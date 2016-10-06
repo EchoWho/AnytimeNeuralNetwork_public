@@ -164,7 +164,7 @@ def get_config():
                                       [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
         ]),
         session_config=sess_config,
-        model=Model(n=18),
+        model=Model(n=5),
         step_per_epoch=step_per_epoch,
         max_epoch=400,
     )
