@@ -169,14 +169,14 @@ class AnytimeModel(ModelDesc):
                     for ww in range(w+1):
                         c2 = conv('conv2.'+str(ww), l_mid_feats[ww], out_channel, 1)
                         ef += c2
-                    l = l_feats_prerelu[w]
+                    ef = BatchNorm('bn2', ef)
+                    l = l_feats[w]
                     if increase_dim:
                         l = AvgPooling('pool', l, 2)
                         l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
                     ef += l
                     l_end_feats_prerelu.append(ef)
-                    ef = BatchNorm('bn2', ef)
-                    ef = tf.nn.relu(ef)
+                    #ef = tf.nn.relu(ef)
                     l_end_feats.append(ef)
             return l_end_feats, l_end_feats_prerelu
 
@@ -184,7 +184,7 @@ class AnytimeModel(ModelDesc):
             l_logits = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.predict') as scope:
-                    l = l_feats[w]
+                    l = tf.nn.relu(l_feats[w])
                     l = GlobalAvgPooling('gap', l)
                     logits = FullyConnected('linear', l, out_dim, nl=tf.identity)
                     if w != 0:
