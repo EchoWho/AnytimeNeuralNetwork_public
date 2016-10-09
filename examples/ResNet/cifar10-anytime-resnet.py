@@ -27,99 +27,12 @@ This model uses the whole training set instead of a train-val split.
 
 NUM_RES_BLOCKS=3
 
-class Model(ModelDesc):
-    def __init__(self, n):
-        super(Model, self).__init__()
-        self.n = n
-
-    def _get_input_vars(self):
-        return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')
-               ]
-
-    def _build_graph(self, input_vars):
-        image, label = input_vars
-        image = image / 128.0 - 1
-
-        def conv(name, l, channel, stride):
-            return Conv2D(name, l, channel, 3, stride=stride,
-                          nl=tf.identity, use_bias=False,
-                          W_init=tf.random_normal_initializer(stddev=np.sqrt(2.0/9/channel)))
-
-        def residual(name, l, increase_dim=False, first=False):
-            shape = l.get_shape().as_list()
-            in_channel = shape[3]
-
-            if increase_dim:
-                out_channel = in_channel * 2
-                stride1 = 2
-            else:
-                out_channel = in_channel
-                stride1 = 1
-
-            with tf.variable_scope(name) as scope:
-                if not first:
-                    b1 = BatchNorm('bn1', l)
-                    b1 = tf.nn.relu(b1)
-                else:
-                    b1 = l
-                c1 = conv('conv1', b1, out_channel, stride1)
-                b2 = BatchNorm('bn2', c1)
-                b2 = tf.nn.relu(b2)
-                c2 = conv('conv2', b2, out_channel, 1)
-
-                if increase_dim:
-                    l = AvgPooling('pool', l, 2)
-                    l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
-
-                l = c2 + l
-                return l
-
-        l = conv('conv0', image, 16, 1)
-        l = BatchNorm('bn0', l)
-        l = tf.nn.relu(l)
-        l = residual('res1.0', l, first=True)
-        for k in range(1, self.n):
-            l = residual('res1.{}'.format(k), l)
-        # 32,c=16
-
-        l = residual('res2.0', l, increase_dim=True)
-        for k in range(1, self.n):
-            l = residual('res2.{}'.format(k), l)
-        # 16,c=32
-
-        l = residual('res3.0', l, increase_dim=True)
-        for k in range(1, self.n):
-            l = residual('res3.' + str(k), l)
-        l = BatchNorm('bnlast', l)
-        l = tf.nn.relu(l)
-        # 8,c=64
-        l = GlobalAvgPooling('gap', l)
-        logits = FullyConnected('linear', l, out_dim=10, nl=tf.identity)
-        prob = tf.nn.softmax(logits, name='output')
-
-        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
-        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
-
-        wrong = prediction_incorrect(logits, label)
-        nr_wrong = tf.reduce_sum(wrong, name='wrong')
-        # monitor training error
-        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
-
-        # weight decay on all W of fc layers
-        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
-                                          480000, 0.2, True)
-        wd_cost = tf.mul(wd_w, regularize_cost('.*/W', tf.nn.l2_loss), name='wd_cost')
-        add_moving_summary(cost, wd_cost)
-
-        add_param_summary([('.*/W', ['histogram'])])   # monitor W
-        self.cost = tf.add_n([cost, wd_cost], name='cost')
-
 class AnytimeModel(ModelDesc):
-    def __init__(self, n, width):
+    def __init__(self, n, width, init_channel):
         super(AnytimeModel, self).__init__()
         self.n = n
         self.width = width
+        self.init_channel = init_channel
 
     def _get_input_vars(self):
         return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
@@ -176,6 +89,7 @@ class AnytimeModel(ModelDesc):
                         l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
                     ef += l
                     l_end_feats_prerelu.append(ef)
+                    # Uncomment to turn on the final relu at each resnet block
                     #ef = tf.nn.relu(ef)
                     l_end_feats.append(ef)
             return l_end_feats, l_end_feats_prerelu
@@ -184,6 +98,9 @@ class AnytimeModel(ModelDesc):
             l_logits = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.predict') as scope:
+                    # If resnet last relu is active in resnet blocks, 
+                    # we don't have to relu each feature before prediction. 
+                    #l = l_feats[w]
                     l = tf.nn.relu(l_feats[w])
                     l = GlobalAvgPooling('gap', l)
                     logits = FullyConnected('linear', l, out_dim, nl=tf.identity)
@@ -210,7 +127,7 @@ class AnytimeModel(ModelDesc):
             return l_costs, l_wrong
 
         l_feats = [] 
-        total_channel = 16
+        total_channel = self.init_channel
         for w in range(self.width):
             with tf.variable_scope('init_conv'+str(w)) as scope:
                 l = conv('conv0', image, total_channel//self.width, 1) 
@@ -231,7 +148,8 @@ class AnytimeModel(ModelDesc):
 
                 for c in l_costs:
                     cost_weight = node_rev_idx**(-2)
-                    cost_weight = 1 if node_rev_idx == 1 else 0
+                    # Uncomment to have weight only on the last layer
+                    #cost_weight = 1 if node_rev_idx == 1 else 0
                     cost += cost_weight * c
                     node_rev_idx -= 1
                 
@@ -285,8 +203,9 @@ def get_config():
     lr = tf.Variable(0.01, trainable=False, name='learning_rate')
     tf.scalar_summary('learning_rate', lr)
 
-    n = 5
-    width = 1
+    n=5
+    width=1
+    init_channel=16
     vcs = []
     for ri in range(NUM_RES_BLOCKS):
         for i in range(n):
@@ -306,7 +225,7 @@ def get_config():
                                       [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
         ]),
         session_config=sess_config,
-        model=AnytimeModel(n=n, width=width),
+        model=AnytimeModel(n=n, width=width, init_channel=init_channel),
         step_per_epoch=step_per_epoch,
         max_epoch=400,
     )
