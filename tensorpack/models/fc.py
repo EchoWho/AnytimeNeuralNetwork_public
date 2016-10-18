@@ -14,7 +14,7 @@ __all__ = ['FullyConnected']
 @layer_register()
 def FullyConnected(x, out_dim,
                    W_init=None, b_init=None,
-                   nl=tf.nn.relu, use_bias=True):
+                   nl=tf.nn.relu, use_bias=True, return_vars=False):
     """
     Fully-Connected layer.
 
@@ -39,4 +39,10 @@ def FullyConnected(x, out_dim,
     if use_bias:
         b = tf.get_variable('b', [out_dim], initializer=b_init)
     prod = tf.nn.xw_plus_b(x, W, b) if use_bias else tf.matmul(x, W)
-    return nl(prod, name='output')
+    output = nl(prod, name='output')
+    if return_vars:
+        var_list = [W]
+        if use_bias:
+            var_list.append(b)
+        return output, var_list
+    return output

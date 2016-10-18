@@ -96,6 +96,7 @@ class AnytimeModel(ModelDesc):
 
         def row_sum_predict(name, l_feats, out_dim):
             l_logits = []
+            var_list = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.predict') as scope:
                     # If resnet last relu is active in resnet blocks, 
@@ -103,11 +104,12 @@ class AnytimeModel(ModelDesc):
                     #l = l_feats[w]
                     l = tf.nn.relu(l_feats[w])
                     l = GlobalAvgPooling('gap', l)
-                    logits = FullyConnected('linear', l, out_dim, nl=tf.identity)
+                    logits, vl = FullyConnected('linear', l, out_dim, nl=tf.identity, return_vars=True)
+                    var_list.extend(vl)
                     if w != 0:
                         logits += l_logits[-1]
                     l_logits.append(logits)
-            return l_logits
+            return l_logits, var_list
 
         def cost_and_eval(name, l_logits, label):
             l_costs = []
@@ -126,6 +128,20 @@ class AnytimeModel(ModelDesc):
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
+
+        def loss_weights(N):
+            log_n = int(np.log2(N))
+            weights = np.zeros(N)
+            for j in range(log_n + 1):
+                t = int(2**j)
+                wj = [ (1 + i // t)**(-2) if i%t==0 else 0 for i in range(N) ] 
+                wj /= np.sum(wj)
+                weights += wj
+            weights[0] = np.sum(weights[1:])
+            #weights /= np.sum(weights)
+            return weights
+                
+
         l_feats = [] 
         total_channel = self.init_channel
         for w in range(self.width):
@@ -138,18 +154,19 @@ class AnytimeModel(ModelDesc):
 
         cost = 0
         node_rev_idx = NUM_RES_BLOCKS * self.n * self.width
+        cost_weights = loss_weights(node_rev_idx) 
         for res_block_i in range(NUM_RES_BLOCKS):
             # {32, c_total=16}, {16, c=32}, {8, c=64}
             for k in range(self.n):
                 scope_name = 'res{}.{}'.format(res_block_i, k)
                 l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
-                l_logits = row_sum_predict(scope_name, l_feats, out_dim=10)
+                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
                 for c in l_costs:
-                    cost_weight = node_rev_idx**(-2)
+                    cost_weight = cost_weights[node_rev_idx - 1]
                     # Uncomment to have weight only on the last layer
-                    #cost_weight = 1 if node_rev_idx == 1 else 0
+                    #cost_weight = 1 if node_rev_idx == 13 else 0
                     cost += cost_weight * c
                     node_rev_idx -= 1
                 
@@ -159,7 +176,7 @@ class AnytimeModel(ModelDesc):
         # weight decay on all W of fc layers
         wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                           480000, 0.2, True)
-        wd_cost = tf.mul(wd_w, regularize_cost('.*/W', tf.nn.l2_loss), name='wd_cost')
+        wd_cost = tf.mul(wd_w, regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
         add_moving_summary(cost, wd_cost)
 
         add_param_summary([('.*/W', ['histogram'])])   # monitor W
