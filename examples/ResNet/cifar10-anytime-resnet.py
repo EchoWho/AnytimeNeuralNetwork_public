@@ -156,7 +156,6 @@ class AnytimeModel(ModelDesc):
         wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                           480000, 0.2, True)
         wd_cost = 0
-
         cost = 0
         node_rev_idx = NUM_RES_BLOCKS * self.n * self.width
         cost_weights = loss_weights(node_rev_idx) 
