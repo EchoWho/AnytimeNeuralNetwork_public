@@ -152,6 +152,11 @@ class AnytimeModel(ModelDesc):
                 l_feats.append(l)
         l_feats_prerelu = l_feats
 
+        # weight decay for all W of fc/conv layers
+        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
+                                          480000, 0.2, True)
+        wd_cost = 0
+
         cost = 0
         node_rev_idx = NUM_RES_BLOCKS * self.n * self.width
         cost_weights = loss_weights(node_rev_idx) 
@@ -163,20 +168,19 @@ class AnytimeModel(ModelDesc):
                 l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
-                for c in l_costs:
+                for ci, c in enumerate(l_costs):
                     cost_weight = cost_weights[node_rev_idx - 1]
                     # Uncomment to have weight only on the last layer
                     #cost_weight = 1 if node_rev_idx == 13 else 0
                     cost += cost_weight * c
+                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                     node_rev_idx -= 1
                 
                 add_moving_summary(l_costs)
                 add_moving_summary(l_wrong)
 
-        # weight decay on all W of fc layers
-        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
-                                          480000, 0.2, True)
-        wd_cost = tf.mul(wd_w, regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
+        # regularize conv
+        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
         add_moving_summary(cost, wd_cost)
 
         add_param_summary([('.*/W', ['histogram'])])   # monitor W
