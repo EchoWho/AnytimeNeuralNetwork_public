@@ -17,7 +17,7 @@ from ..tfutils.summary import *
 from .base import Callback
 
 __all__ = ['InferenceRunner', 'ClassificationError',
-        'ScalarStats', 'Inferencer', 'BinaryClassificationStats']
+        'ScalarStats', 'Inferencer', 'BinaryClassificationStats', 'StorePrediction']
 
 class Inferencer(object):
     __metaclass__ = ABCMeta
@@ -225,3 +225,24 @@ class BinaryClassificationStats(Inferencer):
     def _after_inference(self):
         return {self.prefix + '_precision': self.stat.precision,
                 self.prefix + '_recall': self.stat.recall}
+
+class StorePrediction(Inferencer):
+    
+    def __init__(self, logit_var_name, path):
+        self.logit_var_name = logit_var_name
+        self.path = path
+
+    def _get_output_tensors(self):
+        return [self.logit_var_name]
+
+    def _before_inference(self):
+        self.logits = []
+
+    def _datapoint(self, dp, outputs):
+        self.logits.append(outputs[0])
+
+    def _after_inference(self):
+        self.logits = np.vstack(self.logits)
+        np.savez(self.path, logits=self.logits) 
+        return {}
+

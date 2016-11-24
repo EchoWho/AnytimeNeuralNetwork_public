@@ -31,6 +31,8 @@ class MultiGPUTrainer(QueueInputTrainer):
         with tf.name_scope('AvgGrad'):
             for grad_and_vars in zip(*tower_grads):
                 v = grad_and_vars[0][1]
+                if grad_and_vars[0][0] is None:
+                    continue
                 try:
                     grad = tf.add_n([x[0] for x in grad_and_vars]) / float(len(tower_grads))
                 except:
