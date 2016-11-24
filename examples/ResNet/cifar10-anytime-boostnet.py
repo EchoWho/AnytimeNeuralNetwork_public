@@ -12,27 +12,15 @@ from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 
-"""
-CIFAR10 ResNet example. See:
-Deep Residual Learning for Image Recognition, arxiv:1512.03385
-This implementation uses the variants proposed in:
-Identity Mappings in Deep Residual Networks, arxiv:1603.05027
-
-I can reproduce the results on 2 TitanX for
-n=5, about 7.1% val error after 67k step (8.6 step/s)
-n=18, about 5.7% val error (2.45 step/s)
-n=30: a 182-layer network, about 5.6% val error after 51k step (1.55 step/s)
-This model uses the whole training set instead of a train-val split.
-"""
-
 NUM_RES_BLOCKS=3
 
 class AnytimeModel(ModelDesc):
-    def __init__(self, n, width, init_channel):
+    def __init__(self, n, width, init_channel, n_boost):
         super(AnytimeModel, self).__init__()
         self.n = n
         self.width = width
         self.init_channel = init_channel
+        self.n_boost = n_boost
 
     def _get_input_vars(self):
         return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
@@ -106,8 +94,10 @@ class AnytimeModel(ModelDesc):
                     l = GlobalAvgPooling('gap', l)
                     logits, vl = FullyConnected('linear', l, out_dim, nl=tf.identity, return_vars=True)
                     var_list.extend(vl)
+                    if w == 0:
+                        logits = tf.identity(logits, name='logits')
                     if w != 0:
-                        logits += l_logits[-1]
+                        logits = tf.add(l_logits[-1], logits, name='logits')
                     l_logits.append(logits)
             return l_logits, var_list
 
@@ -166,34 +156,62 @@ class AnytimeModel(ModelDesc):
             for k in range(self.n):
                 scope_name = 'res{}.{}'.format(res_block_i, k)
                 l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
-                l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
-                for ci, c in enumerate(l_costs):
-                    cost_weight = cost_weights[node_rev_idx - 1]
-                    # Uncomment to have weight only on the last layer
-                    cost_weight = 1 if node_rev_idx == 8 else 0
-                    #cost_weight = 0.26 if node_rev_idx == 13 else cost_weight
-                    #cost_weight = 0.1 if node_rev_idx == 15 else cost_weight
-                    #cost_weight = 0.7**(node_rev_idx-1)
-                    cost += cost_weight * c
-                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
-                    node_rev_idx -= 1
-                
-                add_moving_summary(l_costs)
-                add_moving_summary(l_wrong)
+                if k == self.n -1 and res_block_i == NUM_RES_BLOCKS - 1:
+                    l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
+                    l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
+
+                                
+                    add_moving_summary(l_costs)
+                    add_moving_summary(l_wrong)
+        
+        logits_target = tf.stop_gradient(l_logits[-1])
+        prediction = 0
+        # create shallow and smaller nets for boosting
+        total_cost = 0
+        for bi in range(self.n_boost):
+            with tf.variable_scope('boost'+str(bi)) as scope:
+                # form network
+                l= conv('conv0', image, total_channel, 1)
+                l = BatchNorm('bn0', l)
+                l = tf.nn.relu(l)
+                l_feats = [l]
+                l_feats_prerelu = l_feats
+
+                for res_block_i in range(NUM_RES_BLOCKS):
+                    k = 0
+                    scope_name = 'res{}.{}'.format(res_block_i, k)
+                    l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
+
+                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
+                if bi == 0:
+                    prediction = l_logits[0]
+                else:
+                    prediction = tf.stop_gradient(prediction) + l_logits[0] 
+
+                cost = tf.reduce_sum(tf.squared_difference(logits_target, prediction), 1)
+                cost = tf.reduce_mean(cost, name='l2_loss')
+
+                wrong = prediction_incorrect(prediction, label)
+                nr_wrong = tf.reduce_sum(wrong, name='wrong') # for testing
+                wrong = tf.reduce_mean(wrong, name='train_error')
+
+                total_cost += cost
+
+                add_moving_summary(cost)
+                add_moving_summary(wrong)
 
         # regularize conv
-        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
-        add_moving_summary(cost, wd_cost)
+        wd_cost = tf.mul(wd_w, regularize_cost('.*boost.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
+        add_moving_summary(total_cost, wd_cost)
 
         add_param_summary([('.*/W', ['histogram'])])   # monitor W
-        self.cost = tf.add_n([cost, wd_cost], name='cost')
+        self.cost = tf.add_n([total_cost, wd_cost], name='cost')
 
 
-def get_data(train_or_test):
+def get_data(train_or_test, shuffle=True):
     isTrain = train_or_test == 'train'
-    ds = dataset.Cifar10(train_or_test, shuffle=True)
+    ds = dataset.Cifar10(train_or_test, shuffle)
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -219,6 +237,7 @@ def get_config():
 
     # prepare dataset
     dataset_train = get_data('train')
+    dataset_train_no_shuffle = get_data('train', shuffle=False)
     step_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
@@ -231,13 +250,14 @@ def get_config():
     n=5
     width=1
     init_channel=16
+    n_boost = 3
     vcs = []
-    for ri in range(NUM_RES_BLOCKS):
-        for i in range(n):
-            for w in range(width):
-                scope_name = 'res{}.{}.{}.eval/'.format(ri, i, w)
-                vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
+    vcs.append(ClassificationError(wrong_var_name='res{}.{}.{}.eval/wrong:0'.format(NUM_RES_BLOCKS-1, n-1, width-1), summary_name='target_val_err'))
+    for bi in range(n_boost):
+        vcs.append(ClassificationError(wrong_var_name='boost{}/wrong:0'.format(bi), summary_name='boost{}_val_err'.format(bi)))
 
+            #InferenceRunner(dataset_train_no_shuffle,
+            #    [StorePrediction('res{}.{}.{}.predict/logits'.format(NUM_RES_BLOCKS-1, n-1, width-1), '/home/hanzhang/code/tensorpack/data/cifar10/logits.npz')]),
     return TrainConfig(
         dataset=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
@@ -247,10 +267,10 @@ def get_config():
             InferenceRunner(dataset_test,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
+                                      [(123, 0.001), (300, 0.0002)])
         ]),
         session_config=sess_config,
-        model=AnytimeModel(n=n, width=width, init_channel=init_channel),
+        model=AnytimeModel(n=n, width=width, init_channel=init_channel, n_boost=n_boost),
         step_per_epoch=step_per_epoch,
         max_epoch=400,
     )
@@ -267,6 +287,7 @@ if __name__ == '__main__':
         pass
 
     config = get_config()
+    config.session_init = SaverRestore('train_log/cifar10_boostnet/init_model_2')
     if args.load:
         config.session_init = SaverRestore(args.load)
     if args.gpu:
