@@ -172,7 +172,7 @@ class AnytimeModel(ModelDesc):
                 for ci, c in enumerate(l_costs):
                     cost_weight = cost_weights[node_rev_idx - 1]
                     # Uncomment to have weight only on the last layer
-                    cost_weight = 1 if node_rev_idx == 8 else 0
+                    cost_weight = 1 if node_rev_idx == 9 else 0
                     #cost_weight = 0.26 if node_rev_idx == 13 else cost_weight
                     #cost_weight = 0.1 if node_rev_idx == 15 else cost_weight
                     #cost_weight = 0.7**(node_rev_idx-1)

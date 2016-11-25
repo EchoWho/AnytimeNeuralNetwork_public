@@ -28,10 +28,10 @@ This model uses the whole training set instead of a train-val split.
 NUM_RES_BLOCKS=3
 
 class AnytimeModel(ModelDesc):
-    def __init__(self, n, width, init_channel):
+    def __init__(self, n, growth_rate, init_channel):
         super(AnytimeModel, self).__init__()
         self.n = n
-        self.width = width
+        self.growth_rate = growth_rate
         self.init_channel = init_channel
 
     def _get_input_vars(self):
@@ -49,74 +49,52 @@ class AnytimeModel(ModelDesc):
                           nl=tf.identity, use_bias=False,
                           W_init=tf.random_normal_initializer(stddev=np.sqrt(2.0/kernel/kernel/channel)))
 
-        def residual(name, l_feats, l_feats_prerelu=None, increase_dim=False):
-            shape = l_feats[0].get_shape().as_list()
-            in_channel = shape[3]
+        def loss_weights(N):
+            log_n = int(np.log2(N))
+            weights = np.zeros(N)
+            for j in range(log_n + 1):
+                t = int(2**j)
+                wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
+                weights += wj
+            weights[0] = np.sum(weights[1:])
+            weights /= np.sum(weights)
+            weights *= N
+            return weights
 
-            if increase_dim:
-                out_channel = in_channel * 2
-                stride1 = 2
+        
+        # weight decay for all W of fc/conv layers
+        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
+                                          480000, 0.2, True)
+        wd_cost = 0
+        total_cost = 0
+        node_rev_idx = NUM_RES_BLOCKS * self.n
+        cost_weights = loss_weights(node_rev_idx) 
+        
+        merged_feats = None
+        for bi in range(NUM_RES_BLOCKS):
+            if bi == 0:
+                with tf.variable_scope('init_conv') as scope:
+                    l = conv('conv0', image, self.init_channel, 1) 
+                    #l = BatchNorm('bn0', l)
+                    #l = tf.nn.relu(l)
             else:
-                out_channel = in_channel
-                stride1 = 1
+                with tf.variable_scope('trans_{}'.format(bi)) as scope:
+                    l = conv('conv1x1', merged_feats, merged_feats.get_shape().as_list()[3], 2)
+                    #l = tf.nn.relu(l)
+            merged_feats = l
 
-            if l_feats_prerelu is None:
-                l_feats_prerelu = l_feats
-
-            l_mid_feats = []
-            for w in range(self.width):
-                with tf.variable_scope(name+'.'+str(w)+'.mid') as scope:
-                    mf = 0 
-                    for ww in range(w+1):
-                        c1 = conv('conv1.'+str(ww), l_feats[ww], out_channel, stride1)
-                        mf += c1
-                    mf = BatchNorm('bn1', mf)
-                    mf = tf.nn.relu(mf)
-                    l_mid_feats.append(mf)
-
-            l_end_feats_prerelu = []
-            l_end_feats = []
-            for w in range(self.width):
-                with tf.variable_scope(name+'.'+str(w)+'.end') as scope:
-                    ef = 0
-                    for ww in range(w+1):
-                        c2 = conv('conv2.'+str(ww), l_mid_feats[ww], out_channel, 1)
-                        ef += c2
-                    ef = BatchNorm('bn2', ef)
-                    l = l_feats[w]
-                    if increase_dim:
-                        l = AvgPooling('pool', l, 2)
-                        l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
-                    ef += l
-                    l_end_feats_prerelu.append(ef)
-                    # Uncomment to turn on the final relu at each resnet block
-                    #ef = tf.nn.relu(ef)
-                    l_end_feats.append(ef)
-            return l_end_feats, l_end_feats_prerelu
-
-        def row_sum_predict(name, l_feats, out_dim):
-            l_logits = []
-            var_list = []
-            for w in range(self.width):
-                with tf.variable_scope(name+'.'+str(w)+'.predict') as scope:
-                    # If resnet last relu is active in resnet blocks, 
-                    # we don't have to relu each feature before prediction. 
-                    #l = l_feats[w]
-                    l = tf.nn.relu(l_feats[w])
+            for k in range(self.n):
+                scope_name = 'dense{}.{}'.format(bi, k)
+                with tf.variable_scope(scope_name) as scope:
+                    l = merged_feats
+                    l = conv('conv', l, self.growth_rate, 1)
+                    l = BatchNorm('bn', l)
+                    l = tf.nn.relu(l)
+                    feats = l
+                    merged_feats = tf.concat(3, [merged_feats, feats], name='concat')
+                    
                     l = GlobalAvgPooling('gap', l)
-                    logits, vl = FullyConnected('linear', l, out_dim, nl=tf.identity, return_vars=True)
-                    var_list.extend(vl)
-                    if w != 0:
-                        logits += l_logits[-1]
-                    l_logits.append(logits)
-            return l_logits, var_list
-
-        def cost_and_eval(name, l_logits, label):
-            l_costs = []
-            l_wrong = []
-            for w in range(self.width):
-                with tf.variable_scope(name+'.'+str(w)+'.eval') as scope:
-                    logits = l_logits[w]
+                    logits, vl = FullyConnected('linear', l, out_dim=10, nl=tf.identity, return_vars=True)
                     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
                     cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
@@ -124,71 +102,26 @@ class AnytimeModel(ModelDesc):
                     nr_wrong = tf.reduce_sum(wrong, name='wrong') # for testing
                     wrong = tf.reduce_mean(wrong, name='train_error')
 
-                    l_costs.append(cost)
-                    l_wrong.append(wrong)
-            return l_costs, l_wrong
-
-
-        def loss_weights(N):
-            log_n = int(np.log2(N))
-            weights = np.zeros(N)
-            for j in range(log_n + 1):
-                t = int(2**j)
-                #wj = [ (1 + i // t)**(-2) if i%t==0 else 0 for i in range(N) ] 
-                #wj = [ 0.7**(i//t) if i%t==0 else 0 for i in range(N) ] 
-                #wj /= np.sum(wj)
-                wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
-                weights += wj
-            weights[0] = np.sum(weights[1:])
-            #weights /= np.sum(weights)
-            return weights
-                
-
-        l_feats = [] 
-        total_channel = self.init_channel
-        for w in range(self.width):
-            with tf.variable_scope('init_conv'+str(w)) as scope:
-                l = conv('conv0', image, total_channel//self.width, 1) 
-                l = BatchNorm('bn0', l)
-                l = tf.nn.relu(l)
-                l_feats.append(l)
-        l_feats_prerelu = l_feats
-
-        # weight decay for all W of fc/conv layers
-        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
-                                          480000, 0.2, True)
-        wd_cost = 0
-        cost = 0
-        node_rev_idx = NUM_RES_BLOCKS * self.n * self.width
-        cost_weights = loss_weights(node_rev_idx) 
-        for res_block_i in range(NUM_RES_BLOCKS):
-            # {32, c_total=16}, {16, c=32}, {8, c=64}
-            for k in range(self.n):
-                scope_name = 'res{}.{}'.format(res_block_i, k)
-                l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
-                l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
-
-                for ci, c in enumerate(l_costs):
                     cost_weight = cost_weights[node_rev_idx - 1]
-                    # Uncomment to have weight only on the last layer
-                    cost_weight = 1 if node_rev_idx == 8 else 0
-                    #cost_weight = 0.26 if node_rev_idx == 13 else cost_weight
-                    #cost_weight = 0.1 if node_rev_idx == 15 else cost_weight
-                    #cost_weight = 0.7**(node_rev_idx-1)
-                    cost += cost_weight * c
-                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
+                    total_cost += cost_weight * cost
+                    wd_cost += cost_weight * wd_w * (tf.nn.l2_loss(vl[0]) + tf.nn.l2_loss(vl[1]))
+                    wd_cost += cost_weight * wd_w * regularize_cost('{}/conv/W'.format(scope_name), tf.nn.l2_loss) / merged_feats.get_shape().as_list()[-1]
                     node_rev_idx -= 1
-                
-                add_moving_summary(l_costs)
-                add_moving_summary(l_wrong)
+
+                    print '{} {} {}'.format(bi, k, cost_weight)
+
+                    add_moving_summary(cost)
+                    add_moving_summary(wrong)
 
         # regularize conv
-        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
-        add_moving_summary(cost, wd_cost)
+        #wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
+        total_cost = tf.identity(total_cost, name='pred_cost')
+        wd_cost = tf.identity(wd_cost, name='wd_cost')
+        
+        add_moving_summary(total_cost, wd_cost)
 
         add_param_summary([('.*/W', ['histogram'])])   # monitor W
-        self.cost = tf.add_n([cost, wd_cost], name='cost')
+        self.cost = tf.add_n([total_cost, wd_cost], name='cost')
 
 
 def get_data(train_or_test):
@@ -228,15 +161,14 @@ def get_config():
     lr = tf.Variable(0.01, trainable=False, name='learning_rate')
     tf.scalar_summary('learning_rate', lr)
 
-    n=5
-    width=1
+    n=10
+    growth_rate=12
     init_channel=16
     vcs = []
     for ri in range(NUM_RES_BLOCKS):
         for i in range(n):
-            for w in range(width):
-                scope_name = 'res{}.{}.{}.eval/'.format(ri, i, w)
-                vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
+            scope_name = 'dense{}.{}/'.format(ri, i)
+            vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
 
     return TrainConfig(
         dataset=dataset_train,
@@ -250,7 +182,7 @@ def get_config():
                                       [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
         ]),
         session_config=sess_config,
-        model=AnytimeModel(n=n, width=width, init_channel=init_channel),
+        model=AnytimeModel(n=n, growth_rate=growth_rate, init_channel=init_channel),
         step_per_epoch=step_per_epoch,
         max_epoch=400,
     )
