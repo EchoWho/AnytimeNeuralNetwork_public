@@ -134,6 +134,7 @@ class AnytimeModel(ModelDesc):
             weights = np.zeros(N)
             for j in range(log_n + 1):
                 t = int(2**j)
+                #wj_val = 1.0 if j==0 else t/2.0
                 #wj = [ (1 + i // t)**(-2) if i%t==0 else 0 for i in range(N) ] 
                 #wj = [ 0.7**(i//t) if i%t==0 else 0 for i in range(N) ] 
                 #wj /= np.sum(wj)
@@ -141,6 +142,7 @@ class AnytimeModel(ModelDesc):
                 weights += wj
             weights[0] = np.sum(weights[1:])
             #weights /= np.sum(weights)
+            weights /= N
             return weights
                 
 
@@ -164,7 +166,7 @@ class AnytimeModel(ModelDesc):
         for res_block_i in range(NUM_RES_BLOCKS):
             # {32, c_total=16}, {16, c=32}, {8, c=64}
             for k in range(self.n):
-                scope_name = 'res{}.{}'.format(res_block_i, k)
+                scope_name = 'res{}.{:02d}'.format(res_block_i, k)
                 l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
                 l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
@@ -172,10 +174,7 @@ class AnytimeModel(ModelDesc):
                 for ci, c in enumerate(l_costs):
                     cost_weight = cost_weights[node_rev_idx - 1]
                     # Uncomment to have weight only on the last layer
-                    cost_weight = 1 if node_rev_idx == 9 else 0
-                    #cost_weight = 0.26 if node_rev_idx == 13 else cost_weight
-                    #cost_weight = 0.1 if node_rev_idx == 15 else cost_weight
-                    #cost_weight = 0.7**(node_rev_idx-1)
+                    #cost_weight = 1 if node_rev_idx == 7 else 0
                     cost += cost_weight * c
                     wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                     node_rev_idx -= 1
@@ -228,14 +227,14 @@ def get_config():
     lr = tf.Variable(0.01, trainable=False, name='learning_rate')
     tf.scalar_summary('learning_rate', lr)
 
-    n=5
+    n=9
     width=1
     init_channel=16
     vcs = []
     for ri in range(NUM_RES_BLOCKS):
         for i in range(n):
             for w in range(width):
-                scope_name = 'res{}.{}.{}.eval/'.format(ri, i, w)
+                scope_name = 'res{}.{:02d}.{}.eval/'.format(ri, i, w)
                 vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
 
     return TrainConfig(
