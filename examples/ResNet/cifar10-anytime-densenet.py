@@ -13,16 +13,6 @@ from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 
 """
-CIFAR10 ResNet example. See:
-Deep Residual Learning for Image Recognition, arxiv:1512.03385
-This implementation uses the variants proposed in:
-Identity Mappings in Deep Residual Networks, arxiv:1603.05027
-
-I can reproduce the results on 2 TitanX for
-n=5, about 7.1% val error after 67k step (8.6 step/s)
-n=18, about 5.7% val error (2.45 step/s)
-n=30: a 182-layer network, about 5.6% val error after 51k step (1.55 step/s)
-This model uses the whole training set instead of a train-val split.
 """
 
 NUM_RES_BLOCKS=3
@@ -128,14 +118,12 @@ class AnytimeModel(ModelDesc):
                         add_moving_summary(tra_err)
 
         # regularize conv
-        #wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
         wd_cost = tf.mul(1e-4, regularize_cost('.*/W', tf.nn.l2_loss), name='wd_cost')
         total_cost = tf.identity(total_cost, name='pred_cost')
         
         add_moving_summary(total_cost, wd_cost)
         add_param_summary([('.*/W', ['histogram'])])   # monitor W
         self.cost = tf.add_n([total_cost, wd_cost], name='cost')
-        #self.cost = tf.identity(total_cost, name='cost')
 
 
 def get_data(train_or_test):
@@ -202,7 +190,7 @@ def get_config():
         session_config=sess_config,
         model=AnytimeModel(n=n, growth_rate=growth_rate, init_channel=init_channel),
         step_per_epoch=step_per_epoch,
-        max_epoch=300,
+        max_epoch=350,
     )
 
 if __name__ == '__main__':
