@@ -176,8 +176,8 @@ def get_config():
     tf.scalar_summary('learning_rate', lr)
 
     n=12
-    growth_rate=15
-    init_channel=20
+    growth_rate=12
+    init_channel=16
     vcs = []
     rev_idx = NUM_RES_BLOCKS*n
     cost_weights = loss_weights(rev_idx)

@@ -94,7 +94,7 @@ class AnytimeModel(ModelDesc):
                     l_end_feats.append(ef)
             return l_end_feats, l_end_feats_prerelu
 
-        def row_sum_predict(name, l_feats, out_dim):
+        def row_sum_predict(name, l_feats, out_dim, is_last):
             l_logits = []
             var_list = []
             for w in range(self.width):
@@ -104,6 +104,8 @@ class AnytimeModel(ModelDesc):
                     #l = l_feats[w]
                     l = tf.nn.relu(l_feats[w])
                     l = GlobalAvgPooling('gap', l)
+                    #if not is_last:
+                    #    l = tf.stop_gradient(l)
                     logits, vl = FullyConnected('linear', l, out_dim, nl=tf.identity, return_vars=True)
                     var_list.extend(vl)
                     if w != 0:
@@ -141,8 +143,7 @@ class AnytimeModel(ModelDesc):
                 wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
                 weights += wj
             weights[0] = np.sum(weights[1:])
-            #weights /= np.sum(weights)
-            weights /= N
+            weights = weights / np.sum(weights) * log_n
             return weights
                 
 
@@ -168,13 +169,14 @@ class AnytimeModel(ModelDesc):
             for k in range(self.n):
                 scope_name = 'res{}.{:02d}'.format(res_block_i, k)
                 l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10)
+                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10, is_last= k==self.n-1 and res_block_i == NUM_RES_BLOCKS-1)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
                 for ci, c in enumerate(l_costs):
                     cost_weight = cost_weights[node_rev_idx - 1]
                     # Uncomment to have weight only on the last layer
                     #cost_weight = 1 if node_rev_idx == 7 else 0
+                    cost_weight = 1.0
                     cost += cost_weight * c
                     wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                     node_rev_idx -= 1
@@ -227,7 +229,7 @@ def get_config():
     lr = tf.Variable(0.01, trainable=False, name='learning_rate')
     tf.scalar_summary('learning_rate', lr)
 
-    n=9
+    n=5
     width=1
     init_channel=16
     vcs = []
