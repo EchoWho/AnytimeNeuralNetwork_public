@@ -12,20 +12,26 @@ from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 
-"""
-CIFAR10 ResNet example. See:
-Deep Residual Learning for Image Recognition, arxiv:1512.03385
-This implementation uses the variants proposed in:
-Identity Mappings in Deep Residual Networks, arxiv:1603.05027
-
-I can reproduce the results on 2 TitanX for
-n=5, about 7.1% val error after 67k step (8.6 step/s)
-n=18, about 5.7% val error (2.45 step/s)
-n=30: a 182-layer network, about 5.6% val error after 51k step (1.55 step/s)
-This model uses the whole training set instead of a train-val split.
-"""
 
 NUM_RES_BLOCKS=3
+
+def loss_weights(N):
+    log_n = int(np.log2(N))
+    weights = np.zeros(N)
+    for j in range(log_n + 1):
+        t = int(2**j)
+        #wj_val = 1.0 if j==0 else t/2.0
+        #wj = [ (1 + i // t)**(-2) if i%t==0 else 0 for i in range(N) ] 
+        #wj = [ 0.7**(i//t) if i%t==0 else 0 for i in range(N) ] 
+        #wj /= np.sum(wj)
+        wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
+        weights += wj
+    weights[0] = np.sum(weights[1:])
+    weights = weights / np.sum(weights) * log_n
+
+    weights[1:] = 0.0
+    weights[0] = 1.0
+    return weights
 
 class AnytimeModel(ModelDesc):
     def __init__(self, n, width, init_channel):
@@ -66,10 +72,15 @@ class AnytimeModel(ModelDesc):
             l_mid_feats = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.mid') as scope:
-                    mf = 0 
-                    for ww in range(w+1):
-                        c1 = conv('conv1.'+str(ww), l_feats[ww], out_channel, stride1)
-                        mf += c1
+                    if w == 0:
+                        merged_feats = l_feats[0]
+                    else:
+                        merged_feats = tf.concat(3, [merged_feats, l_feats[w]], name='concat_mf')
+                    mf = conv('conv1', merged_feats, out_channel, stride1)
+                    #mf = 0 
+                    #for ww in range(w+1):
+                    #    c1 = conv('conv1.'+str(ww), l_feats[ww], out_channel, stride1)
+                    #    mf += c1
                     mf = BatchNorm('bn1', mf)
                     mf = tf.nn.relu(mf)
                     l_mid_feats.append(mf)
@@ -78,10 +89,15 @@ class AnytimeModel(ModelDesc):
             l_end_feats = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.end') as scope:
-                    ef = 0
-                    for ww in range(w+1):
-                        c2 = conv('conv2.'+str(ww), l_mid_feats[ww], out_channel, 1)
-                        ef += c2
+                    if w == 0:
+                        merged_feats = l_mid_feats[0]
+                    else: 
+                        merged_feats = tf.concat(3, [merged_feats, l_mid_feats[w]], name='concat_ef')
+                    ef = conv('conv2', merged_feats, out_channel, 1)
+                    #ef = 0
+                    #for ww in range(w+1):
+                    #    c2 = conv('conv2.'+str(ww), l_mid_feats[ww], out_channel, 1)
+                    #    ef += c2
                     ef = BatchNorm('bn2', ef)
                     l = l_feats[w]
                     if increase_dim:
@@ -104,12 +120,14 @@ class AnytimeModel(ModelDesc):
                     #l = l_feats[w]
                     l = tf.nn.relu(l_feats[w])
                     l = GlobalAvgPooling('gap', l)
-                    #if not is_last:
-                    #    l = tf.stop_gradient(l)
-                    logits, vl = FullyConnected('linear', l, out_dim, nl=tf.identity, return_vars=True)
+                    if w == 0:
+                        merged_feats = l
+                    else:
+                        merged_feats = tf.concat(1, [merged_feats, l], name='concat')
+                    logits, vl = FullyConnected('linear', merged_feats, out_dim, nl=tf.identity, return_vars=True)
                     var_list.extend(vl)
-                    if w != 0:
-                        logits += l_logits[-1]
+                    #if w != 0:
+                    #    logits += l_logits[-1]
                     l_logits.append(logits)
             return l_logits, var_list
 
@@ -130,21 +148,6 @@ class AnytimeModel(ModelDesc):
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
-
-        def loss_weights(N):
-            log_n = int(np.log2(N))
-            weights = np.zeros(N)
-            for j in range(log_n + 1):
-                t = int(2**j)
-                #wj_val = 1.0 if j==0 else t/2.0
-                #wj = [ (1 + i // t)**(-2) if i%t==0 else 0 for i in range(N) ] 
-                #wj = [ 0.7**(i//t) if i%t==0 else 0 for i in range(N) ] 
-                #wj /= np.sum(wj)
-                wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
-                weights += wj
-            weights[0] = np.sum(weights[1:])
-            weights = weights / np.sum(weights) * log_n
-            return weights
                 
 
         l_feats = [] 
@@ -176,7 +179,7 @@ class AnytimeModel(ModelDesc):
                     cost_weight = cost_weights[node_rev_idx - 1]
                     # Uncomment to have weight only on the last layer
                     #cost_weight = 1 if node_rev_idx == 7 else 0
-                    cost_weight = 1.0
+                    #cost_weight = 1.0
                     cost += cost_weight * c
                     wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                     node_rev_idx -= 1
@@ -230,7 +233,7 @@ def get_config():
     tf.scalar_summary('learning_rate', lr)
 
     n=5
-    width=1
+    width=2
     init_channel=16
     vcs = []
     for ri in range(NUM_RES_BLOCKS):

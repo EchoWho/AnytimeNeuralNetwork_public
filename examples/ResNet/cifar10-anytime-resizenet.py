@@ -16,7 +16,7 @@ from tensorpack.tfutils.summary import *
 """
 
 NUM_RES_BLOCKS=3
-BATCH_SIZE=128
+BATCH_SIZE=64
 
 def loss_weights(N):
     log_n = int(np.log2(N))
@@ -29,8 +29,6 @@ def loss_weights(N):
     weights /= np.sum(weights)
     weights *= log_n
 
-    weights[1:] = 0.0
-    weights[0] = 1.0
     return weights
 
 def conv_info(N, init_channel, init_size):
@@ -172,9 +170,9 @@ def get_config():
     lr = tf.Variable(0.1, trainable=False, name='learning_rate')
     tf.scalar_summary('learning_rate', lr)
 
-    n=39
+    n=15
     growth_rate=12
-    init_channel=16 * 4
+    init_channel=16
     vcs = []
     cost_weights = loss_weights(n)
     for i in range(n):
@@ -191,7 +189,7 @@ def get_config():
             InferenceRunner(dataset_test,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (90, 0.01), (125, 0.001), (250, 0002)])
+                                      [(1, 0.1), (90, 0.01), (125, 0.001), (250, 0.0002)])
         ]),
         session_config=sess_config,
         model=Model(n=n, growth_rate=growth_rate, init_channel=init_channel),

@@ -21,15 +21,13 @@ def loss_weights(N):
     log_n = int(np.log2(N))
     weights = np.zeros(N)
     for j in range(log_n + 1):
-        t = int(2**j) *2
+        t = int(2**j)
         wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
         weights += wj
     weights[0] = np.sum(weights[1:])
     weights /= np.sum(weights)
     weights *= log_n
 
-    #weights[1:] = 0.0
-    #weights[0] = 1.0
     return weights
 
 
@@ -79,6 +77,8 @@ class AnytimeModel(ModelDesc):
             merged_feats = l
 
             for k in range(self.n):
+                cost_weight = cost_weights[node_rev_idx - 1]
+                node_rev_idx -= 1
                 scope_name = 'dense{}.{}'.format(bi, k)
                 with tf.variable_scope(scope_name) as scope:
                     l = merged_feats
@@ -89,13 +89,12 @@ class AnytimeModel(ModelDesc):
                     l = tf.nn.relu(l)
                     l = conv('conv1', l, self.growth_rate, 1)
 
-                    feats = l
-                    merged_feats = tf.concat(3, [merged_feats, feats], name='concat')
+                    merged_feats = tf.concat(3, [merged_feats, l], name='concat')
                     
-                    cost_weight = cost_weights[node_rev_idx - 1]
-                    node_rev_idx -= 1
-
                     if cost_weight >0:
+                        
+                        merged_feats = tf.stop_gradient(merged_feats)
+                        print "Stop gradient at {}".format(scope_name)
 
                         l = BatchNorm('bn_pred', l)
                         l = tf.nn.relu(l)
