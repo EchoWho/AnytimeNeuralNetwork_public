@@ -15,7 +15,12 @@ from tensorpack.tfutils.summary import *
 
 NUM_RES_BLOCKS=3
 
-def loss_weights(N):
+def frequency_loss_weight(N, freq):
+    weights = np.zeros(N)
+    weights[0:N:freq] = 1.0
+    return weights
+
+def seive_loss_weights(N):
     log_n = int(np.log2(N))
     weights = np.zeros(N)
     for j in range(log_n + 1):
@@ -28,10 +33,11 @@ def loss_weights(N):
         weights += wj
     weights[0] = np.sum(weights[1:])
     weights = weights / np.sum(weights) * log_n
-
-    weights[1:] = 0.0
-    weights[0] = 1.0
     return weights
+
+def loss_weights(N):
+    #return frequency_loss_weight(N, 2)
+    return seive_loss_weights(N)
 
 class AnytimeModel(ModelDesc):
     def __init__(self, n, width, init_channel):
@@ -176,13 +182,14 @@ class AnytimeModel(ModelDesc):
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
                 for ci, c in enumerate(l_costs):
-                    cost_weight = cost_weights[node_rev_idx - 1]
-                    # Uncomment to have weight only on the last layer
-                    #cost_weight = 1 if node_rev_idx == 7 else 0
-                    #cost_weight = 1.0
-                    cost += cost_weight * c
-                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                     node_rev_idx -= 1
+                    cost_weight = cost_weights[node_rev_idx]
+                    if cost_weight > 0:
+                        # Uncomment to have weight only on the last layer
+                        #cost_weight = 1 if node_rev_idx == 7 else 0
+                        #cost_weight = 1.0
+                        cost += cost_weight * c
+                        wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                 
                 add_moving_summary(l_costs)
                 add_moving_summary(l_wrong)
@@ -233,14 +240,19 @@ def get_config():
     tf.scalar_summary('learning_rate', lr)
 
     n=5
-    width=2
+    width=1
     init_channel=16
     vcs = []
+    rev_idx = NUM_RES_BLOCKS*n*width
+    weights = loss_weights(rev_idx)
     for ri in range(NUM_RES_BLOCKS):
         for i in range(n):
             for w in range(width):
-                scope_name = 'res{}.{:02d}.{}.eval/'.format(ri, i, w)
-                vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
+                rev_idx -= 1
+                weight = weights[rev_idx]
+                if weight > 0:
+                    scope_name = 'res{}.{:02d}.{}.eval/'.format(ri, i, w)
+                    vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
 
     return TrainConfig(
         dataset=dataset_train,

@@ -17,7 +17,12 @@ from tensorpack.tfutils.summary import *
 
 NUM_RES_BLOCKS=3
 
-def loss_weights(N):
+def frequency_loss_weights(N, freq):
+    weights = np.zeros(N)
+    weights[0:N:freq] = 1.0
+    return weights
+
+def seive_loss_weights(N):
     log_n = int(np.log2(N))
     weights = np.zeros(N)
     for j in range(log_n + 1):
@@ -30,7 +35,8 @@ def loss_weights(N):
 
     return weights
 
-
+def loss_weights(N):
+    return frequency_loss_weights(N, 4)
 
 class AnytimeModel(ModelDesc):
     def __init__(self, n, growth_rate, init_channel):
@@ -90,12 +96,9 @@ class AnytimeModel(ModelDesc):
                     l = conv('conv1', l, self.growth_rate, 1)
 
                     merged_feats = tf.concat(3, [merged_feats, l], name='concat')
-                    
                     if cost_weight >0:
-                        
-                        merged_feats = tf.stop_gradient(merged_feats)
                         print "Stop gradient at {}".format(scope_name)
-
+                        merged_feats = tf.stop_gradient(merged_feats)
                         l = BatchNorm('bn_pred', l)
                         l = tf.nn.relu(l)
                         l = GlobalAvgPooling('gap', l)
@@ -184,12 +187,13 @@ def get_config():
             InferenceRunner(dataset_test,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (150, 0.01), (225, 0.001)])
+                                      #[(1, 0.1), (75, 0.01), (150, 0.001)])
+                                      [(1, 0.1), (120, 0.01), (180, 0.001)])
         ]),
         session_config=sess_config,
         model=AnytimeModel(n=n, growth_rate=growth_rate, init_channel=init_channel),
         step_per_epoch=step_per_epoch,
-        max_epoch=350,
+        max_epoch=240,
     )
 
 if __name__ == '__main__':
