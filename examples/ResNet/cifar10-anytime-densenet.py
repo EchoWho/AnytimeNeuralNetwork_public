@@ -11,50 +11,34 @@ import os
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
+import tensorpack.utils.anytime_loss as anytime_loss
 
 """
 """
 
 NUM_RES_BLOCKS=3
-
-
-def sieve_loss_weights(N):
-    log_n = int(np.log2(N))
-    weights = np.zeros(N)
-    for j in range(log_n + 1):
-        t = int(2**j)
-        wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
-        weights += wj
-    weights[0] = np.sum(weights[1:])
-    weights /= np.sum(weights)
-    weights *= log_n
-
-    return weights
-
-def frequency_loss_weights(N, freq):
-    weights = np.zeros(N)
-    weights[0:N:freq] = sieve_loss_weights(N // freq)
-    return weights
+NUM_UNITS=12
+GROWTH_RATE=12
+INIT_CHANNEL=16
 
 def loss_weights(N):
-    return frequency_loss_weights(N, 4)
+    return anytime_loss.stack_loss_weights(N, 6)
 
-class AnytimeModel(ModelDesc):
+class Model(ModelDesc):
     def __init__(self, n, growth_rate, init_channel):
-        super(AnytimeModel, self).__init__()
+        super(Model, self).__init__()
         self.n = n
         self.growth_rate = growth_rate
         self.init_channel = init_channel
-        self.bottleneck_width = 4
+        #self.bottleneck_width = 4
         self.reduction_rate = 1
 
-    def _get_input_vars(self):
+    def _get_inputs(self):
         return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')
-               ]
+                InputVar(tf.int32, [None], 'label')]
 
-    def _build_graph(self, input_vars):
-        image, label = input_vars
+    def _build_graph(self, inputs):
+        image, label = inputs
         image = image / 128.0 - 1
 
         def conv(name, l, channel, stride, kernel=3):
@@ -108,7 +92,6 @@ class AnytimeModel(ModelDesc):
                         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
                         wrong = prediction_incorrect(logits, label)
-                        nr_wrong = tf.reduce_sum(wrong, name='wrong') # for testing
                         tra_err = tf.reduce_mean(wrong, name='train_error')
 
                         total_cost += cost_weight * cost
@@ -121,11 +104,13 @@ class AnytimeModel(ModelDesc):
                         add_moving_summary(tra_err)
 
         # regularize conv
-        wd_cost = tf.mul(1e-4, regularize_cost('.*/W', tf.nn.l2_loss), name='wd_cost')
+        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
+                                          480000, 0.2, True)
+        wd_cost = tf.mul(wd_w, regularize_cost('.*/W', tf.nn.l2_loss), name='wd_cost')
         total_cost = tf.identity(total_cost, name='pred_cost')
         
         add_moving_summary(total_cost, wd_cost)
-        add_param_summary([('.*/W', ['histogram'])])   # monitor W
+        add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([total_cost, wd_cost], name='cost')
 
 
@@ -138,8 +123,6 @@ def get_data(train_or_test):
             imgaug.CenterPaste((40, 40)),
             imgaug.RandomCrop((32, 32)),
             imgaug.Flip(horiz=True),
-            #imgaug.Brightness(20),
-            #imgaug.Contrast((0.6,1.4)),
             imgaug.MapImage(lambda x: x - pp_mean),
         ]
     else:
@@ -157,56 +140,63 @@ def get_config():
 
     # prepare dataset
     dataset_train = get_data('train')
-    step_per_epoch = dataset_train.size()
+    steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
-    sess_config = get_default_sess_config(0.9)
 
     get_global_step_var()
     lr = tf.Variable(0.1, trainable=False, name='learning_rate')
     tf.summary.scalar('learning_rate', lr)
 
-    n=12
-    growth_rate=12
-    init_channel=16
     vcs = []
-    rev_idx = NUM_RES_BLOCKS*n
+    rev_idx = NUM_RES_BLOCKS * NUM_UNITS
     cost_weights = loss_weights(rev_idx)
-    for ri in range(NUM_RES_BLOCKS):
-        for i in range(n):
-            scope_name = 'dense{}.{}/'.format(ri, i)
+    for bi in range(NUM_RES_BLOCKS):
+        for ui in range(NUM_UNITS):
+            scope_name = 'dense{}.{}/'.format(bi, ui)
             rev_idx -= 1 
             if cost_weights[rev_idx] > 0:
-                vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
+                vcs.append(ClassificationError(\
+                    wrong_tensor_name=scope_name+'incorrect_vector:0', 
+                    summary_name=scope_name+'val_err'))
 
     return TrainConfig(
-        dataset=dataset_train,
+        dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
-        callbacks=Callbacks([
+        callbacks=[
             StatPrinter(),
             ModelSaver(),
             InferenceRunner(dataset_test,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      #[(1, 0.1), (75, 0.01), (150, 0.001)])
-                                      [(1, 0.1), (120, 0.01), (180, 0.001)])
-        ]),
-        session_config=sess_config,
-        model=AnytimeModel(n=n, growth_rate=growth_rate, init_channel=init_channel),
-        step_per_epoch=step_per_epoch,
-        max_epoch=240,
+                                      [(1, 0.1), (150, 0.01), (225, 0.001)])
+        ],
+        model=Model(n=NUM_UNITS, growth_rate=GROWTH_RATE, init_channel=INIT_CHANNEL),
+        steps_per_epoch=steps_per_epoch,
+        max_epoch=300,
     )
 
 if __name__ == '__main__':
     CUDA_VISIBLE_DEVICES=""
     parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--num_units',
+                        help='number of units in each stage',
+                        type=int, default=12)
+    parser.add_argument('-g', '--growth_rate',
+                        help='number of channel per new layer',
+                        type=int, default=12)
+    parser.add_argument('-c', '--init_channel',
+                        help='number of initial channels',
+                        type=int, default=16)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.') # nargs='*' in multi mode
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
+    NUM_UNITS = args.num_units
+    GROWTH_RATE = args.growth_rate
+    INIT_CHANNEL = args.init_channel
 
     if args.gpu:
-    #    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-        pass
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     config = get_config()
     if args.load:

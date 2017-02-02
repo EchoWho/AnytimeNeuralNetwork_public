@@ -1,58 +1,46 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: cifar10-resnet.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
+# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import numpy as np
-import tensorflow as tf
 import argparse
 import os
 
+import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
+import tensorpack.utils.anytime_loss as anytime_loss
 
+from tensorflow.contrib.layers import variance_scaling_initializer
 
-NUM_RES_BLOCKS=3
+"""
+"""
 
-def frequency_loss_weight(N, freq):
-    weights = np.zeros(N)
-    weights[0:N:freq] = 1.0
-    return weights
-
-def sieve_loss_weights(N):
-    log_n = int(np.log2(N))
-    weights = np.zeros(N)
-    for j in range(log_n + 1):
-        t = int(2**j)
-        #wj_val = 1.0 if j==0 else t/2.0
-        #wj = [ (1 + i // t)**(-2) if i%t==0 else 0 for i in range(N) ] 
-        #wj = [ 0.7**(i//t) if i%t==0 else 0 for i in range(N) ] 
-        #wj /= np.sum(wj)
-        wj = [ 1 if i%t==0 else 0 for i in range(N) ] 
-        weights += wj
-    weights[0] = np.sum(weights[1:])
-    weights = weights / np.sum(weights) * log_n
-    return weights
+BATCH_SIZE = 128
+NUM_RES_BLOCKS = 3
+NUM_UNITS = 5
+WIDTH = 2
+INIT_CHANNEL = 16
 
 def loss_weights(N):
-    #return frequency_loss_weight(N, 2)
-    return seive_loss_weights(N)
+    return anytime_loss.sieve_loss_weights(N)
 
-class AnytimeModel(ModelDesc):
+class Model(ModelDesc):
+
     def __init__(self, n, width, init_channel):
-        super(AnytimeModel, self).__init__()
+        super(Model, self).__init__()
         self.n = n
         self.width = width
         self.init_channel = init_channel
 
-    def _get_input_vars(self):
+    def _get_inputs(self):
         return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')
-               ]
+                InputVar(tf.int32, [None], 'label')]
 
-    def _build_graph(self, input_vars):
-        image, label = input_vars
+    def _build_graph(self, inputs):
+        image, label = inputs
         image = image / 128.0 - 1
 
         def conv(name, l, channel, stride):
@@ -145,28 +133,25 @@ class AnytimeModel(ModelDesc):
                     logits = l_logits[w]
                     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
                     cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+                    add_moving_summary(cost)
 
                     wrong = prediction_incorrect(logits, label)
-                    nr_wrong = tf.reduce_sum(wrong, name='wrong') # for testing
                     wrong = tf.reduce_mean(wrong, name='train_error')
+                    add_moving_summary(wrong)
 
                     l_costs.append(cost)
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
-                
-
         l_feats = [] 
-        total_channel = self.init_channel
         for w in range(self.width):
             with tf.variable_scope('init_conv'+str(w)) as scope:
-                l = conv('conv0', image, total_channel//self.width, 1) 
+                l = conv('conv0', image, self.init_channel, 1) 
                 l = BatchNorm('bn0', l)
                 l = tf.nn.relu(l)
                 l_feats.append(l)
         l_feats_prerelu = l_feats
 
-        # weight decay for all W of fc/conv layers
         wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                           480000, 0.2, True)
         wd_cost = 0
@@ -177,8 +162,12 @@ class AnytimeModel(ModelDesc):
             # {32, c_total=16}, {16, c=32}, {8, c=64}
             for k in range(self.n):
                 scope_name = 'res{}.{:02d}'.format(res_block_i, k)
-                l_feats, l_feats_prerelu = residual(scope_name, l_feats, l_feats_prerelu, increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = row_sum_predict(scope_name, l_feats, out_dim=10, is_last= k==self.n-1 and res_block_i == NUM_RES_BLOCKS-1)
+                l_feats, l_feats_prerelu = \
+                    residual(scope_name, l_feats, l_feats_prerelu, 
+                             increase_dim=(k==0 and res_block_i > 0))
+                l_logits, var_list = \
+                    row_sum_predict(scope_name, l_feats, out_dim=10, 
+                                    is_last= k==self.n-1 and res_block_i == NUM_RES_BLOCKS-1)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
                 for ci, c in enumerate(l_costs):
@@ -189,30 +178,27 @@ class AnytimeModel(ModelDesc):
                         #cost_weight = 1 if node_rev_idx == 7 else 0
                         #cost_weight = 1.0
                         cost += cost_weight * c
+                        # regularize weights from FC layers
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
-                
-                add_moving_summary(l_costs)
-                add_moving_summary(l_wrong)
 
-        # regularize conv
+
+        # weight decay on all W on conv layers
         wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
         add_moving_summary(cost, wd_cost)
 
-        add_param_summary([('.*/W', ['histogram'])])   # monitor W
+        add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([cost, wd_cost], name='cost')
 
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
-    ds = dataset.Cifar10(train_or_test, shuffle=True)
+    ds = dataset.Cifar10(train_or_test)
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
             imgaug.CenterPaste((40, 40)),
             imgaug.RandomCrop((32, 32)),
             imgaug.Flip(horiz=True),
-            #imgaug.Brightness(20),
-            #imgaug.Contrast((0.6,1.4)),
             imgaug.MapImage(lambda x: x - pp_mean),
         ]
     else:
@@ -225,67 +211,72 @@ def get_data(train_or_test):
         ds = PrefetchData(ds, 3, 2)
     return ds
 
+
 def get_config():
     logger.auto_set_dir()
 
     # prepare dataset
     dataset_train = get_data('train')
-    step_per_epoch = dataset_train.size()
+    steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
-    sess_config = get_default_sess_config(0.9)
-
-    get_global_step_var()
-    lr = tf.Variable(0.01, trainable=False, name='learning_rate')
-    tf.scalar_summary('learning_rate', lr)
-
-    n=5
-    width=1
-    init_channel=16
     vcs = []
-    rev_idx = NUM_RES_BLOCKS*n*width
+    rev_idx = NUM_RES_BLOCKS * NUM_UNITS * WIDTH
     weights = loss_weights(rev_idx)
-    for ri in range(NUM_RES_BLOCKS):
-        for i in range(n):
-            for w in range(width):
+    for bi in range(NUM_RES_BLOCKS):
+        for ui in range(NUM_UNITS):
+            for wi in range(WIDTH):
                 rev_idx -= 1
                 weight = weights[rev_idx]
                 if weight > 0:
-                    scope_name = 'res{}.{:02d}.{}.eval/'.format(ri, i, w)
-                    vcs.append(ClassificationError(wrong_var_name=scope_name+'wrong:0', summary_name=scope_name+'val_err'))
+                    scope_name = 'res{}.{:02d}.{}.eval/'.format(bi, ui, wi)
+                    vcs.append(ClassificationError(\
+                        wrong_tensor_name=scope_name+'incorrect_vector:0', 
+                        summary_name=scope_name+'val_err'))
 
+
+    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
-        dataset=dataset_train,
+        dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
-        callbacks=Callbacks([
-            StatPrinter(),
+        callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_test,
-                [ScalarStats('cost')] + vcs),
+                            [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
                                       [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
-        ]),
-        session_config=sess_config,
-        model=AnytimeModel(n=n, width=width, init_channel=init_channel),
-        step_per_epoch=step_per_epoch,
+        ],
+        model=Model(n=NUM_UNITS,width=WIDTH,init_channel=INIT_CHANNEL),
+        steps_per_epoch=steps_per_epoch,
         max_epoch=400,
     )
 
+
 if __name__ == '__main__':
-    CUDA_VISIBLE_DEVICES=""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.') # nargs='*' in multi mode
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
+    parser.add_argument('-n', '--num_units',
+                        help='number of units in each stage',
+                        type=int, default=5)
+    parser.add_argument('-w', '--width',
+                        help='width of the network',
+                        type=int, default=2)
+    parser.add_argument('-c', '--init_channel',
+                        help='channel at beginning of each width of the network',
+                        type=int, default=16)
+
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
+    NUM_UNITS = args.num_units
+    WIDTH = args.width
+    INIT_CHANNEL = args.init_channel
 
     if args.gpu:
-    #    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-        pass
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     config = get_config()
     if args.load:
         config.session_init = SaverRestore(args.load)
     if args.gpu:
         config.nr_tower = len(args.gpu.split(','))
-        config.set_tower(tower=map(int, args.gpu.split(',')))
     SyncMultiGPUTrainer(config).train()
