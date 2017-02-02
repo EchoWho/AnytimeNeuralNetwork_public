@@ -20,7 +20,7 @@ def frequency_loss_weight(N, freq):
     weights[0:N:freq] = 1.0
     return weights
 
-def seive_loss_weights(N):
+def sieve_loss_weights(N):
     log_n = int(np.log2(N))
     weights = np.zeros(N)
     for j in range(log_n + 1):

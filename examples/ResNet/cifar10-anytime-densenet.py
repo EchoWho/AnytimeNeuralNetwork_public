@@ -17,12 +17,8 @@ from tensorpack.tfutils.summary import *
 
 NUM_RES_BLOCKS=3
 
-def frequency_loss_weights(N, freq):
-    weights = np.zeros(N)
-    weights[0:N:freq] = 1.0
-    return weights
 
-def seive_loss_weights(N):
+def sieve_loss_weights(N):
     log_n = int(np.log2(N))
     weights = np.zeros(N)
     for j in range(log_n + 1):
@@ -33,6 +29,11 @@ def seive_loss_weights(N):
     weights /= np.sum(weights)
     weights *= log_n
 
+    return weights
+
+def frequency_loss_weights(N, freq):
+    weights = np.zeros(N)
+    weights[0:N:freq] = sieve_loss_weights(N // freq)
     return weights
 
 def loss_weights(N):
@@ -163,7 +164,7 @@ def get_config():
 
     get_global_step_var()
     lr = tf.Variable(0.1, trainable=False, name='learning_rate')
-    tf.scalar_summary('learning_rate', lr)
+    tf.summary.scalar('learning_rate', lr)
 
     n=12
     growth_rate=12
