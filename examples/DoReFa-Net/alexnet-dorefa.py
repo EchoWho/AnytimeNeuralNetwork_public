@@ -9,11 +9,13 @@ import argparse
 import numpy as np
 import multiprocessing
 import msgpack
-import os, sys
+import os
+import sys
 
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
+from tensorpack.tfutils.varreplace import replace_get_variable
 from dorefa import get_dorefa
 
 """
@@ -22,7 +24,7 @@ DoReFa-Net: Training Low Bitwidth Convolutional Neural Networks with Low Bitwidt
 http://arxiv.org/abs/1606.06160
 
 The original experiements are performed on a proprietary framework.
-This is our attempt to reproduce it on tensorpack/tensorflow.
+This is our attempt to reproduce it on tensorpack & TensorFlow.
 
 Accuracy:
     Trained with 4 GPUs and (W,A,G)=(1,2,6), it can reach top-1 single-crop validation error of 51%,
@@ -33,15 +35,16 @@ Accuracy:
     BATCH_SIZE * NUM_GPU. With a different number of GPUs in use, things might
     be a bit different, especially for learning rate.
 
-    With (W,A,G)=(32,32,32), 43% error.
+    With (W,A,G)=(32,32,32) -- full precision baseline, 43% error.
+    With (W,A,G)=(1,32,32) -- BWN, 46% error.
     With (W,A,G)=(1,2,6), 51% error.
     With (W,A,G)=(1,2,4), 63% error.
 
 Speed:
-    About 3.5 iteration/s on 4 Tesla M40. (Each epoch is set to 10000 iterations)
+    About 2.8 iteration/s on 1 TitanX. (Each epoch is set to 10000 iterations)
 
-To Train:
-    ./alexnet-dorefa.py --dorefa 1,2,6 --data PATH --gpu 0,1,2,3
+To Train, for example:
+    ./alexnet-dorefa.py --dorefa 1,2,6 --data PATH --gpu 0,1
 
     PATH should look like:
     PATH/
@@ -54,9 +57,10 @@ To Train:
         ILSVRC2012_val_00000001.JPEG
         ...
 
-    And better to have:
+    And you'll need the following to be able to fetch data efficiently
         Fast disk random access (Not necessarily SSD. I used a RAID of HDD, but not sure if plain HDD is enough)
         More than 12 CPU cores (for data processing)
+        More than 10G of free memory
 
 To Run Pretrained Model:
     ./alexnet-dorefa.py --load alexnet-126.npy --run a.jpg --dorefa 1,2,6
@@ -65,20 +69,24 @@ To Run Pretrained Model:
 BITW = 1
 BITA = 2
 BITG = 6
-BATCH_SIZE = 32
+TOTAL_BATCH_SIZE = 128
+BATCH_SIZE = None
+
 
 class Model(ModelDesc):
-    def _get_input_vars(self):
+    def _get_inputs(self):
         return [InputVar(tf.float32, [None, 224, 224, 3], 'input'),
-                InputVar(tf.int32, [None], 'label') ]
+                InputVar(tf.int32, [None], 'label')]
 
-    def _build_graph(self, input_vars):
-        image, label = input_vars
+    def _build_graph(self, inputs):
+        image, label = inputs
         image = image / 255.0
 
         fw, fa, fg = get_dorefa(BITW, BITA, BITG)
-        # monkey-patch tf.get_variable to apply fw
+
         old_get_variable = tf.get_variable
+
+        # monkey-patch tf.get_variable to apply fw
         def new_get_variable(name, shape=None, **kwargs):
             v = old_get_variable(name, shape, **kwargs)
             # don't binarize first and last layer
@@ -87,7 +95,6 @@ class Model(ModelDesc):
             else:
                 logger.info("Binarizing weight {}".format(v.op.name))
                 return fw(v)
-        tf.get_variable = new_get_variable
 
         def nonlin(x):
             if BITA == 32:
@@ -97,64 +104,63 @@ class Model(ModelDesc):
         def activate(x):
             return fa(nonlin(x))
 
-        with argscope(BatchNorm, decay=0.9, epsilon=1e-4), \
+        with replace_get_variable(new_get_variable), \
+                argscope(BatchNorm, decay=0.9, epsilon=1e-4), \
                 argscope([Conv2D, FullyConnected], use_bias=False, nl=tf.identity):
             logits = (LinearWrap(image)
-                .Conv2D('conv0', 96, 12, stride=4, padding='VALID')
-                .apply(activate)
-                .Conv2D('conv1', 256, 5, padding='SAME', split=2)
-                .apply(fg)
-                .BatchNorm('bn1')
-                .MaxPooling('pool1', 3, 2, padding='SAME')
-                .apply(activate)
+                      .Conv2D('conv0', 96, 12, stride=4, padding='VALID')
+                      .apply(activate)
+                      .Conv2D('conv1', 256, 5, padding='SAME', split=2)
+                      .apply(fg)
+                      .BatchNorm('bn1')
+                      .MaxPooling('pool1', 3, 2, padding='SAME')
+                      .apply(activate)
 
-                .Conv2D('conv2', 384, 3)
-                .apply(fg)
-                .BatchNorm('bn2')
-                .MaxPooling('pool2', 3, 2, padding='SAME')
-                .apply(activate)
+                      .Conv2D('conv2', 384, 3)
+                      .apply(fg)
+                      .BatchNorm('bn2')
+                      .MaxPooling('pool2', 3, 2, padding='SAME')
+                      .apply(activate)
 
-                .Conv2D('conv3', 384, 3, split=2)
-                .apply(fg)
-                .BatchNorm('bn3')
-                .apply(activate)
+                      .Conv2D('conv3', 384, 3, split=2)
+                      .apply(fg)
+                      .BatchNorm('bn3')
+                      .apply(activate)
 
-                .Conv2D('conv4', 256, 3, split=2)
-                .apply(fg)
-                .BatchNorm('bn4')
-                .MaxPooling('pool4', 3, 2, padding='VALID')
-                .apply(activate)
+                      .Conv2D('conv4', 256, 3, split=2)
+                      .apply(fg)
+                      .BatchNorm('bn4')
+                      .MaxPooling('pool4', 3, 2, padding='VALID')
+                      .apply(activate)
 
-                .FullyConnected('fc0', 4096)
-                .apply(fg)
-                .BatchNorm('bnfc0')
-                .apply(activate)
+                      .FullyConnected('fc0', 4096)
+                      .apply(fg)
+                      .BatchNorm('bnfc0')
+                      .apply(activate)
 
-                .FullyConnected('fc1', 4096)
-                .apply(fg)
-                .BatchNorm('bnfc1')
-                .apply(nonlin)
-                .FullyConnected('fct', 1000, use_bias=True)())
-        tf.get_variable = old_get_variable
+                      .FullyConnected('fc1', 4096)
+                      .apply(fg)
+                      .BatchNorm('bnfc1')
+                      .apply(nonlin)
+                      .FullyConnected('fct', 1000, use_bias=True)())
 
         prob = tf.nn.softmax(logits, name='output')
 
-        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
+        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
-        wrong = prediction_incorrect(logits, label, 1)
-        nr_wrong = tf.reduce_sum(wrong, name='wrong-top1')
-        add_moving_summary(tf.reduce_mean(wrong, name='train_error_top1'))
-        wrong = prediction_incorrect(logits, label, 5)
-        nr_wrong = tf.reduce_sum(wrong, name='wrong-top5')
-        add_moving_summary(tf.reduce_mean(wrong, name='train_error_top5'))
+        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
+        add_moving_summary(tf.reduce_mean(wrong, name='train-error-top1'))
+        wrong = prediction_incorrect(logits, label, 5, name='wrong-top5')
+        add_moving_summary(tf.reduce_mean(wrong, name='train-error-top5'))
 
         # weight decay on all W of fc layers
-        wd_cost = regularize_cost('fc.*/W', l2_regularizer(5e-6))
-        add_moving_summary(cost, wd_cost)
+        wd_cost = regularize_cost('fc.*/W', l2_regularizer(5e-6), name='regularize_cost')
 
-        add_param_summary([('.*/W', ['histogram', 'rms'])])
+        add_param_summary(('.*/W', ['histogram', 'rms']))
         self.cost = tf.add_n([cost, wd_cost], name='cost')
+        add_moving_summary(cost, wd_cost, self.cost)
+
 
 def get_data(dataset_name):
     isTrain = dataset_name == 'train'
@@ -162,22 +168,24 @@ def get_data(dataset_name):
 
     meta = dataset.ILSVRCMeta()
     pp_mean = meta.get_per_pixel_mean()
-    pp_mean_224 = pp_mean[16:-16,16:-16,:]
+    pp_mean_224 = pp_mean[16:-16, 16:-16, :]
 
     if isTrain:
         class Resize(imgaug.ImageAugmentor):
+
             def __init__(self):
                 self._init(locals())
+
             def _augment(self, img, _):
                 h, w = img.shape[:2]
                 size = 224
                 scale = self.rng.randint(size, 308) * 1.0 / min(h, w)
                 scaleX = scale * self.rng.uniform(0.85, 1.15)
                 scaleY = scale * self.rng.uniform(0.85, 1.15)
-                desSize = map(int, (max(size, min(w, scaleX * w)),\
-                    max(size, min(h, scaleY * h))))
+                desSize = map(int, (max(size, min(w, scaleX * w)),
+                                    max(size, min(h, scaleY * h))))
                 dst = cv2.resize(img, tuple(desSize),
-                     interpolation=cv2.INTER_CUBIC)
+                                 interpolation=cv2.INTER_CUBIC)
                 return dst
 
         augmentors = [
@@ -186,11 +194,11 @@ def get_data(dataset_name):
             imgaug.RandomApplyAug(imgaug.GaussianBlur(3), 0.5),
             imgaug.Brightness(30, True),
             imgaug.Gamma(),
-            imgaug.Contrast((0.8,1.2), True),
+            imgaug.Contrast((0.8, 1.2), True),
             imgaug.RandomCrop((224, 224)),
             imgaug.RandomApplyAug(imgaug.JpegNoise(), 0.8),
             imgaug.RandomApplyAug(imgaug.GaussianDeform(
-                [(0.2, 0.2), (0.2, 0.8), (0.8,0.8), (0.8,0.2)],
+                [(0.2, 0.2), (0.2, 0.8), (0.8, 0.8), (0.8, 0.2)],
                 (224, 224), 0.2, 3), 0.1),
             imgaug.Flip(horiz=True),
             imgaug.MapImage(lambda x: x - pp_mean_224),
@@ -199,7 +207,7 @@ def get_data(dataset_name):
         def resize_func(im):
             h, w = im.shape[:2]
             scale = 256.0 / min(h, w)
-            desSize = map(int, (max(224, min(w, scale * w)),\
+            desSize = map(int, (max(224, min(w, scale * w)),
                                 max(224, min(h, scale * h))))
             im = cv2.resize(im, tuple(desSize), interpolation=cv2.INTER_CUBIC)
             return im
@@ -214,6 +222,7 @@ def get_data(dataset_name):
         ds = PrefetchDataZMQ(ds, min(12, multiprocessing.cpu_count()))
     return ds
 
+
 def get_config():
     logger.auto_set_dir()
 
@@ -221,46 +230,45 @@ def get_config():
     data_train = get_data('train')
     data_test = get_data('val')
 
-    lr = tf.Variable(1e-4, trainable=False, name='learning_rate')
-    tf.scalar_summary('learning_rate', lr)
+    lr = get_scalar_var('learning_rate', 1e-4, summary=True)
 
     return TrainConfig(
-        dataset=data_train,
+        dataflow=data_train,
         optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-5),
-        callbacks=Callbacks([
-            StatPrinter(),
+        callbacks=[
             ModelSaver(),
-            #HumanHyperParamSetter('learning_rate'),
+            # HumanHyperParamSetter('learning_rate'),
             ScheduledHyperParamSetter(
                 'learning_rate', [(56, 2e-5), (64, 4e-6)]),
             InferenceRunner(data_test,
-                [ScalarStats('cost'),
-                 ClassificationError('wrong-top1', 'val-top1-error'),
-                 ClassificationError('wrong-top5', 'val-top5-error')])
-        ]),
+                            [ScalarStats('cost'),
+                             ClassificationError('wrong-top1', 'val-error-top1'),
+                             ClassificationError('wrong-top5', 'val-error-top5')])
+        ],
         model=Model(),
-        step_per_epoch=10000,
+        steps_per_epoch=10000,
         max_epoch=100,
     )
+
 
 def run_image(model, sess_init, inputs):
     pred_config = PredictConfig(
         model=model,
         session_init=sess_init,
         session_config=get_default_sess_config(0.9),
-        input_var_names=['input'],
-        output_var_names=['output']
+        input_names=['input'],
+        output_names=['output']
     )
     predict_func = get_predict_func(pred_config)
     meta = dataset.ILSVRCMeta()
     pp_mean = meta.get_per_pixel_mean()
-    pp_mean_224 = pp_mean[16:-16,16:-16,:]
+    pp_mean_224 = pp_mean[16:-16, 16:-16, :]
     words = meta.get_synset_words_1000()
 
     def resize_func(im):
         h, w = im.shape[:2]
         scale = 256.0 / min(h, w)
-        desSize = map(int, (max(224, min(w, scale * w)),\
+        desSize = map(int, (max(224, min(w, scale * w)),
                             max(224, min(h, scale * h))))
         im = cv2.resize(im, tuple(desSize), interpolation=cv2.INTER_CUBIC)
         return im
@@ -274,7 +282,7 @@ def run_image(model, sess_init, inputs):
         img = cv2.imread(f).astype('float32')
         assert img is not None
 
-        img = transformers.augment(img)[np.newaxis, :,:,:]
+        img = transformers.augment(img)[np.newaxis, :, :, :]
         outputs = predict_func([img])[0]
         prob = outputs[0]
         ret = prob.argsort()[-10:][::-1]
@@ -283,13 +291,14 @@ def run_image(model, sess_init, inputs):
         print(f + ":")
         print(list(zip(names, prob[ret])))
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='the physical ids of GPUs to use')
     parser.add_argument('--load', help='load a checkpoint, or a npy (given as the pretrained model)')
     parser.add_argument('--data', help='ILSVRC dataset dir')
     parser.add_argument('--dorefa',
-            help='number of bits for W,A,G, separated by comma', required=True)
+                        help='number of bits for W,A,G, separated by comma', required=True)
     parser.add_argument('--run', help='run on a list of images with the pretrained model', nargs='*')
     args = parser.parse_args()
 
@@ -302,6 +311,11 @@ if __name__ == '__main__':
         assert args.load.endswith('.npy')
         run_image(Model(), ParamRestore(np.load(args.load, encoding='latin1').item()), args.run)
         sys.exit()
+
+    assert args.gpu is not None, "Need to specify a list of gpu for training!"
+    NR_GPU = len(args.gpu.split(','))
+    BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
+    logger.info("Batch per tower: {}".format(BATCH_SIZE))
 
     config = get_config()
     if args.load:

@@ -3,12 +3,19 @@
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import tensorflow as tf
+from termcolor import colored
 
 from ..utils import logger
 
+__all__ = ['describe_model', 'get_shape_str']
+
+
 def describe_model():
-    """ print a description of the current model parameters """
+    """ Print a description of the current model parameters """
     train_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+    if len(train_vars) == 0:
+        logger.info("No trainable variables in the graph!")
+        return
     msg = [""]
     total = 0
     for v in train_vars:
@@ -18,14 +25,17 @@ def describe_model():
         msg.append("{}: shape={}, dim={}".format(
             v.name, shape.as_list(), ele))
     size_mb = total * 4 / 1024.0**2
-    msg.append("Total param={} ({:01f} MB assuming all float32)".format(total, size_mb))
-    logger.info("Model Parameters: {}".format('\n'.join(msg)))
+    msg.append(colored(
+        "Total #param={} ({:.02f} MB assuming all float32)".format(total, size_mb), 'cyan'))
+    logger.info(colored("Model Parameters: ", 'cyan') + '\n'.join(msg))
 
 
 def get_shape_str(tensors):
     """
-    :param tensors: a tensor or a list of tensors
-    :returns: a string to describe the shape
+    Args:
+        tensors (list or tf.Tensor): a tensor or a list of tensors
+    Returns:
+        str: a string to describe the shape
     """
     if isinstance(tensors, (list, tuple)):
         logged_tensors = []
@@ -40,4 +50,3 @@ def get_shape_str(tensors):
         assert isinstance(tensors, (tf.Tensor, tf.Variable)), "Not a tensor: {}".format(type(tensors))
         shape_str = str(tensors.get_shape().as_list())
     return shape_str
-

@@ -1,58 +1,71 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: base.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 
 from abc import abstractmethod, ABCMeta
+import six
 from ..utils import get_rng
 
 __all__ = ['DataFlow', 'ProxyDataFlow', 'RNGDataFlow']
 
+
+@six.add_metaclass(ABCMeta)
 class DataFlow(object):
     """ Base class for all DataFlow """
-    __metaclass__ = ABCMeta
 
     @abstractmethod
     def get_data(self):
         """
-        A generator to generate data as a list.
-        Datapoint should be a mutable list.
-        Each component should be assumed immutable.
+        The method to generate datapoints.
+
+        Yields:
+            list: The datapoint, i.e. list of components.
         """
 
     def size(self):
         """
-        Size of this data flow.
+        Returns:
+            int: size of this data flow.
+
+        Raises:
+            :class:`NotImplementedError` if this DataFlow doesn't have a size.
         """
         raise NotImplementedError()
 
     def reset_state(self):
         """
-        Reset state of the dataflow. Will always be called before consuming data points.
-        for example, RNG **HAS** to be reset here if used in the DataFlow.
-        Otherwise it may not work well with prefetching, because different
+        Reset state of the dataflow. It has to be called before producing datapoints.
+
+        For example, RNG **has to** be reset if used in the DataFlow,
+        otherwise it won't work well with prefetching, because different
         processes will have the same RNG state.
         """
         pass
 
 
 class RNGDataFlow(DataFlow):
-    """ A dataflow with rng"""
+    """ A DataFlow with RNG"""
+
     def reset_state(self):
+        """ Reset the RNG """
         self.rng = get_rng(self)
+
 
 class ProxyDataFlow(DataFlow):
     """ Base class for DataFlow that proxies another"""
+
     def __init__(self, ds):
         """
-        :param ds: a :mod:`DataFlow` instance to proxy
+        Args:
+            ds (DataFlow): DataFlow to proxy.
         """
         self.ds = ds
 
     def reset_state(self):
         """
-        Will reset state of the proxied DataFlow
+        Reset state of the proxied DataFlow.
         """
         self.ds.reset_state()
 

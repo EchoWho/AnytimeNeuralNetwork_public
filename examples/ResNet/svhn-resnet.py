@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: svhn-resnet.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
+# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import tensorflow as tf
 import argparse
@@ -20,10 +20,11 @@ You might need to adjust the learning rate schedule when running with 1 GPU.
 
 import imp
 cifar_example = imp.load_source('cifar_example',
-        os.path.join(os.path.dirname(__file__), 'cifar10-resnet.py'))
+                                os.path.join(os.path.dirname(__file__), 'cifar10-resnet.py'))
 Model = cifar_example.Model
 
 BATCH_SIZE = 128
+
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -39,9 +40,9 @@ def get_data(train_or_test):
         augmentors = [
             imgaug.CenterPaste((40, 40)),
             imgaug.Brightness(10),
-            imgaug.Contrast((0.8,1.2)),
+            imgaug.Contrast((0.8, 1.2)),
             imgaug.GaussianDeform(  # this is slow. without it, can only reach 1.9% error
-                [(0.2, 0.2), (0.2, 0.8), (0.8,0.8), (0.8,0.2)],
+                [(0.2, 0.2), (0.2, 0.8), (0.8, 0.8), (0.8, 0.2)],
                 (40, 40), 0.2, 3),
             imgaug.RandomCrop((32, 32)),
             imgaug.MapImage(lambda x: x - pp_mean),
@@ -56,39 +57,35 @@ def get_data(train_or_test):
         ds = PrefetchData(ds, 5, 5)
     return ds
 
+
 def get_config():
     logger.auto_set_dir()
 
     # prepare dataset
     dataset_train = get_data('train')
-    step_per_epoch = dataset_train.size()
+    steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
-    sess_config = get_default_sess_config(0.9)
-
-    lr = tf.Variable(0.1, trainable=False, name='learning_rate')
-    tf.scalar_summary('learning_rate', lr)
-
+    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
-        dataset=dataset_train,
+        dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
-        callbacks=Callbacks([
-            StatPrinter(),
+        callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_test,
-                [ScalarStats('cost'), ClassificationError() ]),
+                            [ScalarStats('cost'), ClassificationError()]),
             ScheduledHyperParamSetter('learning_rate',
                                       [(1, 0.1), (20, 0.01), (28, 0.001), (50, 0.0001)])
-        ]),
-        session_config=sess_config,
+        ],
         model=Model(n=18),
-        step_per_epoch=step_per_epoch,
+        steps_per_epoch=steps_per_epoch,
         max_epoch=500,
     )
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.') # nargs='*' in multi mode
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
 

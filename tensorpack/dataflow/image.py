@@ -4,50 +4,62 @@
 
 import numpy as np
 import cv2
-import copy
-from .base import DataFlow, ProxyDataFlow
+from .base import RNGDataFlow
 from .common import MapDataComponent, MapData
 from .imgaug import AugmentorList
+from ..utils import logger
 
 __all__ = ['ImageFromFile', 'AugmentImageComponent', 'AugmentImageComponents']
 
-class ImageFromFile(DataFlow):
-    """ Generate rgb images from list of files """
-    def __init__(self, files, channel=3, resize=None):
-        """ :param files: list of file paths
-            :param channel: 1 or 3 channel
-            :param resize: a (h, w) tuple. If given, will force a resize
+
+class ImageFromFile(RNGDataFlow):
+    """ Produce images read from a list of files. """
+    def __init__(self, files, channel=3, resize=None, shuffle=False):
         """
-        assert len(files)
+        Args:
+            files (list): list of file paths.
+            channel (int): 1 or 3. Will convert grayscale to RGB images if channel==3.
+            resize (tuple): (h, w). If given, resize the image.
+        """
+        assert len(files), "No image files given to ImageFromFile!"
         self.files = files
         self.channel = int(channel)
+        self.imread_mode = cv2.IMREAD_GRAYSCALE if self.channel == 1 else cv2.IMREAD_COLOR
         self.resize = resize
+        self.shuffle = shuffle
 
     def size(self):
         return len(self.files)
 
     def get_data(self):
+        if self.shuffle:
+            self.rng.shuffle(self.files)
         for f in self.files:
-            im = cv2.imread(
-                f, cv2.IMREAD_GRAYSCALE if self.channel == 1 else cv2.IMREAD_COLOR)
+            im = cv2.imread(f, self.imread_mode)
             if self.channel == 3:
                 im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             if self.resize is not None:
                 im = cv2.resize(im, self.resize[::-1])
+            if self.channel == 1:
+                im = im[:, :, np.newaxis]
             yield [im]
 
 
 class AugmentImageComponent(MapDataComponent):
     """
-    Augment the image component of datapoints
+    Apply image augmentors on 1 component.
     """
     def __init__(self, ds, augmentors, index=0):
         """
-        :param ds: a `DataFlow` instance.
-        :param augmentors: a list of `ImageAugmentor` instance to be applied in order.
-        :param index: the index (or list of indices) of the image component in the produced datapoints by `ds`. default to be 0
+        Args:
+            ds (DataFlow): input DataFlow.
+            augmentors (AugmentorList): a list of :class:`imgaug.ImageAugmentor` to be applied in order.
+            index (int): the index of the image component to be augmented.
         """
-        self.augs = AugmentorList(augmentors)
+        if isinstance(augmentors, AugmentorList):
+            self.augs = augmentors
+        else:
+            self.augs = AugmentorList(augmentors)
         super(AugmentImageComponent, self).__init__(
             ds, lambda x: self.augs.augment(x), index)
 
@@ -57,23 +69,36 @@ class AugmentImageComponent(MapDataComponent):
 
 
 class AugmentImageComponents(MapData):
-    """ Augment a list of images of the same shape, with the same parameters"""
-    def __init__(self, ds, augmentors, index=(0,1)):
+    """
+    Apply image augmentors on several components, with shared augmentation parameters.
+    """
+
+    def __init__(self, ds, augmentors, index=(0, 1)):
         """
-        :param ds: a `DataFlow` instance.
-        :param augmentors: a list of `ImageAugmentor` instance to be applied in order.
-        :param index: tuple of indices of the image components
+        Args:
+            ds (DataFlow): input DataFlow.
+            augmentors (AugmentorList): a list of :class:`imgaug.ImageAugmentor` instance to be applied in order.
+            index: tuple of indices of components.
         """
         self.augs = AugmentorList(augmentors)
         self.ds = ds
+        self._nr_error = 0
 
         def func(dp):
-            im = dp[index[0]]
-            im, prms = self.augs._augment_return_params(im)
-            dp[index[0]] = im
-            for idx in index[1:]:
-                dp[idx] = self.augs._augment(dp[idx], prms)
-            return dp
+            try:
+                im = dp[index[0]]
+                im, prms = self.augs._augment_return_params(im)
+                dp[index[0]] = im
+                for idx in index[1:]:
+                    dp[idx] = self.augs._augment(dp[idx], prms)
+                return dp
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                self._nr_error += 1
+                if self._nr_error % 1000 == 0:
+                    logger.warn("Got {} augmentation errors.".format(self._nr_error))
+                return None
 
         super(AugmentImageComponents, self).__init__(ds, func)
 

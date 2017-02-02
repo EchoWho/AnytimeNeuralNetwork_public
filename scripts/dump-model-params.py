@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: dump-model-params.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
@@ -8,7 +8,7 @@ import argparse
 import tensorflow as tf
 import imp
 
-from tensorpack import *
+from tensorpack import TowerContext, logger, ModelFromMetaGraph
 from tensorpack.tfutils import sessinit, varmanip
 
 parser = argparse.ArgumentParser()
@@ -24,7 +24,8 @@ with tf.Graph().as_default() as G:
     if args.config:
         MODEL = imp.load_source('config_script', args.config).Model
         M = MODEL()
-        M.build_graph(M.get_input_vars(), is_training=False)
+        with TowerContext('', is_training=False):
+            M.build_graph(M.get_input_vars())
     else:
         M = ModelFromMetaGraph(args.meta)
 
@@ -42,12 +43,14 @@ with tf.Graph().as_default() as G:
             varmanip.dump_session_params(args.output)
         else:
             var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
-            var.extend(tf.get_collection(EXTRA_SAVE_VARS_KEY))
+            var.extend(tf.get_collection(tf.GraphKeys.MODEL_VARIABLES))
             var_dict = {}
             for v in var:
                 name = varmanip.get_savename_from_varname(v.name)
                 var_dict[name] = v
             logger.info("Variables to dump:")
             logger.info(", ".join(var_dict.keys()))
-            saver = tf.train.Saver(var_list=var_dict)
+            saver = tf.train.Saver(
+                var_list=var_dict,
+                write_version=tf.train.SaverDef.V2)
             saver.save(sess, args.output, write_meta_graph=False)

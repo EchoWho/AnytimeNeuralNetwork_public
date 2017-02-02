@@ -6,14 +6,16 @@
 
 from abc import abstractmethod, ABCMeta
 from collections import defaultdict
-import random
+import six
 from ..utils import get_rng
 
 __all__ = ['RLEnvironment', 'NaiveRLEnvironment', 'ProxyPlayer',
            'DiscreteActionSpace']
 
+
+@six.add_metaclass(ABCMeta)
 class RLEnvironment(object):
-    __meta__ = ABCMeta
+    """ Base class of RL environment. """
 
     def __init__(self):
         self.reset_stat()
@@ -28,8 +30,11 @@ class RLEnvironment(object):
     def action(self, act):
         """
         Perform an action. Will automatically start a new episode if isOver==True
-        :param act: the action
-        :returns: (reward, isOver)
+
+        Args:
+            act: the action
+        Returns:
+            tuple: (reward, isOver)
         """
 
     def restart_episode(self):
@@ -37,22 +42,26 @@ class RLEnvironment(object):
         raise NotImplementedError()
 
     def finish_episode(self):
-        """ get called when an episode finished"""
+        """ Get called when an episode finished"""
         pass
 
     def get_action_space(self):
-        """ return an `ActionSpace` instance"""
+        """ Returns:
+            :class:`ActionSpace` """
         raise NotImplementedError()
 
     def reset_stat(self):
-        """ reset all statistics counter"""
+        """ Reset all statistics counter"""
         self.stats = defaultdict(list)
 
     def play_one_episode(self, func, stat='score'):
-        """ play one episode for eval.
-            :param func: call with the state and return an action
-            :param stat: a key or list of keys in stats
-            :returns: the stat(s) after running this episode
+        """ Play one episode for eval.
+
+        Args:
+            func: the policy function. Takes a state and returns an action.
+            stat: a key or list of keys in stats to return.
+        Returns:
+            the stat(s) after running this episode
         """
         if not isinstance(stat, list):
             stat = [stat]
@@ -60,13 +69,15 @@ class RLEnvironment(object):
             s = self.current_state()
             act = func(s)
             r, isOver = self.action(act)
-            #print r
+            # print r
             if isOver:
                 s = [self.stats[k] for k in stat]
                 self.reset_stat()
                 return s if len(s) > 1 else s[0]
 
+
 class ActionSpace(object):
+
     def __init__(self):
         self.rng = get_rng(self)
 
@@ -77,7 +88,9 @@ class ActionSpace(object):
     def num_actions(self):
         raise NotImplementedError()
 
+
 class DiscreteActionSpace(ActionSpace):
+
     def __init__(self, num):
         super(DiscreteActionSpace, self).__init__()
         self.num = num
@@ -94,19 +107,25 @@ class DiscreteActionSpace(ActionSpace):
     def __str__(self):
         return "DiscreteActionSpace({})".format(self.num)
 
+
 class NaiveRLEnvironment(RLEnvironment):
-    """ for testing only"""
+    """ For testing only"""
+
     def __init__(self):
         self.k = 0
+
     def current_state(self):
         self.k += 1
         return self.k
+
     def action(self, act):
         self.k = act
         return (self.k, self.k > 10)
 
+
 class ProxyPlayer(RLEnvironment):
-    """ Serve as a proxy another player """
+    """ Serve as a proxy to another player """
+
     def __init__(self, player):
         self.player = player
 

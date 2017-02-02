@@ -3,9 +3,10 @@
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import os
-from pkgutil import walk_packages
+from pkgutil import iter_modules
 
 __all__ = []
+
 
 def global_import(name):
     p = __import__(name, globals(), locals(), level=1)
@@ -13,9 +14,10 @@ def global_import(name):
     del globals()[name]
     for k in lst:
         globals()[k] = p.__dict__[k]
+        __all__.append(k)
 
-for _, module_name, _ in walk_packages(
+
+for _, module_name, _ in iter_modules(
         [os.path.dirname(__file__)]):
     if not module_name.startswith('_'):
         global_import(module_name)
-

@@ -6,16 +6,19 @@ import six
 import tensorflow as tf
 import re
 
-from ..utils import *
-from . import get_global_step_var
+from ..utils import logger
+from ..utils.naming import MOVING_SUMMARY_VARS_KEY
+from .tower import get_current_tower_context
 from .symbolic_functions import rms
 
-__all__ = ['create_summary', 'add_param_summary', 'add_activation_summary',
-           'add_moving_summary', 'summary_moving_average']
+__all__ = ['create_scalar_summary', 'add_param_summary', 'add_activation_summary',
+           'add_moving_summary']
 
-def create_summary(name, v):
+
+def create_scalar_summary(name, v):
     """
-    Return a tf.Summary object with name and simple scalar value v
+    Returns:
+        tf.Summary: a tf.Summary object with name and simple scalar value v.
     """
     assert isinstance(name, six.string_types), type(name)
     v = float(v)
@@ -23,53 +26,67 @@ def create_summary(name, v):
     s.value.add(tag=name, simple_value=v)
     return s
 
+
 def add_activation_summary(x, name=None):
     """
-    Add summary to graph for an activation tensor x.
-    If name is None, use x.name.
+    Add summary for an activation tensor x.  If name is None, use x.name.
+
+    Args:
+        x (tf.Tensor): the tensor to summary.
     """
+    ctx = get_current_tower_context()
+    if ctx is not None and not ctx.is_main_training_tower:
+        return
     ndim = x.get_shape().ndims
+    # TODO use scalar if found ndim == 1
     assert ndim >= 2, \
         "Summary a scalar with histogram? Maybe use scalar instead. FIXME!"
     if name is None:
         name = x.name
-    with tf.name_scope('act_summary'):
-        tf.summary.histogram(name + '/activation', x)
-        tf.summary.scalar(name + '/activation_sparsity', tf.nn.zero_fraction(x))
-        tf.summary.scalar(
-                name + '/activation_rms', rms(x))
+    with tf.name_scope('activation-summary'):
+        tf.summary.histogram(name, x)
+        tf.summary.scalar(name + '-sparsity', tf.nn.zero_fraction(x))
+        tf.summary.scalar(name + '-rms', rms(x))
 
-def add_param_summary(summary_lists):
+def add_param_summary(*summary_lists):
     """
-    Add summary for all trainable variables matching the regex
+    Add summary Ops for all trainable variables matching the regex.
 
-    :param summary_lists: list of (regex, [list of summary type to perform]).
-        Type can be 'mean', 'scalar', 'histogram', 'sparsity', 'rms'
+    Args:
+        summary_lists (list): each is (regex, [list of summary type to perform]).
+        Summary type can be 'mean', 'scalar', 'histogram', 'sparsity', 'rms'
     """
+    ctx = get_current_tower_context()
+    if ctx is not None and not ctx.is_main_training_tower:
+        return
+    if len(summary_lists) == 1 and isinstance(summary_lists[0], list):
+        logger.warn("[Deprecated] Use positional args to call add_param_summary() instead of a list.")
+        summary_lists = summary_lists[0]
+
     def perform(var, action):
         ndim = var.get_shape().ndims
         name = var.name.replace(':0', '')
         if action == 'scalar':
             assert ndim == 0, "Scalar summary on high-dimension data. Maybe you want 'mean'?"
-            tf.summary.scala(name, var)
+            tf.summary.scalar(name, var)
             return
         assert ndim > 0, "Cannot perform {} summary on scalar data".format(action)
         if action == 'histogram':
             tf.summary.histogram(name, var)
             return
         if action == 'sparsity':
-            tf.summary.scalar(name + '/sparsity', tf.nn.zero_fraction(var))
+            tf.summary.scalar(name + '-sparsity', tf.nn.zero_fraction(var))
             return
         if action == 'mean':
-            tf.summary.scalar(name + '/mean', tf.reduce_mean(var))
+            tf.summary.scalar(name + '-mean', tf.reduce_mean(var))
             return
         if action == 'rms':
-            tf.summary.scalar(name + '/rms', rms(var))
+            tf.summary.scalar(name + '-rms', rms(var))
             return
         raise RuntimeError("Unknown summary type: {}".format(action))
 
     params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
-    with tf.name_scope('param_summary'):
+    with tf.name_scope('param-summary'):
         for p in params:
             name = p.name
             for rgx, actions in summary_lists:
@@ -79,32 +96,20 @@ def add_param_summary(summary_lists):
                     for act in actions:
                         perform(p, act)
 
+
 def add_moving_summary(v, *args):
     """
-    :param v: tensor or list of tensor to summary
-    :param args: tensors to summary
+    Args:
+        v (tf.Tensor or list): tensor or list of tensors to summary. Must have
+            scalar type.
+        args: tensors to summary (support positional arguments)
     """
+    ctx = get_current_tower_context()
+    if ctx is not None and not ctx.is_main_training_tower:
+        return
     if not isinstance(v, list):
         v = [v]
     v.extend(args)
     for x in v:
+        assert x.get_shape().ndims == 0, x.get_shape()
         tf.add_to_collection(MOVING_SUMMARY_VARS_KEY, x)
-
-def summary_moving_average():
-    """ Create a MovingAverage op and summary for all variables in
-        MOVING_SUMMARY_VARS_KEY.
-        :returns: a op to maintain these average.
-    """
-    with tf.name_scope('EMA_summary'):
-        global_step_var = get_global_step_var()
-        with tf.name_scope(None):
-            averager = tf.train.ExponentialMovingAverage(
-                0.99, num_updates=global_step_var, name='EMA')
-            vars_to_summary = tf.get_collection(MOVING_SUMMARY_VARS_KEY)
-            avg_maintain_op = averager.apply(vars_to_summary)
-        for idx, c in enumerate(vars_to_summary):
-# TODO assert scalar
-            name = re.sub('tower[p0-9]+/', '', c.op.name)
-            tf.summary.scalar(name, averager.average(c))
-        return avg_maintain_op
-

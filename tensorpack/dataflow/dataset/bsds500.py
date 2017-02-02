@@ -3,40 +3,36 @@
 # File: bsds500.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import os, glob
+import os
+import glob
 import cv2
 import numpy as np
 
-from ...utils import logger, get_rng, get_dataset_path
+from ...utils import get_dataset_path
 from ...utils.fs import download
 from ..base import RNGDataFlow
 
-try:
-    from scipy.io import loadmat
-    __all__ = ['BSDS500']
-except ImportError:
-    logger.warn("Cannot import scipy. BSDS500 dataset won't be available!")
-    __all__ = []
-
+__all__ = ['BSDS500']
 DATA_URL = "http://www.eecs.berkeley.edu/Research/Projects/CS/vision/grouping/BSR/BSR_bsds500.tgz"
 IMG_W, IMG_H = 481, 321
 
+
 class BSDS500(RNGDataFlow):
     """
-    `Berkeley Segmentation Data Set and Benchmarks 500
+    `Berkeley Segmentation Data Set and Benchmarks 500 dataset
     <http://www.eecs.berkeley.edu/Research/Projects/CS/vision/grouping/resources.html#bsds500>`_.
 
-    Produce (image, label) pair, where image has shape (321, 481, 3) and
-    ranges in [0,255]. Label is binary and has shape (321, 481).
-    Those pixels annotated as boundaries by <=2 annotators are set to 0.
-    This is used in `Holistically-Nested Edge Detection
-    <http://arxiv.org/abs/1504.06375>`_.
+    Produce ``(image, label)`` pair, where ``image`` has shape (321, 481, 3(BGR)) and
+    ranges in [0,255].
+    ``Label`` is a floating point image of shape (321, 481) in range [0, 1].
+    The value of each pixel is ``number of times it is annotated as edge / total number of annotators for this image``.
     """
 
     def __init__(self, name, data_dir=None, shuffle=True):
         """
-        :param name: 'train', 'test', 'val'
-        :param data_dir: a directory containing the original 'BSR' directory.
+        Args:
+            name (str): 'train', 'test', 'val'
+            data_dir (str): a directory containing the original 'BSR' directory.
         """
         # check and download data
         if data_dir is None:
@@ -65,7 +61,7 @@ class BSDS500(RNGDataFlow):
             im = cv2.imread(f, cv2.IMREAD_COLOR)
             assert im is not None
             if im.shape[0] > im.shape[1]:
-                im = np.transpose(im, (1,0,2))
+                im = np.transpose(im, (1, 0, 2))
             assert im.shape[:2] == (IMG_H, IMG_W), "{} != {}".format(im.shape[:2], (IMG_H, IMG_W))
 
             imgid = os.path.basename(f).split('.')[0]
@@ -73,16 +69,14 @@ class BSDS500(RNGDataFlow):
             gt = loadmat(gt_file)['groundTruth'][0]
             n_annot = gt.shape[0]
             gt = sum(gt[k]['Boundaries'][0][0] for k in range(n_annot))
-            #gt[gt <= 2] = 0
             gt = gt.astype('float32')
-            gt /= np.max(gt)
+            gt *= 1.0 / n_annot
             if gt.shape[0] > gt.shape[1]:
                 gt = gt.transpose()
             assert gt.shape == (IMG_H, IMG_W)
 
             self.data[idx] = im
             self.label[idx] = gt
-        #self.label[self.label<0.9] = 0
 
     def size(self):
         return self.data.shape[0]
@@ -95,8 +89,14 @@ class BSDS500(RNGDataFlow):
             yield [self.data[k], self.label[k]]
 
 
+try:
+    from scipy.io import loadmat
+except ImportError:
+    from ...utils.dependency import create_dummy_class
+    BSDS500 = create_dummy_class('BSDS500', 'scipy.io')  # noqa
+
 if __name__ == '__main__':
     a = BSDS500('val')
     for k in a.get_data():
-        cv2.imshow("haha", k[1].astype('uint8')*255)
+        cv2.imshow("haha", k[1].astype('uint8') * 255)
         cv2.waitKey(1000)

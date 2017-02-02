@@ -67,3 +67,11 @@ target/
 *.log*
 model-*
 .gitignore
+*.caffemodel
+*.png
+*.jpg
+checkpoint
+*.json
+*.prototxt
+snippet
+*.txt

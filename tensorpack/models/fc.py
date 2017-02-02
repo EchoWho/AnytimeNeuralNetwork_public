@@ -1,37 +1,44 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: fc.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import tensorflow as tf
-import math
 
-from ._common import layer_register
-from ..tfutils.symbolic_functions import *
+from .common import layer_register
+from ..tfutils import symbolic_functions as symbf
 
 __all__ = ['FullyConnected']
+
 
 @layer_register()
 def FullyConnected(x, out_dim,
                    W_init=None, b_init=None,
-                   nl=tf.nn.relu, use_bias=True, return_vars=False):
+                   nl=tf.identity, use_bias=True, return_vars=False):
     """
-    Fully-Connected layer.
+    Fully-Connected layer. Takes a N>1D tensor and returns a 2D tensor.
 
-    :param input: a tensor to be flattened except the first dimension.
-    :param out_dim: output dimension
-    :param W_init: initializer for W. default to `xavier_initializer_conv2d`.
-    :param b_init: initializer for b. default to zero initializer.
-    :param nl: nonlinearity. default to `relu`.
-    :param use_bias: whether to use bias. a boolean default to True
-    :returns: a 2D tensor
+    Args:
+        x (tf.Tensor): a tensor to be flattened except for the first dimension.
+        out_dim (int): output dimension
+        W_init: initializer for W. Defaults to `variance_scaling_initializer`.
+        b_init: initializer for b. Defaults to zero.
+        nl: a nonlinearity function
+        use_bias (bool): whether to use bias.
+
+    Returns:
+        tf.Tensor: a NC tensor named ``output``.
+
+    Variable Names:
+
+    * ``W``: weights
+    * ``b``: bias
     """
-    x = batch_flatten(x)
+    x = symbf.batch_flatten(x)
     in_dim = x.get_shape().as_list()[1]
 
     if W_init is None:
-        #W_init = tf.truncated_normal_initializer(stddev=1 / math.sqrt(float(in_dim)))
-        W_init = tf.uniform_unit_scaling_initializer(factor=1.43)
+        W_init = tf.contrib.layers.variance_scaling_initializer()
     if b_init is None:
         b_init = tf.constant_initializer()
 

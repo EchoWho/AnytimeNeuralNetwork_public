@@ -1,13 +1,26 @@
 tensorpack.utils package
 ========================
 
-Submodules
-----------
+tensorpack.utils.argtools module
+--------------------------------
+
+.. automodule:: tensorpack.utils.argtools
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 tensorpack.utils.concurrency module
 -----------------------------------
 
 .. automodule:: tensorpack.utils.concurrency
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+tensorpack.utils.debug module
+-----------------------------
+
+.. automodule:: tensorpack.utils.debug
     :members:
     :undoc-members:
     :show-inheritance:
@@ -24,6 +37,14 @@ tensorpack.utils.fs module
 --------------------------
 
 .. automodule:: tensorpack.utils.fs
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+tensorpack.utils.globvars module
+--------------------------------
+
+.. automodule:: tensorpack.utils.globvars
     :members:
     :undoc-members:
     :show-inheritance:
@@ -52,13 +73,6 @@ tensorpack.utils.lut module
     :undoc-members:
     :show-inheritance:
 
-tensorpack.utils.naming module
-------------------------------
-
-.. automodule:: tensorpack.utils.naming
-    :members:
-    :undoc-members:
-    :show-inheritance:
 
 tensorpack.utils.rect module
 ----------------------------
@@ -76,10 +90,10 @@ tensorpack.utils.serialize module
     :undoc-members:
     :show-inheritance:
 
-tensorpack.utils.stat module
-----------------------------
+tensorpack.utils.stats module
+-----------------------------
 
-.. automodule:: tensorpack.utils.stat
+.. automodule:: tensorpack.utils.stats
     :members:
     :undoc-members:
     :show-inheritance:
@@ -92,10 +106,10 @@ tensorpack.utils.timer module
     :undoc-members:
     :show-inheritance:
 
-tensorpack.utils.utils module
------------------------------
+tensorpack.utils.viz module
+---------------------------
 
-.. automodule:: tensorpack.utils.utils
+.. automodule:: tensorpack.utils.viz
     :members:
     :undoc-members:
     :show-inheritance:

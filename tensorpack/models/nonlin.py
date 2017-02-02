@@ -1,24 +1,27 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: nonlin.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import tensorflow as tf
-from copy import copy
 
-from ._common import *
+from .common import layer_register
 from .batch_norm import BatchNorm
 
 __all__ = ['Maxout', 'PReLU', 'LeakyReLU', 'BNReLU']
 
-@layer_register()
+
+@layer_register(use_scope=False)
 def Maxout(x, num_unit):
     """
-    Maxout as in `Maxout Networks <http://arxiv.org/abs/1302.4389>`_.
+    Maxout as in the paper `Maxout Networks <http://arxiv.org/abs/1302.4389>`_.
 
-    :param input: a NHWC or NC tensor.
-    :param num_unit: a int. must be divisible by C.
-    :returns: a NHW(C/num_unit) tensor
+    Args:
+        x (tf.Tensor): a NHWC or NC tensor. Channel has to be known.
+        num_unit (int): a int. Must be divisible by C.
+
+    Returns:
+        tf.Tensor: of shape NHW(C/num_unit) named ``output``.
     """
     input_shape = x.get_shape().as_list()
     ndim = len(input_shape)
@@ -31,47 +34,48 @@ def Maxout(x, num_unit):
         x = tf.reshape(x, [-1, ch / num_unit, num_unit])
     return tf.reduce_max(x, ndim, name='output')
 
+
 @layer_register(log_shape=False)
-def PReLU(x, init=tf.constant_initializer(0.001), name=None):
+def PReLU(x, init=0.001, name='output'):
     """
-    Parameterized relu as in `Delving Deep into Rectifiers: Surpassing
+    Parameterized ReLU as in the paper `Delving Deep into Rectifiers: Surpassing
     Human-Level Performance on ImageNet Classification
     <http://arxiv.org/abs/1502.01852>`_.
 
-    :param input: any tensor.
-    :param init: initializer for the p. default to 0.001.
+    Args:
+        x (tf.Tensor): input
+        init (float): initial value for the learnable slope.
+        name (str): name of the output.
+
+    Variable Names:
+
+    * ``alpha``: learnable slope.
     """
+    init = tf.constant_initializer(init)
     alpha = tf.get_variable('alpha', [], initializer=init)
     x = ((1 + alpha) * x + (1 - alpha) * tf.abs(x))
-    if name is None:
-        name = 'output'
-    return tf.mul(x, 0.5, name=name)
+    return tf.multiply(x, 0.5, name=name)
 
-@layer_register(log_shape=False)
-def LeakyReLU(x, alpha, name=None):
+
+@layer_register(use_scope=False, log_shape=False)
+def LeakyReLU(x, alpha, name='output'):
     """
-    Leaky relu as in `Rectifier Nonlinearities Improve Neural Network Acoustic
+    Leaky ReLU as in paper `Rectifier Nonlinearities Improve Neural Network Acoustic
     Models
     <http://ai.stanford.edu/~amaas/papers/relu_hybrid_icml2013_final.pdf>`_.
 
-    :param input: any tensor.
-    :param alpha: the negative slope.
+    Args:
+        x (tf.Tensor): input
+        alpha (float): the slope.
     """
-    alpha = float(alpha)
-    x = ((1 + alpha) * x + (1 - alpha) * tf.abs(x))
-    if name is None:
-        name = 'output'
-    return tf.mul(x, 0.5, name=name)
+    return tf.maximum(x, alpha * x, name=name)
 
-# I'm not a layer, but I return a nonlinearity.
-def BNReLU(is_training=None, **kwargs):
+
+@layer_register(log_shape=False, use_scope=False)
+def BNReLU(x, name=None):
     """
-    :param is_traning: boolean
-    :param kwargs: args for BatchNorm
-    :returns: an activation function that performs BN + ReLU (a too common combination)
+    A shorthand of BatchNormalization + ReLU.
     """
-    def BNReLU(x, name=None):
-        x = BatchNorm('bn', x, use_local_stat=is_training, **kwargs)
-        x = tf.nn.relu(x, name=name)
-        return x
-    return BNReLU
+    x = BatchNorm('bn', x)
+    x = tf.nn.relu(x, name=name)
+    return x

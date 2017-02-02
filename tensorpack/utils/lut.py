@@ -7,10 +7,17 @@ import six
 
 __all__ = ['LookUpTable']
 
+
 class LookUpTable(object):
+    """ Maintain mapping from index to objects. """
+
     def __init__(self, objlist):
+        """
+        Args:
+            objlist(list): list of objects
+        """
         self.idx2obj = dict(enumerate(objlist))
-        self.obj2idx = {v : k for k, v in six.iteritems(self.idx2obj)}
+        self.obj2idx = {v: k for k, v in six.iteritems(self.idx2obj)}
 
     def size(self):
         return len(self.idx2obj)

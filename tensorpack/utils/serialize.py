@@ -6,14 +6,23 @@
 import msgpack
 import msgpack_numpy
 msgpack_numpy.patch()
-#import dill
 
 __all__ = ['loads', 'dumps']
 
+
 def dumps(obj):
-    #return dill.dumps(obj)
+    """
+    Serialize an object.
+
+    Returns:
+        str
+    """
     return msgpack.dumps(obj, use_bin_type=True)
 
+
 def loads(buf):
-    #return dill.loads(buf)
+    """
+    Args:
+        buf (str): serialized object.
+    """
     return msgpack.loads(buf)

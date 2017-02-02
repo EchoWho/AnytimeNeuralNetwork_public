@@ -4,24 +4,27 @@
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 
-import numpy as np
 from collections import deque
 from .envbase import ProxyPlayer
 
 __all__ = ['PreventStuckPlayer', 'LimitLengthPlayer', 'AutoRestartPlayer',
-        'MapPlayerState']
+           'MapPlayerState']
+
 
 class PreventStuckPlayer(ProxyPlayer):
     """ Prevent the player from getting stuck (repeating a no-op)
     by inserting a different action. Useful in games such as Atari Breakout
     where the agent needs to press the 'start' button to start playing.
+
+    It does auto-reset, but doesn't auto-restart the underlying player.
     """
     # TODO hash the state as well?
+
     def __init__(self, player, nr_repeat, action):
         """
-        :param nr_repeat: trigger the 'action' after this many of repeated action
-        :param action: the action to be triggered to get out of stuck
-        Does auto-reset, but doesn't auto-restart the underlying player.
+        Args:
+            nr_repeat (int): trigger the 'action' after this many of repeated action.
+            action: the action to be triggered to get out of stuck.
         """
         super(PreventStuckPlayer, self).__init__(player)
         self.act_que = deque(maxlen=nr_repeat)
@@ -40,11 +43,17 @@ class PreventStuckPlayer(ProxyPlayer):
         super(PreventStuckPlayer, self).restart_episode()
         self.act_que.clear()
 
+
 class LimitLengthPlayer(ProxyPlayer):
     """ Limit the total number of actions in an episode.
-        Will auto restart the underlying player on timeout
+        Will restart the underlying player on timeout.
     """
+
     def __init__(self, player, limit):
+        """
+        Args:
+            limit(int): the time limit
+        """
         super(LimitLengthPlayer, self).__init__(player)
         self.limit = limit
         self.cnt = 0
@@ -64,9 +73,12 @@ class LimitLengthPlayer(ProxyPlayer):
         self.player.restart_episode()
         self.cnt = 0
 
+
 class AutoRestartPlayer(ProxyPlayer):
     """ Auto-restart the player on episode ends,
-        in case some player wasn't designed to do so. """
+        in case some player wasn't designed to do so.
+    """
+
     def action(self, act):
         r, isOver = self.player.action(act)
         if isOver:
@@ -74,8 +86,15 @@ class AutoRestartPlayer(ProxyPlayer):
             self.player.restart_episode()
         return r, isOver
 
+
 class MapPlayerState(ProxyPlayer):
+    """ Map the state of the underlying player by a function. """
+
     def __init__(self, player, func):
+        """
+        Args:
+            func: takes the old state and return a new state.
+        """
         super(MapPlayerState, self).__init__(player)
         self.func = func
 

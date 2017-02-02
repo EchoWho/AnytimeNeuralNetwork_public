@@ -5,18 +5,25 @@
 
 """ Graph related callbacks"""
 
-from .base import Callback
-from ..utils import logger
+from .base import Triggerable
 
 __all__ = ['RunOp']
 
-class RunOp(Callback):
-    """ Run an op periodically"""
+
+class RunOp(Triggerable):
+    """ Run an Op. """
+
     def __init__(self, setup_func, run_before=True, run_epoch=True):
         """
-        :param setup_func: a function that returns the op in the graph
-        :param run_before: run the op before training
-        :param run_epoch: run the op on every epoch trigger
+        Args:
+            setup_func: a function that returns the Op in the graph
+            run_before (bool): run the Op before training
+            run_epoch (bool): run the Op on every epoch trigger
+
+        Examples:
+            The `DQN Example
+            <https://github.com/ppwwyyxx/tensorpack/blob/master/examples/Atari2600/DQN.py#L182>`_
+            uses this callback to update target network.
         """
         self.setup_func = setup_func
         self.run_before = run_before
@@ -24,15 +31,11 @@ class RunOp(Callback):
 
     def _setup_graph(self):
         self._op = self.setup_func()
-        #self._op_name = self._op.name
 
     def _before_train(self):
         if self.run_before:
             self._op.run()
 
-    def _trigger_epoch(self):
+    def _trigger(self):
         if self.run_epoch:
             self._op.run()
-
-    #def _log(self):
-        #logger.info("Running op {} ...".format(self._op_name))

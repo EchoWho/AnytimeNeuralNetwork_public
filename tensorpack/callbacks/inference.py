@@ -2,25 +2,22 @@
 # File: inference.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
-import tensorflow as tf
 import numpy as np
-from tqdm import tqdm
 from abc import ABCMeta, abstractmethod
+import sys
 import six
-from six.moves import zip, map
+from six.moves import zip
 
-from ..dataflow import DataFlow
-from ..utils import *
-from ..utils.stat import *
-from ..tfutils import *
-from ..tfutils.summary import *
-from .base import Callback
+from ..utils import logger
+from ..utils.stats import RatioCounter, BinaryStatistics
+from ..tfutils import get_op_tensor_name
 
-__all__ = ['InferenceRunner', 'ClassificationError',
-        'ScalarStats', 'Inferencer', 'BinaryClassificationStats', 'StorePrediction']
+__all__ = ['ScalarStats', 'Inferencer',
+           'ClassificationError', 'BinaryClassificationStats', 'StorePrediction']
 
+@six.add_metaclass(ABCMeta)
 class Inferencer(object):
-    __metaclass__ = ABCMeta
+    """ Base class of Inferencer. To be used with :class:`InferenceRunner`. """
 
     def before_inference(self):
         """
@@ -31,20 +28,25 @@ class Inferencer(object):
     def _before_inference(self):
         pass
 
-    def datapoint(self, dp, output):
+    def datapoint(self, output):
         """
-        Called after complete running every data point
+        Called after each new datapoint finished the forward inference.
+
+        Args:
+            output(list): list of output this inferencer needs. Has the same
+                length as ``self.get_output_tensors()``.
         """
-        self._datapoint(dp, output)
+        self._datapoint(output)
 
     @abstractmethod
-    def _datapoint(self, dp, output):
+    def _datapoint(self, output):
         pass
 
     def after_inference(self):
         """
         Called after a round of inference ends.
-        Returns a dict of statistics.
+        Returns a dict of statistics which will be logged by the :class:`InferenceRunner`.
+        The inferencer needs to handle other type of logging by itself, if there is any.
         """
         return self._after_inference()
 
@@ -53,90 +55,28 @@ class Inferencer(object):
 
     def get_output_tensors(self):
         """
-        Return a list of tensor names needed for this inference
+        Return a list of tensor names (guranteed not op name) this inferencer needs.
         """
-        return self._get_output_vars()
+        ret = self._get_output_tensors()
+        return [get_op_tensor_name(n)[1] for n in ret]
 
     @abstractmethod
     def _get_output_tensors(self):
         pass
 
-class InferenceRunner(Callback):
-    """
-    A callback that runs different kinds of inferencer.
-    """
-
-    def __init__(self, ds, vcs):
-        """
-        :param ds: inference dataset. a `DataFlow` instance.
-        :param vcs: a list of `Inferencer` instance.
-        """
-        assert isinstance(ds, DataFlow), type(ds)
-        self.ds = ds
-        if not isinstance(vcs, list):
-            self.vcs = [vcs]
-        else:
-            self.vcs = vcs
-        for v in self.vcs:
-            assert isinstance(v, Inferencer), str(v)
-
-    def _setup_graph(self):
-        self.input_vars = self.trainer.model.reuse_input_vars()
-        self._find_output_tensors()
-        input_names = [x.name for x in self.input_vars]
-        self.pred_func = self.trainer.get_predict_func(
-                input_names, self.output_tensors)
-
-    def _find_output_tensors(self):
-        self.output_tensors = []    # list of names
-        self.vc_to_vars = []    # list of list of (var_name: output_idx)
-        for vc in self.vcs:
-            vc_vars = vc._get_output_tensors()
-            def find_oid(var):
-                if var in self.output_tensors:
-                    return self.output_tensors.index(var)
-                else:
-                    self.output_tensors.append(var)
-                    return len(self.output_tensors) - 1
-            vc_vars = [(var, find_oid(var)) for var in vc_vars]
-            self.vc_to_vars.append(vc_vars)
-
-    def _trigger_epoch(self):
-        for vc in self.vcs:
-            vc.before_inference()
-
-        sess = tf.get_default_session()
-        self.ds.reset_state()
-        with tqdm(total=self.ds.size(), **get_tqdm_kwargs()) as pbar:
-            for dp in self.ds.get_data():
-                #feed = dict(zip(self.input_vars, dp))   # TODO custom dp mapping?
-                #outputs = sess.run(self.output_tensors, feed_dict=feed)
-                outputs = self.pred_func(dp)
-                for vc, varsmap in zip(self.vcs, self.vc_to_vars):
-                    vc_output = [outputs[k[1]] for k in varsmap]
-                    vc.datapoint(dp, vc_output)
-                pbar.update()
-
-        for vc in self.vcs:
-            ret = vc.after_inference()
-            for k, v in six.iteritems(ret):
-                try:
-                    v = float(v)
-                except:
-                    logger.warn("{} returns a non-scalar statistics!".format(type(vc).__name__))
-                    continue
-                self.trainer.write_scalar_summary(k, v)
 
 class ScalarStats(Inferencer):
     """
-    Write some scalar tensor to both stat and summary.
-    The output of the given Ops must be a scalar.
-    The value will be averaged over all data points in the dataset.
+    Statistics of some scalar tensor.
+    The value will be averaged over all given datapoints.
     """
+
     def __init__(self, names_to_print, prefix='validation'):
         """
-        :param names_to_print: list of names of tensors, or just a name
-        :param prefix: an optional prefix for logging
+        Args:
+            names_to_print(list or str): list of names or just one name. The
+                corresponding tensors have to be scalar.
+            prefix(str): a prefix for logging
         """
         if not isinstance(names_to_print, list):
             self.names = [names_to_print]
@@ -150,7 +90,9 @@ class ScalarStats(Inferencer):
     def _before_inference(self):
         self.stats = []
 
-    def _datapoint(self, dp, output):
+    def _datapoint(self, output):
+        for o in output:
+            assert isinstance(o, (float, np.float32)), type(o)
         self.stats.append(output)
 
     def _after_inference(self):
@@ -159,66 +101,82 @@ class ScalarStats(Inferencer):
 
         ret = {}
         for stat, name in zip(self.stats, self.names):
-            opname, _ = get_op_var_name(name)
+            opname, _ = get_op_tensor_name(name)
             name = '{}_{}'.format(self.prefix, opname) if self.prefix else opname
             ret[name] = stat
         return ret
 
+
 class ClassificationError(Inferencer):
     """
-    Compute classification error from a `wrong` variable
+    Compute classification error in batch mode, from a ``wrong`` tensor.
 
-    The `wrong` variable is supposed to be an integer equal to the number of failed samples in this batch.
-    You can use `tf.nn.in_top_k` to record top-k error as well.
+    The ``wrong`` tensor is supposed to be an binary vector containing
+    whether each sample in the batch is *incorrectly* classified.
+    You can use ``tf.nn.in_top_k`` to produce this vector.
 
-    This callback produce the "true" error,
+    This Inferencer produces the "true" error,
     taking account of the fact that batches might not have the same size in
     testing (because the size of test set might not be a multiple of batch size).
-    Therefore the result is different from averaging the error rate of each batch.
+    Therefore the result can be different from averaging the error rate of each batch.
     """
-    def __init__(self, wrong_var_name='wrong:0', summary_name='validation_error'):
+
+    def __init__(self, wrong_tensor_name='incorrect_vector', summary_name='val_error'):
         """
-        :param wrong_var_name: name of the `wrong` variable
-        :param summary_name: the name for logging
+        Args:
+            wrong_tensor_name(str): name of the ``wrong`` tensor.
+                The default is the same as the default output name of
+                :meth:`prediction_incorrect`.
+            summary_name(str): the name for logging.
         """
-        self.wrong_var_name = wrong_var_name
+        self.wrong_tensor_name = wrong_tensor_name
         self.summary_name = summary_name
 
     def _get_output_tensors(self):
-        return [self.wrong_var_name]
+        return [self.wrong_tensor_name]
 
     def _before_inference(self):
         self.err_stat = RatioCounter()
 
-    def _datapoint(self, dp, outputs):
-        batch_size = dp[0].shape[0]   # assume batched input
-        wrong = int(outputs[0])
+    def _datapoint(self, outputs):
+        vec = outputs[0]
+        if vec.ndim == 0:
+            logger.error("[DEPRECATED] use a 'wrong vector' for ClassificationError instead of nr_wrong")
+            sys.exit(1)
+        else:
+            # TODO put shape assertion into inferencerrunner
+            assert vec.ndim == 1, "{} is not a vector!".format(self.wrong_tensor_name)
+            batch_size = len(vec)
+            wrong = np.sum(vec)
         self.err_stat.feed(wrong, batch_size)
 
     def _after_inference(self):
         return {self.summary_name: self.err_stat.ratio}
 
+
 class BinaryClassificationStats(Inferencer):
-    """ Compute precision/recall in binary classification, given the
+    """
+    Compute precision / recall in binary classification, given the
     prediction vector and the label vector.
     """
 
-    def __init__(self, pred_var_name, label_var_name, summary_prefix='val'):
+    def __init__(self, pred_tensor_name, label_tensor_name, summary_prefix='val'):
         """
-        :param pred_var_name: name of the 0/1 prediction tensor.
-        :param label_var_name: name of the 0/1 label tensor.
+        Args:
+            pred_tensor_name(str): name of the 0/1 prediction tensor.
+            label_tensor_name(str): name of the 0/1 label tensor.
         """
-        self.pred_var_name = pred_var_name
-        self.label_var_name = label_var_name
+        self.pred_tensor_name = pred_tensor_name
+        self.label_tensor_name = label_tensor_name
         self.prefix = summary_prefix
 
     def _get_output_tensors(self):
-        return [self.pred_var_name, self.label_var_name]
+        return [self.pred_tensor_name, self.label_tensor_name]
 
     def _before_inference(self):
         self.stat = BinaryStatistics()
 
-    def _datapoint(self, dp, outputs):
+    def _datapoint(self, outputs):
         pred, label = outputs
         self.stat.feed(pred, label)
 

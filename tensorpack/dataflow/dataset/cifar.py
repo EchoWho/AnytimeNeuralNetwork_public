@@ -1,19 +1,17 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: cifar.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 #         Yukun Chen <cykustc@gmail.com>
 
-import os, sys
+import os
 import pickle
 import numpy as np
-import random
 import six
-from six.moves import urllib, range
+from six.moves import range
 import copy
-import logging
 
-from ...utils import logger, get_rng, get_dataset_path
+from ...utils import logger, get_dataset_path
 from ...utils.fs import download
 from ..base import RNGDataFlow
 
@@ -22,6 +20,7 @@ __all__ = ['Cifar10', 'Cifar100']
 
 DATA_URL_CIFAR_10 = 'http://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz'
 DATA_URL_CIFAR_100 = 'http://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz'
+
 
 def maybe_download_and_extract(dest_directory, cifar_classnum):
     """Download and extract the tarball from Alex's website.
@@ -42,6 +41,7 @@ def maybe_download_and_extract(dest_directory, cifar_classnum):
         import tarfile
         tarfile.open(filepath, 'r:gz').extractall(dest_directory)
 
+
 def read_cifar(filenames, cifar_classnum):
     assert cifar_classnum == 10 or cifar_classnum == 100
     ret = []
@@ -54,7 +54,7 @@ def read_cifar(filenames, cifar_classnum):
         data = dic[b'data']
         if cifar_classnum == 10:
             label = dic[b'labels']
-            IMG_NUM = 10000 # cifar10 data are split into blocks of 10000
+            IMG_NUM = 10000  # cifar10 data are split into blocks of 10000
         elif cifar_classnum == 100:
             label = dic[b'fine_labels']
             IMG_NUM = 50000 if 'train' in fname else 10000
@@ -64,6 +64,7 @@ def read_cifar(filenames, cifar_classnum):
             img = np.transpose(img, [1, 2, 0])
             ret.append([img, label[k]])
     return ret
+
 
 def get_filenames(dir, cifar_classnum):
     assert cifar_classnum == 10 or cifar_classnum == 100
@@ -77,17 +78,9 @@ def get_filenames(dir, cifar_classnum):
                      os.path.join(dir, 'cifar-100-python', 'test')]
     return filenames
 
+
 class CifarBase(RNGDataFlow):
-    """
-    Return [image, label],
-        image is 32x32x3 in the range [0,255]
-    """
     def __init__(self, train_or_test, shuffle=True, dir=None, cifar_classnum=10):
-        """
-        Args:
-            train_or_test: string either 'train' or 'test'
-            shuffle: default to True
-        """
         assert train_or_test in ['train', 'test']
         assert cifar_classnum == 10 or cifar_classnum == 100
         self.cifar_classnum = cifar_classnum
@@ -132,15 +125,29 @@ class CifarBase(RNGDataFlow):
         return three values as mean of each channel
         """
         mean = self.get_per_pixel_mean()
-        return np.mean(mean, axis=(0,1))
+        return np.mean(mean, axis=(0, 1))
+
 
 class Cifar10(CifarBase):
+    """
+    Produces [image, label] in Cifar10 dataset,
+    image is 32x32x3 in the range [0,255].
+    label is an int.
+    """
     def __init__(self, train_or_test, shuffle=True, dir=None):
+        """
+        Args:
+            train_or_test (str): either 'train' or 'test'.
+            shuffle (bool): shuffle the dataset.
+        """
         super(Cifar10, self).__init__(train_or_test, shuffle, dir, 10)
 
+
 class Cifar100(CifarBase):
+    """ Similar to Cifar10"""
     def __init__(self, train_or_test, shuffle=True, dir=None):
         super(Cifar100, self).__init__(train_or_test, shuffle, dir, 100)
+
 
 if __name__ == '__main__':
     ds = Cifar10('train')
@@ -149,7 +156,6 @@ if __name__ == '__main__':
     print(mean)
     dump_dataset_images(ds, '/tmp/cifar', 100)
 
-    #for (img, label) in ds.get_data():
-        #from IPython import embed; embed()
-        #break
-
+    # for (img, label) in ds.get_data():
+    #     from IPython import embed; embed()
+    #     break

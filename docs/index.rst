@@ -1,36 +1,19 @@
-.. tensorpack documentation master file, created by
-   sphinx-quickstart on Sun Mar 27 01:41:24 2016.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
-Welcome to tensorpack
+Welcome to tensorpack!
 ======================================
 
-Tensorpack is in early development.
-
-Contents:
-
-.. toctree::
-   :maxdepth: 2
-
-   user/dataflow
-   user/models
+tensorpack is in early development.
+All tutorials are drafts for now. You can get an idea from them but the details
+might not be correct.
 
 .. toctree::
-  :maxdepth: 1
+  :maxdepth: 2
 
-
-  modules/tensorpack.models
-  modules/tensorpack.dataflow
-  modules/tensorpack.callbacks
-  modules/tensorpack.train
-  modules/tensorpack.utils
-  modules/tensorpack.tfutils
-  modules/tensorpack.RL
-
+  user/tutorials
+  casestudies/index
+  modules/index
 
 Indices and tables
-==================
+------------------
 
 * :ref:`genindex`
 * :ref:`modindex`
