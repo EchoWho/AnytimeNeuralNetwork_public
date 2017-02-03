@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
-# File: cifar10-resnet.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import numpy as np
 import tensorflow as tf
@@ -21,8 +19,10 @@ NUM_UNITS=12
 GROWTH_RATE=12
 INIT_CHANNEL=16
 
+NUM_UNITS_PER_STACK=1
+
 def loss_weights(N):
-    return anytime_loss.stack_loss_weights(N, 6)
+    return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
 
 class Model(ModelDesc):
     def __init__(self, n, growth_rate, init_channel):
@@ -45,8 +45,6 @@ class Model(ModelDesc):
             return Conv2D(name, l, channel, kernel, stride=stride,
                           nl=tf.identity, use_bias=False,
                           W_init=tf.random_normal_initializer(stddev=np.sqrt(2.0/kernel/kernel/channel)))
-
-       
         wd_cost = 0
         total_cost = 0
         total_units = NUM_RES_BLOCKS * self.n
@@ -83,8 +81,8 @@ class Model(ModelDesc):
 
                     merged_feats = tf.concat(3, [merged_feats, l], name='concat')
                     if cost_weight >0:
-                        print "Stop gradient at {}".format(scope_name)
-                        merged_feats = tf.stop_gradient(merged_feats)
+                        #print "Stop gradient at {}".format(scope_name)
+                        #merged_feats = tf.stop_gradient(merged_feats)
                         l = BatchNorm('bn_pred', l)
                         l = tf.nn.relu(l)
                         l = GlobalAvgPooling('gap', l)
@@ -190,12 +188,16 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--init_channel',
                         help='number of initial channels',
                         type=int, default=16)
+    parser.add_argument('-s', '--stack', 
+                        help='number of units per stack, i.e., number of units per prediction',
+                        type=int, default=1)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.') # nargs='*' in multi mode
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     NUM_UNITS = args.num_units
     GROWTH_RATE = args.growth_rate
     INIT_CHANNEL = args.init_channel
+    NUM_UNITS_PER_STACK = args.stack
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu

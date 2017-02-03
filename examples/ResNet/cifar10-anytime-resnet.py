@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
-# File: cifar10-resnet.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import numpy as np
 import argparse
@@ -24,8 +22,10 @@ NUM_UNITS = 5
 WIDTH = 2
 INIT_CHANNEL = 16
 
+NUM_UNITS_PER_STACK=1
+
 def loss_weights(N):
-    return anytime_loss.sieve_loss_weights(N)
+    return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
 
 class Model(ModelDesc):
 
@@ -49,7 +49,7 @@ class Model(ModelDesc):
                           nl=tf.identity, use_bias=False,
                           W_init=tf.random_normal_initializer(stddev=np.sqrt(2.0/kernel/kernel/channel)))
 
-        def residual(name, l_feats, l_feats_prerelu=None, increase_dim=False):
+        def residual(name, l_feats, increase_dim=False):
             shape = l_feats[0].get_shape().as_list()
             in_channel = shape[3]
 
@@ -60,9 +60,6 @@ class Model(ModelDesc):
                 out_channel = in_channel
                 stride1 = 1
 
-            if l_feats_prerelu is None:
-                l_feats_prerelu = l_feats
-
             l_mid_feats = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.mid') as scope:
@@ -71,15 +68,10 @@ class Model(ModelDesc):
                     else:
                         merged_feats = tf.concat(3, [merged_feats, l_feats[w]], name='concat_mf')
                     mf = conv('conv1', merged_feats, out_channel, stride1)
-                    #mf = 0 
-                    #for ww in range(w+1):
-                    #    c1 = conv('conv1.'+str(ww), l_feats[ww], out_channel, stride1)
-                    #    mf += c1
                     mf = BatchNorm('bn1', mf)
                     mf = tf.nn.relu(mf)
                     l_mid_feats.append(mf)
 
-            l_end_feats_prerelu = []
             l_end_feats = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.end') as scope:
@@ -88,30 +80,22 @@ class Model(ModelDesc):
                     else: 
                         merged_feats = tf.concat(3, [merged_feats, l_mid_feats[w]], name='concat_ef')
                     ef = conv('conv2', merged_feats, out_channel, 1)
-                    #ef = 0
-                    #for ww in range(w+1):
-                    #    c2 = conv('conv2.'+str(ww), l_mid_feats[ww], out_channel, 1)
-                    #    ef += c2
                     ef = BatchNorm('bn2', ef)
                     l = l_feats[w]
                     if increase_dim:
                         l = AvgPooling('pool', l, 2)
                         l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
                     ef += l
-                    l_end_feats_prerelu.append(ef)
                     # Uncomment to turn on the final relu at each resnet block
                     #ef = tf.nn.relu(ef)
                     l_end_feats.append(ef)
-            return l_end_feats, l_end_feats_prerelu
+            return l_end_feats
 
         def row_sum_predict(name, l_feats, out_dim, is_last):
             l_logits = []
             var_list = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.predict') as scope:
-                    # If resnet last relu is active in resnet blocks, 
-                    # we don't have to relu each feature before prediction. 
-                    #l = l_feats[w]
                     l = tf.nn.relu(l_feats[w])
                     l = GlobalAvgPooling('gap', l)
                     if w == 0:
@@ -150,7 +134,6 @@ class Model(ModelDesc):
                 l = BatchNorm('bn0', l)
                 l = tf.nn.relu(l)
                 l_feats.append(l)
-        l_feats_prerelu = l_feats
 
         wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                           480000, 0.2, True)
@@ -160,11 +143,10 @@ class Model(ModelDesc):
         cost_weights = loss_weights(total_units)
         unit_idx = 0
         for res_block_i in range(NUM_RES_BLOCKS):
-            # {32, c_total=16}, {16, c=32}, {8, c=64}
             for k in range(self.n):
                 scope_name = 'res{}.{:02d}'.format(res_block_i, k)
-                l_feats, l_feats_prerelu = \
-                    residual(scope_name, l_feats, l_feats_prerelu, 
+                l_feats = \
+                    residual(scope_name, l_feats, 
                              increase_dim=(k==0 and res_block_i > 0))
                 l_logits, var_list = \
                     row_sum_predict(scope_name, l_feats, out_dim=10, 
@@ -175,9 +157,9 @@ class Model(ModelDesc):
                     cost_weight = cost_weights[unit_idx]
                     unit_idx += 1
                     if cost_weight > 0:
-                        # Uncomment to have weight only on the last layer
                         cost += cost_weight * c
                         # regularize weights from FC layers
+                        # Should use regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
 
 
@@ -264,12 +246,16 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
                         type=int, default=16)
+    parser.add_argument('-s', '--stack', 
+                        help='number of units per stack, i.e., number of units per prediction',
+                        type=int, default=1)
 
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
+    NUM_UNITS_PER_STACK = args.stack
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
