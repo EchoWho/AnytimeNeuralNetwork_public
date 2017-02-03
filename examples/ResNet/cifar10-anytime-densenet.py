@@ -49,8 +49,9 @@ class Model(ModelDesc):
        
         wd_cost = 0
         total_cost = 0
-        node_rev_idx = NUM_RES_BLOCKS * self.n
-        cost_weights = loss_weights(node_rev_idx) 
+        total_units = NUM_RES_BLOCKS * self.n
+        cost_weights = loss_weights(total_units) 
+        unit_idx = 0
         
         merged_feats = None
         for bi in range(NUM_RES_BLOCKS):
@@ -68,8 +69,8 @@ class Model(ModelDesc):
             merged_feats = l
 
             for k in range(self.n):
-                cost_weight = cost_weights[node_rev_idx - 1]
-                node_rev_idx -= 1
+                cost_weight = cost_weights[unit_idx]
+                unit_idx += 1
                 scope_name = 'dense{}.{}'.format(bi, k)
                 with tf.variable_scope(scope_name) as scope:
                     l = merged_feats
@@ -149,16 +150,17 @@ def get_config():
     tf.summary.scalar('learning_rate', lr)
 
     vcs = []
-    rev_idx = NUM_RES_BLOCKS * NUM_UNITS
-    cost_weights = loss_weights(rev_idx)
+    total_units = NUM_RES_BLOCKS * NUM_UNITS
+    cost_weights = loss_weights(total_units)
+    unit_idx = 0
     for bi in range(NUM_RES_BLOCKS):
         for ui in range(NUM_UNITS):
             scope_name = 'dense{}.{}/'.format(bi, ui)
-            rev_idx -= 1 
-            if cost_weights[rev_idx] > 0:
+            if cost_weights[unit_idx] > 0:
                 vcs.append(ClassificationError(\
                     wrong_tensor_name=scope_name+'incorrect_vector:0', 
                     summary_name=scope_name+'val_err'))
+            unit_idx += 1
 
     return TrainConfig(
         dataflow=dataset_train,

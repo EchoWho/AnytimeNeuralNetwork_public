@@ -156,8 +156,9 @@ class Model(ModelDesc):
                                           480000, 0.2, True)
         wd_cost = 0
         cost = 0
-        node_rev_idx = NUM_RES_BLOCKS * self.n * self.width
-        cost_weights = loss_weights(node_rev_idx) 
+        total_units = NUM_RES_BLOCKS * self.n * self.width
+        cost_weights = loss_weights(total_units)
+        unit_idx = 0
         for res_block_i in range(NUM_RES_BLOCKS):
             # {32, c_total=16}, {16, c=32}, {8, c=64}
             for k in range(self.n):
@@ -171,12 +172,10 @@ class Model(ModelDesc):
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
                 for ci, c in enumerate(l_costs):
-                    node_rev_idx -= 1
-                    cost_weight = cost_weights[node_rev_idx]
+                    cost_weight = cost_weights[unit_idx]
+                    unit_idx += 1
                     if cost_weight > 0:
                         # Uncomment to have weight only on the last layer
-                        #cost_weight = 1 if node_rev_idx == 7 else 0
-                        #cost_weight = 1.0
                         cost += cost_weight * c
                         # regularize weights from FC layers
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
@@ -221,13 +220,14 @@ def get_config():
     dataset_test = get_data('test')
 
     vcs = []
-    rev_idx = NUM_RES_BLOCKS * NUM_UNITS * WIDTH
-    weights = loss_weights(rev_idx)
+    total_units = NUM_RES_BLOCKS * NUM_UNITS * WIDTH
+    weights = loss_weights(total_units)
+    unit_idx = 0
     for bi in range(NUM_RES_BLOCKS):
         for ui in range(NUM_UNITS):
             for wi in range(WIDTH):
-                rev_idx -= 1
-                weight = weights[rev_idx]
+                weight = weights[unit_idx]
+                unit_idx += 1
                 if weight > 0:
                     scope_name = 'res{}.{:02d}.{}.eval/'.format(bi, ui, wi)
                     vcs.append(ClassificationError(\
