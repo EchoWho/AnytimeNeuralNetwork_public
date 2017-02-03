@@ -23,11 +23,11 @@ NUM_UNITS = 5
 WIDTH = 1
 INIT_CHANNEL = 16
 
-NUM_UNITS_PER_STACK=1
+OPTIMAL_AT=-1
 STOP_GRADIENTS=False
 
 def loss_weights(N):
-    return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
+    return anytime_loss.optimal_at(N, OPTIMAL_AT)
 
 class Model(ModelDesc):
 
@@ -252,8 +252,8 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
                         type=int, default=16)
-    parser.add_argument('-s', '--stack', 
-                        help='number of units per stack, i.e., number of units per prediction',
+    parser.add_argument('-o', '--optimalat', 
+                        help='Layer at which the net is optimal',
                         type=int, default=1)
     parser.add_argument('--stopgrad', help='Whether to stop gradients.',
                         type=bool, default=False)
@@ -262,11 +262,11 @@ if __name__ == '__main__':
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
-    NUM_UNITS_PER_STACK = args.stack
+    OPTIMAL_AT = args.optimalat
     STOP_GRADIENTS = args.stopgrad
     
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
+    logger.info("Parameters: n= {}, w= {}, c= {}, o= {}, stopgrad= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, OPTIMAL_AT, STOP_GRADIENTS))
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu

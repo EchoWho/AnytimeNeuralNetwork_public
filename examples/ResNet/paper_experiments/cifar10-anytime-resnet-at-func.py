@@ -23,11 +23,16 @@ NUM_UNITS = 5
 WIDTH = 1
 INIT_CHANNEL = 16
 
-NUM_UNITS_PER_STACK=1
+FUNC_TYPE=0
 STOP_GRADIENTS=False
 
 def loss_weights(N):
-    return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
+    if FUNC_TYPE == 0: # exponential spacing
+        return anytime_loss.at_func(N, func=lambda x:2**x)
+    elif FUNC_TYPE == 1: # square spacing
+        return anytime_loss.at_func(N, func=lambda x:x**2)
+    else:
+        raise NameError('func type must be either 0: exponential or 1: square')
 
 class Model(ModelDesc):
 
@@ -252,8 +257,8 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
                         type=int, default=16)
-    parser.add_argument('-s', '--stack', 
-                        help='number of units per stack, i.e., number of units per prediction',
+    parser.add_argument('-f', '--func_type', 
+                        help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
                         type=int, default=1)
     parser.add_argument('--stopgrad', help='Whether to stop gradients.',
                         type=bool, default=False)
@@ -262,11 +267,11 @@ if __name__ == '__main__':
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
-    NUM_UNITS_PER_STACK = args.stack
+    FUNC_TYPE = args.func_type
     STOP_GRADIENTS = args.stopgrad
     
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
+    logger.info("Parameters: n= {}, w= {}, c= {}, f= {}, stopgrad= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, FUNC_TYPE, STOP_GRADIENTS))
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu

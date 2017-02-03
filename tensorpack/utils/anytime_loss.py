@@ -40,7 +40,7 @@ def at_func(N, func=lambda x:x, method=sieve_loss_weights):
     i = 0
     do_append = True
     while do_append:
-        fi = func(i)
+        fi = int(func(i))
         if fi >= N:
             do_append = False
             break
