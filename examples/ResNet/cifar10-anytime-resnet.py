@@ -10,6 +10,7 @@ from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 import tensorpack.utils.anytime_loss as anytime_loss
+from tensorpack.utils import logger
 
 from tensorflow.contrib.layers import variance_scaling_initializer
 
@@ -23,6 +24,7 @@ WIDTH = 2
 INIT_CHANNEL = 16
 
 NUM_UNITS_PER_STACK=1
+STOP_GRADIENTS=False
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
@@ -153,6 +155,10 @@ class Model(ModelDesc):
                                     is_last= k==self.n-1 and res_block_i == NUM_RES_BLOCKS-1)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
+                # Stop gradients from uppper layers. 
+                if STOP_GRADIENTS:
+                    l_feats = [tf.stop_gradient(feats) for feats in l_feats]
+
                 for ci, c in enumerate(l_costs):
                     cost_weight = cost_weights[unit_idx]
                     unit_idx += 1
@@ -249,6 +255,8 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--stack', 
                         help='number of units per stack, i.e., number of units per prediction',
                         type=int, default=1)
+    parser.add_argument('--stopgrad', help='Whether to stop gradients.',
+                        type=bool, default=False)
 
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
@@ -256,6 +264,10 @@ if __name__ == '__main__':
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
     NUM_UNITS_PER_STACK = args.stack
+    STOP_GRADIENTS = args.stopgrad
+    
+    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
