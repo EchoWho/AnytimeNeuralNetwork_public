@@ -114,16 +114,20 @@ def disable_logger():
         globals()[func] = lambda x: None
 
 
-def auto_set_dir(action=None, overwrite=False):
+def auto_set_dir(log_root=None, action=None, overwrite=False, append_time=True):
     """
     Set log directory to a subdir inside "train_log", with the name being
     the main python file currently running"""
     if LOG_DIR is not None and not overwrite:
         # dir already set
         return
+    if log_root is None:
+        log_root = 'train_log'
     mod = sys.modules['__main__']
     basename = os.path.basename(mod.__file__)
+    basename = basename[:basename.rfind('.')]
+    if append_time:
+        basename += get_time_str()
     set_logger_dir(
-        os.path.join('train_log',
-                     basename[:basename.rfind('.')]),
+        os.path.join(log_root, basename),
         action=action)

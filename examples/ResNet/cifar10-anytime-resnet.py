@@ -1,6 +1,6 @@
 import numpy as np
 import argparse
-import os
+import os, sys, datetime
 
 import tensorflow as tf
 from tensorpack import *
@@ -197,7 +197,6 @@ def get_data(train_or_test):
 
 
 def get_config():
-    logger.auto_set_dir()
 
     # prepare dataset
     dataset_train = get_data('train')
@@ -262,11 +261,18 @@ if __name__ == '__main__':
     NUM_UNITS_PER_STACK = args.stack
     STOP_GRADIENTS = args.stopgrad
     
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
-
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+
+    if os.getenv('LOG_DIR') is None:
+        logger.auto_set_dir()
+    else:
+        logger.auto_set_dir(log_root = os.environ['LOG_DIR'])
+    if os.getenv('DATA_DIR') is not None:
+        os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
+
+    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
 
     config = get_config()
     if args.load:
