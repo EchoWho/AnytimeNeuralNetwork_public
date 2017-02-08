@@ -24,6 +24,7 @@ WIDTH = 1
 INIT_CHANNEL = 16
 
 NUM_UNITS_PER_STACK=1
+NUM_CLASSES=10
 STOP_GRADIENTS=False
 
 def loss_weights(N):
@@ -151,7 +152,7 @@ class Model(ModelDesc):
                     residual(scope_name, l_feats, 
                              increase_dim=(k==0 and res_block_i > 0))
                 l_logits, var_list = \
-                    row_sum_predict(scope_name, l_feats, out_dim=10, 
+                    row_sum_predict(scope_name, l_feats, out_dim=NUM_CLASSES, 
                                     is_last= k==self.n-1 and res_block_i == NUM_RES_BLOCKS-1)
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
@@ -179,7 +180,12 @@ class Model(ModelDesc):
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
-    ds = dataset.Cifar10(train_or_test)
+    if NUM_CLASSES == 10:
+        ds = dataset.Cifar10(train_or_test)
+    elif NUM_CLASSES == 100:
+        ds = dataset.Cifar100(train_or_test)
+    else:
+        raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -241,27 +247,30 @@ def get_config():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('-n', '--num_units',
                         help='number of units in each stage',
-                        type=int, default=5)
+                        type=int, default=NUM_UNITS)
     parser.add_argument('-w', '--width',
                         help='width of the network',
-                        type=int, default=1)
+                        type=int, default=WIDTH)
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
-                        type=int, default=16)
+                        type=int, default=INIT_CHANNEL)
     parser.add_argument('-s', '--stack', 
                         help='number of units per stack, i.e., number of units per prediction',
-                        type=int, default=1)
+                        type=int, default=NUM_UNITS_PER_STACK)
+    parser.add_argument('--num_classes', help='Number of classes', 
+                        type=int, default=NUM_CLASSES)
     parser.add_argument('--stopgrad', help='Whether to stop gradients.',
-                        type=bool, default=False)
+                        type=bool, default=STOP_GRADIENTS)
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
     NUM_UNITS_PER_STACK = args.stack
+    NUM_CLASSES = args.num_classes
     STOP_GRADIENTS = args.stopgrad
     
     if args.gpu:
@@ -274,8 +283,8 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(\
+        NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
 
     config = get_config()
     if args.load:
