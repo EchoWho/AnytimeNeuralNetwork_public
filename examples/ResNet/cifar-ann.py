@@ -26,6 +26,7 @@ INIT_CHANNEL = 16
 NUM_UNITS_PER_STACK=1
 NUM_CLASSES=10
 STOP_GRADIENTS=False
+STOP_GRADIENTS_PARTIAL=True
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
@@ -70,6 +71,8 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l_feats[0]
                     else:
+                        if STOP_GRADIENTS_PARTIAL:
+                            merged_feats = tf.stop_gradient(merged_feats)
                         merged_feats = tf.concat(3, [merged_feats, l_feats[w]], \
                                                  name='concat_mf')
                     mf = conv('conv1', merged_feats, out_channel, stride1)
@@ -83,6 +86,8 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l_mid_feats[0]
                     else: 
+                        if STOP_GRADIENTS_PARTIAL:
+                            merged_feats = tf.stop_gradient(merged_feats)
                         merged_feats = tf.concat(3, [merged_feats, l_mid_feats[w]], \
                                                  name='concat_ef')
                     ef = conv('conv2', merged_feats, out_channel, 1)
@@ -267,6 +272,8 @@ if __name__ == '__main__':
                         type=int, default=NUM_CLASSES)
     parser.add_argument('--stopgrad', help='Whether to stop gradients.',
                         type=bool, default=STOP_GRADIENTS)
+    parser.add_argument('--stopgradpartial', help='Whether to stop gradients for other width.',
+                        type=bool, default=STOP_GRADIENTS_PARTIAL)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
@@ -276,6 +283,7 @@ if __name__ == '__main__':
     NUM_UNITS_PER_STACK = args.stack
     NUM_CLASSES = args.num_classes
     STOP_GRADIENTS = args.stopgrad
+    STOP_GRADIENTS_PARTIAL = args.stopgradpartial
     
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -287,10 +295,10 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("On Dataset CIFAR{}, \
-                Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(\
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {},\
+                stopgrad= {}, stopgradpartial= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
-                NUM_UNITS_PER_STACK, STOP_GRADIENTS))
+                NUM_UNITS_PER_STACK, STOP_GRADIENTS, STOP_GRADIENTS_PARTIAL))
 
     config = get_config()
     if args.load:
