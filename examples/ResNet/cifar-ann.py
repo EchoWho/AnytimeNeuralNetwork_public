@@ -21,7 +21,9 @@ WIDTH = 1
 INIT_CHANNEL = 16
 
 NUM_UNITS_PER_STACK=1
+NUM_CLASSES=10
 STOP_GRADIENTS=False
+STOP_GRADIENTS_PARTIAL=True
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
@@ -44,9 +46,10 @@ class Model(ModelDesc):
 
         def conv(name, l, channel, stride):
             kernel = 3
+            stddev = np.sqrt(2.0/kernel/kernel/channel)
             return Conv2D(name, l, channel, kernel, stride=stride,
                           nl=tf.identity, use_bias=False,
-                          W_init=tf.random_normal_initializer(stddev=np.sqrt(2.0/kernel/kernel/channel)))
+                          W_init=tf.random_normal_initializer(stddev=stddev))
 
         def residual(name, l_feats, increase_dim=False):
             shape = l_feats[0].get_shape().as_list()
@@ -65,7 +68,10 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l_feats[0]
                     else:
-                        merged_feats = tf.concat(3, [merged_feats, l_feats[w]], name='concat_mf')
+                        if STOP_GRADIENTS_PARTIAL:
+                            merged_feats = tf.stop_gradient(merged_feats)
+                        merged_feats = tf.concat(3, [merged_feats, l_feats[w]], \
+                                                 name='concat_mf')
                     mf = conv('conv1', merged_feats, out_channel, stride1)
                     mf = BatchNorm('bn1', mf)
                     mf = tf.nn.relu(mf)
@@ -77,7 +83,10 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l_mid_feats[0]
                     else: 
-                        merged_feats = tf.concat(3, [merged_feats, l_mid_feats[w]], name='concat_ef')
+                        if STOP_GRADIENTS_PARTIAL:
+                            merged_feats = tf.stop_gradient(merged_feats)
+                        merged_feats = tf.concat(3, [merged_feats, l_mid_feats[w]], \
+                                                 name='concat_ef')
                     ef = conv('conv2', merged_feats, out_channel, 1)
                     ef = BatchNorm('bn2', ef)
                     l = l_feats[w]
@@ -90,7 +99,7 @@ class Model(ModelDesc):
                     l_end_feats.append(ef)
             return l_end_feats
 
-        def row_sum_predict(name, l_feats, out_dim, is_last):
+        def row_sum_predict(name, l_feats, out_dim):
             l_logits = []
             var_list = []
             for w in range(self.width):
@@ -101,7 +110,8 @@ class Model(ModelDesc):
                         merged_feats = l
                     else:
                         merged_feats = tf.concat(1, [merged_feats, l], name='concat')
-                    logits, vl = FullyConnected('linear', merged_feats, out_dim, nl=tf.identity, return_vars=True)
+                    logits, vl = FullyConnected('linear', merged_feats, out_dim, \
+                                                nl=tf.identity, return_vars=True)
                     var_list.extend(vl)
                     #if w != 0:
                     #    logits += l_logits[-1]
@@ -147,9 +157,7 @@ class Model(ModelDesc):
                 l_feats = \
                     residual(scope_name, l_feats, 
                              increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = \
-                    row_sum_predict(scope_name, l_feats, out_dim=10, 
-                                    is_last= k==self.n-1 and res_block_i == NUM_RES_BLOCKS-1)
+                l_logits, var_list = row_sum_predict(scope_name, l_feats, NUM_CLASSES) 
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
                 # Stop gradients from uppper layers. 
@@ -161,13 +169,14 @@ class Model(ModelDesc):
                     unit_idx += 1
                     if cost_weight > 0:
                         cost += cost_weight * c
-                        # regularize weights from FC layers
-                        # Should use regularize_cost to get the weights using variable names
+                        # Regularize weights from FC layers. Should use 
+                        # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
 
 
         # weight decay on all W on conv layers
-        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), name='wd_cost')
+        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
+                         name='wd_cost')
         add_moving_summary(cost, wd_cost)
 
         add_param_summary(('.*/W', ['histogram']))   # monitor W
@@ -176,7 +185,12 @@ class Model(ModelDesc):
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
-    ds = dataset.Cifar10(train_or_test)
+    if NUM_CLASSES == 10:
+        ds = dataset.Cifar10(train_or_test)
+    elif NUM_CLASSES == 100:
+        ds = dataset.Cifar100(train_or_test)
+    else:
+        raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -228,38 +242,45 @@ def get_config():
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
+                                      [(1, 0.1), (82, 0.01), (123, 0.001), (225, 0.0002)])
         ],
         model=Model(n=NUM_UNITS,width=WIDTH,init_channel=INIT_CHANNEL),
         steps_per_epoch=steps_per_epoch,
-        max_epoch=400,
+        max_epoch=300,
     )
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('-n', '--num_units',
                         help='number of units in each stage',
-                        type=int, default=5)
+                        type=int, default=NUM_UNITS)
     parser.add_argument('-w', '--width',
                         help='width of the network',
-                        type=int, default=1)
+                        type=int, default=WIDTH)
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
-                        type=int, default=16)
+                        type=int, default=INIT_CHANNEL)
     parser.add_argument('-s', '--stack', 
-                        help='number of units per stack, i.e., number of units per prediction',
-                        type=int, default=1)
+                        help='number of units per stack, \
+                              i.e., number of units per prediction',
+                        type=int, default=NUM_UNITS_PER_STACK)
+    parser.add_argument('--num_classes', help='Number of classes', 
+                        type=int, default=NUM_CLASSES)
     parser.add_argument('--stopgrad', help='Whether to stop gradients.',
-                        type=bool, default=False)
+                        type=bool, default=STOP_GRADIENTS)
+    parser.add_argument('--stopgradpartial', help='Whether to stop gradients for other width.',
+                        type=bool, default=STOP_GRADIENTS_PARTIAL)
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
     NUM_UNITS_PER_STACK = args.stack
+    NUM_CLASSES = args.num_classes
     STOP_GRADIENTS = args.stopgrad
+    STOP_GRADIENTS_PARTIAL = args.stopgradpartial
     
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -271,8 +292,10 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {},\
+                stopgrad= {}, stopgradpartial= {}".format(\
+                NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
+                NUM_UNITS_PER_STACK, STOP_GRADIENTS, STOP_GRADIENTS_PARTIAL))
 
     config = get_config()
     if args.load:
