@@ -9,6 +9,7 @@
 
 DATA_DIR=NONE
 LOG_DIR=NONE
+CONFIG_DIR=NONE
 
 # Parsing command line arguments:
 while [[ $# > 0 ]]
@@ -21,10 +22,15 @@ case $key in
     echo "Options:"
     echo "  -d|--data-dir <path> - directory path to input data (default NONE)"
     echo "  -l|--log-dir <path> - directory path to save the log files (default NONE)"
+    echo "  -p|--config-file-dir <path> - directory path to config file directory (default NONE)"
     exit 1
     ;;
     -d|--data-dir)
     DATA_DIR="$2"
+    shift # pass argument
+    ;;
+    -p|--config-file-dir)
+    CONFIG_DIR="$2"
     shift # pass argument
     ;;
     -l|--log-dir)
@@ -40,15 +46,13 @@ done
 # Prints out the arguments that were passed into the script
 echo "DATA_DIR=$DATA_DIR"
 echo "LOG_DIR=$LOG_DIR"
+echo "CONFIG_DIR=$CONFIG_DIR"
 
 # Run training on philly
 
-# First get the full path to the directory that houses the config file
-DIRECTORY=$ (dirname "${CONFIG_FILE}")
-
 # Add the root folder of the code to the PYTHONPATH
-export PYTHONPATH=$PYTHONPATH:$DIRECTORY
+export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $DIRECTORY/examples/ResNet/cifar10-anytime-resnet.py \
+python $CONFIG_DIR/examples/ResNet/cifar10-anytime-resnet.py \
 --stopgrad True
