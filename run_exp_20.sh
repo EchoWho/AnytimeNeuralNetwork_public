@@ -54,5 +54,5 @@ echo "CONFIG_DIR=$CONFIG_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar10-anytime-resnet-at-func.py \
--f=0
+python $CONFIG_DIR/examples/ResNet/cifar-ann.py \
+-w=10
