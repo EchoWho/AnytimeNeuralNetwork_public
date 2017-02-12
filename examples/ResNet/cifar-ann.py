@@ -14,7 +14,7 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 """
 """
 
-BATCH_SIZE = 128
+BATCH_SIZE = 100
 NUM_RES_BLOCKS = 3
 NUM_UNITS = 5
 WIDTH = 1
@@ -23,7 +23,7 @@ INIT_CHANNEL = 16
 NUM_UNITS_PER_STACK=1
 NUM_CLASSES=10
 STOP_GRADIENTS=False
-STOP_GRADIENTS_PARTIAL=True
+STOP_GRADIENTS_PARTIAL=False
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
