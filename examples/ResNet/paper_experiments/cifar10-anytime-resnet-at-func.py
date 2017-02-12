@@ -281,8 +281,8 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, batch_size={}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS))
+    logger.info("Parameters: n= {}, w= {}, c= {}, batch_size={}, stopgrad= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, BATCH_SIZE, STOP_GRADIENTS))
 
     config = get_config()
     if args.load:
