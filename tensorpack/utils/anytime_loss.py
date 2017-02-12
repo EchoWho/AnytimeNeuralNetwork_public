@@ -32,7 +32,11 @@ def exponential_weights(N, base=2.0):
     weights[0] = 1.0
     for i in range(1,N):
         weights[i] = weights[i-1] * base
-    weights /= weights[-1] / int(np.log2(N))
+    if base >= 1.0:
+        max_val = weights[-1]
+    else:
+        max_val = weights[0]
+    weights /= max_val / int(np.log2(N))
     return weights
 
 def at_func(N, func=lambda x:x, method=sieve_loss_weights):
