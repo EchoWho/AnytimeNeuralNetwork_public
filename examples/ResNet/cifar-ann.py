@@ -14,7 +14,7 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 """
 """
 
-BATCH_SIZE = 100
+BATCH_SIZE = 64
 NUM_RES_BLOCKS = 3
 NUM_UNITS = 5
 WIDTH = 1
