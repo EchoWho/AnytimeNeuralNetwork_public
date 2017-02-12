@@ -55,4 +55,5 @@ export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
 python $CONFIG_DIR/examples/ResNet/cifar-ann.py \
--w=10
+-w=10 \
+--batch_size=64
