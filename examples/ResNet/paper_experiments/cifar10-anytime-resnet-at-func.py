@@ -198,7 +198,7 @@ def get_data(train_or_test):
             imgaug.MapImage(lambda x: x - pp_mean)
         ]
     ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, 128, remainder=not isTrain)
+    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchData(ds, 3, 2)
     return ds
@@ -246,6 +246,8 @@ def get_config():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
+    parser.add_argument('--batch_size', help='Batch size for train/testing', 
+                        type=int, default=BATCH_SIZE)
     parser.add_argument('-n', '--num_units',
                         help='number of units in each stage',
                         type=int, default=5)
@@ -262,6 +264,7 @@ if __name__ == '__main__':
                         type=bool, default=False)
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
+    BATCH_SIZE = args.batch_size
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
@@ -278,8 +281,8 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("Parameters: n= {}, w= {}, c= {}, s= {}, stopgrad= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, NUM_UNITS_PER_STACK, STOP_GRADIENTS))
+    logger.info("Parameters: n= {}, w= {}, c= {}, batch_size={}, stopgrad= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, BATCH_SIZE, STOP_GRADIENTS))
 
     config = get_config()
     if args.load:

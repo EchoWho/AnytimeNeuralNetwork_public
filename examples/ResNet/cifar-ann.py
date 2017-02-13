@@ -23,7 +23,7 @@ INIT_CHANNEL = 16
 NUM_UNITS_PER_STACK=1
 NUM_CLASSES=10
 STOP_GRADIENTS=False
-STOP_GRADIENTS_PARTIAL=True
+STOP_GRADIENTS_PARTIAL=False
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
@@ -204,7 +204,7 @@ def get_data(train_or_test):
             imgaug.MapImage(lambda x: x - pp_mean)
         ]
     ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, 128, remainder=not isTrain)
+    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchData(ds, 3, 2)
     return ds
@@ -252,6 +252,8 @@ def get_config():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--batch_size', help='Batch size for train/testing', 
+                        type=int, default=BATCH_SIZE)
     parser.add_argument('-n', '--num_units',
                         help='number of units in each stage',
                         type=int, default=NUM_UNITS)
@@ -274,6 +276,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
+    BATCH_SIZE = args.batch_size
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
@@ -292,10 +295,9 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {},\
-                stopgrad= {}, stopgradpartial= {}".format(\
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
-                NUM_UNITS_PER_STACK, STOP_GRADIENTS, STOP_GRADIENTS_PARTIAL))
+                NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, STOP_GRADIENTS_PARTIAL))
 
     config = get_config()
     if args.load:
