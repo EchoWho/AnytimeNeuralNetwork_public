@@ -65,37 +65,38 @@ class Model(ModelDesc):
             l_mid_feats = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.mid') as scope:
+                    l = BatchNorm('bn0', l_feats[w])
+                    # The first round doesn't use relu per pyramidial deep net
+                    # l = tf.nn.relu(l)
                     if w == 0:
-                        merged_feats = l_feats[0]
+                        merged_feats = l
                     else:
                         if STOP_GRADIENTS_PARTIAL:
                             merged_feats = tf.stop_gradient(merged_feats)
-                        merged_feats = tf.concat(3, [merged_feats, l_feats[w]], \
-                                                 name='concat_mf')
-                    mf = conv('conv1', merged_feats, out_channel, stride1)
-                    mf = BatchNorm('bn1', mf)
-                    mf = tf.nn.relu(mf)
-                    l_mid_feats.append(mf)
+                        merged_feats = tf.concat(3, [merged_feats, l], name='concat_mf')
+                    l = conv('conv1', merged_feats, out_channel, stride1)
+                    l = BatchNorm('bn1', l)
+                    l = tf.nn.relu(l)
+                    l_mid_feats.append(l)
 
             l_end_feats = []
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.end') as scope:
+                    l = l_mid_feats[w]
                     if w == 0:
-                        merged_feats = l_mid_feats[0]
+                        merged_feats = l
                     else: 
                         if STOP_GRADIENTS_PARTIAL:
                             merged_feats = tf.stop_gradient(merged_feats)
-                        merged_feats = tf.concat(3, [merged_feats, l_mid_feats[w]], \
-                                                 name='concat_ef')
+                        merged_feats = tf.concat(3, [merged_feats, l], name='concat_ef')
                     ef = conv('conv2', merged_feats, out_channel, 1)
+                    # The second conv need to be BN before addition.
                     ef = BatchNorm('bn2', ef)
                     l = l_feats[w]
                     if increase_dim:
                         l = AvgPooling('pool', l, 2)
                         l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
                     ef += l
-                    # Uncomment to turn on the final relu at each resnet block
-                    #ef = tf.nn.relu(ef)
                     l_end_feats.append(ef)
             return l_end_feats
 
@@ -140,8 +141,8 @@ class Model(ModelDesc):
         for w in range(self.width):
             with tf.variable_scope('init_conv'+str(w)) as scope:
                 l = conv('conv0', image, self.init_channel, 1) 
-                l = BatchNorm('bn0', l)
-                l = tf.nn.relu(l)
+                #l = BatchNorm('bn0', l)
+                #l = tf.nn.relu(l)
                 l_feats.append(l)
 
         wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
