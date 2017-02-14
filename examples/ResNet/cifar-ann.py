@@ -19,22 +19,25 @@ NUM_RES_BLOCKS = 3
 NUM_UNITS = 5
 WIDTH = 1
 INIT_CHANNEL = 16
+NUM_CLASSES=10
 
 NUM_UNITS_PER_STACK=1
-NUM_CLASSES=10
 STOP_GRADIENTS=False
 STOP_GRADIENTS_PARTIAL=False
+SG_GAMMA = 0.3
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
 
 class Model(ModelDesc):
 
-    def __init__(self, n, width, init_channel):
+    def __init__(self, n, width, init_channel, num_classes, weights):
         super(Model, self).__init__()
         self.n = n
         self.width = width
         self.init_channel = init_channel
+        self.num_classes = num_classes
+        self.weights = weights
 
     def _get_inputs(self):
         return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
@@ -71,8 +74,6 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l
                     else:
-                        if STOP_GRADIENTS_PARTIAL:
-                            merged_feats = tf.stop_gradient(merged_feats)
                         merged_feats = tf.concat(3, [merged_feats, l], name='concat_mf')
                     l = conv('conv1', merged_feats, out_channel, stride1)
                     l = BatchNorm('bn1', l)
@@ -86,8 +87,6 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l
                     else: 
-                        if STOP_GRADIENTS_PARTIAL:
-                            merged_feats = tf.stop_gradient(merged_feats)
                         merged_feats = tf.concat(3, [merged_feats, l], name='concat_ef')
                     ef = conv('conv2', merged_feats, out_channel, 1)
                     # The second conv need to be BN before addition.
@@ -149,8 +148,6 @@ class Model(ModelDesc):
                                           480000, 0.2, True)
         wd_cost = 0
         cost = 0
-        total_units = NUM_RES_BLOCKS * self.n * self.width
-        cost_weights = loss_weights(total_units)
         unit_idx = 0
         for res_block_i in range(NUM_RES_BLOCKS):
             for k in range(self.n):
@@ -158,21 +155,22 @@ class Model(ModelDesc):
                 l_feats = \
                     residual(scope_name, l_feats, 
                              increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = row_sum_predict(scope_name, l_feats, NUM_CLASSES) 
+                l_logits, var_list = row_sum_predict(scope_name, l_feats, self.num_classes) 
                 l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
-                # Stop gradients from uppper layers. 
-                if STOP_GRADIENTS:
-                    l_feats = [tf.stop_gradient(feats) for feats in l_feats]
-
+                is_last_row = res_block_i == NUM_RES_BLOCKS-1 and k==self.n-1
                 for ci, c in enumerate(l_costs):
-                    cost_weight = cost_weights[unit_idx]
+                    cost_weight = self.weights[unit_idx]
                     unit_idx += 1
                     if cost_weight > 0:
                         cost += cost_weight * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
+                        if STOP_GRADIENTS_PARTIAL and not is_last_row: 
+                            l = l_feats[ci]
+                            l = (1 - SG_GAMMA) * tf.stop_gradient(l) + SG_GAMMA * l
+                            l_feats[ci] = l
 
 
         # weight decay on all W on conv layers
@@ -233,7 +231,7 @@ def get_config():
                         wrong_tensor_name=scope_name+'incorrect_vector:0', 
                         summary_name=scope_name+'val_err'))
 
-
+    logger.info('weights: {}'.format(weights))
     lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
@@ -243,9 +241,9 @@ def get_config():
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (225, 0.0002)])
+                                      [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)])
         ],
-        model=Model(n=NUM_UNITS,width=WIDTH,init_channel=INIT_CHANNEL),
+        model=Model(NUM_UNITS,WIDTH,INIT_CHANNEL,NUM_CLASSES,weights),
         steps_per_epoch=steps_per_epoch,
         max_epoch=300,
     )
@@ -274,6 +272,8 @@ if __name__ == '__main__':
                         type=bool, default=STOP_GRADIENTS)
     parser.add_argument('--stopgradpartial', help='Whether to stop gradients for other width.',
                         type=bool, default=STOP_GRADIENTS_PARTIAL)
+    parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
+                        type=np.float32, default=SG_GAMMA)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
@@ -285,6 +285,10 @@ if __name__ == '__main__':
     NUM_CLASSES = args.num_classes
     STOP_GRADIENTS = args.stopgrad
     STOP_GRADIENTS_PARTIAL = args.stopgradpartial
+    SG_GAMMA = args.sg_gamma
+    if STOP_GRADIENTS:
+        STOP_GRADIENTS_PARTIAL = True
+        SG_GAMMA = 0.0
     
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -296,9 +300,10 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}".format(\
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
-                NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, STOP_GRADIENTS_PARTIAL))
+                NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
+                STOP_GRADIENTS_PARTIAL, SG_GAMMA))
 
     config = get_config()
     if args.load:
