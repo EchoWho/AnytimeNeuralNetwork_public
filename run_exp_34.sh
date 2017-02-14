@@ -55,6 +55,7 @@ export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
 python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar10-anytime-resnet-optimal.py \
--w=10 \
+-w=5 \
+-c=32 \
 -n=9 \
 --batch_size=64
