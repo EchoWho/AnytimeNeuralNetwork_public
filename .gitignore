@@ -1,6 +1,7 @@
 *.gz
 *.npy
 train_log
+what_is_running
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
