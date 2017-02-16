@@ -54,8 +54,9 @@ echo "CONFIG_DIR=$CONFIG_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar10-anytime-resnet-optimal.py \
--w=10 \
--c=16 \
+python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar-ann-paper-exp.py \
+-f=2 \
+-c=160 \
 -n=9 \
+--num_classes=100 \
 --batch_size=64
