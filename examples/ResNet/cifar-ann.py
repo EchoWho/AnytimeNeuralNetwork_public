@@ -22,6 +22,9 @@ INIT_CHANNEL = 16
 NUM_CLASSES=10
 
 NUM_UNITS_PER_STACK=1
+
+RAND_WEIGHT=False
+
 STOP_GRADIENTS=False
 STOP_GRADIENTS_PARTIAL=False
 SG_GAMMA = 0.3
@@ -163,7 +166,12 @@ class Model(ModelDesc):
                     cost_weight = self.weights[unit_idx]
                     unit_idx += 1
                     if cost_weight > 0:
-                        cost += cost_weight * c
+                        rand_weight = 0
+                        if RAND_WEIGHT:
+                            prob = 1.0 / len(self.weights)
+                            do_rand_weight = tf.multinomial(tf.log([[1-prob, prob]]), 1)[0][0]
+                            rand_weight = self.weights[-1] * tf.to_float(do_rand_weight)
+                        cost += (cost_weight + rand_weight) * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
