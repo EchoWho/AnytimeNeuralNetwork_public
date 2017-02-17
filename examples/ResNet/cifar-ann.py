@@ -205,7 +205,10 @@ class Model(ModelDesc):
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
                                                name='l2_grad_{}'.format(anytime_idx))
                             add_moving_summary(reward)
-                        cost += (1.0 / (SUM_RAND_RATIO + 1)) * (SUM_RAND_RATIO * cost_weight + add_weight) * c
+                        if RAND_WEIGHT or EXP3_WEIGHT: 
+                            cost += (1.0 / (SUM_RAND_RATIO + 1)) * (SUM_RAND_RATIO * cost_weight + add_weight) * c
+                        else 
+                            cost += cost_weight * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
