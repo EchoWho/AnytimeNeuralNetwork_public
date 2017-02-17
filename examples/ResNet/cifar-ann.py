@@ -317,7 +317,7 @@ if __name__ == '__main__':
                         type=int, default=0)
     parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
                         type=np.float32, default=EXP3_GAMMA)
-    parser.add_argument('--track_grad', help='Whether to track gradient l2 of each loss',
+    parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
                         type=bool, default=TRACK_GRADIENTS)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
