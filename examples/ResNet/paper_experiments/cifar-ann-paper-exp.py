@@ -1,6 +1,9 @@
+#!/usr/bin/env python
+# -*- coding: UTF-8 -*-
+
 import numpy as np
 import argparse
-import os, sys, datetime
+import os
 
 import tensorflow as tf
 from tensorpack import *
@@ -13,24 +16,25 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 """
+#import imp
+#dir_name = os.path.dirname(__file__)
+#cifar_example = imp.load_source('cifar_example',
+#                                os.path.join(dir_name[:dir_name.rfind('/')], 'cifar-ann.py'))
+#Model = cifar_example.Model
 
 BATCH_SIZE = 128
 NUM_RES_BLOCKS = 3
 NUM_UNITS = 5
 WIDTH = 1
 INIT_CHANNEL = 16
-NUM_CLASSES=10
+NUM_CLASSES = 10
 
-NUM_UNITS_PER_STACK=1
-
-RAND_WEIGHT=False
+FUNC_TYPE=2
+OPTIMAL_AT=-1
+EXP_BASE=2.0
 
 STOP_GRADIENTS=False
 STOP_GRADIENTS_PARTIAL=False
-SG_GAMMA = 0.3
-
-def loss_weights(N):
-    return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
 
 class Model(ModelDesc):
 
@@ -166,12 +170,7 @@ class Model(ModelDesc):
                     cost_weight = self.weights[unit_idx]
                     unit_idx += 1
                     if cost_weight > 0:
-                        rand_weight = 0
-                        if RAND_WEIGHT:
-                            prob = 1.0 / len(self.weights)
-                            do_rand_weight = tf.multinomial(tf.log([[1-prob, prob]]), 1)[0][0]
-                            rand_weight = self.weights[-1] * tf.to_float(do_rand_weight)
-                        cost += (cost_weight + rand_weight) * c
+                        cost += cost_weight * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
@@ -189,6 +188,23 @@ class Model(ModelDesc):
         add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([cost, wd_cost], name='cost')
 
+
+def loss_weights(N):
+    if FUNC_TYPE == 0: # exponential spacing
+        return anytime_loss.at_func(N, func=lambda x:2**x)
+    elif FUNC_TYPE == 1: # square spacing
+        return anytime_loss.at_func(N, func=lambda x:x**2)
+    elif FUNC_TYPE == 2: #optimal at ?
+        return anytime_loss.optimal_at(N, OPTIMAL_AT)
+    elif FUNC_TYPE == 3: #exponential weights
+        return anytime_loss.exponential_weights(N, base=EXP_BASE)
+    elif FUNC_TYPE == 4: #constant weights
+        return anytime_loss.constant_weights(N) 
+    elif FUNC_TYPE == 5: # sieve
+        return anytime_loss.sieve_loss_weights(N)
+    else:
+        raise NameError('func type must be either 0: exponential or 1: square\
+            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -216,9 +232,7 @@ def get_data(train_or_test):
         ds = PrefetchData(ds, 3, 2)
     return ds
 
-
 def get_config():
-
     # prepare dataset
     dataset_train = get_data('train')
     steps_per_epoch = dataset_train.size()
@@ -259,6 +273,7 @@ def get_config():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=BATCH_SIZE)
     parser.add_argument('-n', '--num_units',
@@ -270,34 +285,26 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
                         type=int, default=INIT_CHANNEL)
-    parser.add_argument('-s', '--stack', 
-                        help='number of units per stack, \
-                              i.e., number of units per prediction',
-                        type=int, default=NUM_UNITS_PER_STACK)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=NUM_CLASSES)
-    parser.add_argument('--stopgrad', help='Whether to stop gradients.',
-                        type=bool, default=STOP_GRADIENTS)
-    parser.add_argument('--stopgradpartial', help='Whether to stop gradients for other width.',
-                        type=bool, default=STOP_GRADIENTS_PARTIAL)
-    parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
-                        type=np.float32, default=SG_GAMMA)
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
+    parser.add_argument('--base', 
+                        help='Exponential base',
+                        type=np.float32, default=EXP_BASE)
+    parser.add_argument('--opt_at', help='Optimal at', type=int, default=OPTIMAL_AT)
+    parser.add_argument('-f', '--func_type', 
+                        help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
+                        type=int, default=0)
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     BATCH_SIZE = args.batch_size
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
-    NUM_UNITS_PER_STACK = args.stack
+    FUNC_TYPE = args.func_type
     NUM_CLASSES = args.num_classes
-    STOP_GRADIENTS = args.stopgrad
-    STOP_GRADIENTS_PARTIAL = args.stopgradpartial
-    SG_GAMMA = args.sg_gamma
-    if STOP_GRADIENTS:
-        STOP_GRADIENTS_PARTIAL = True
-        SG_GAMMA = 0.0
-    
+    OPTIMAL_AT = args.opt_at
+    EXP_BASE = args.base
+
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
@@ -308,10 +315,8 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}".format(\
-                NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
-                NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
-                STOP_GRADIENTS_PARTIAL, SG_GAMMA))
+    logger.info("Parameters: n= {}, w= {}, c= {}, batch_size={}, -f= {}, -b= {}, --opt_at= {}".format(NUM_UNITS,\
+        WIDTH, INIT_CHANNEL, BATCH_SIZE, FUNC_TYPE, EXP_BASE, OPTIMAL_AT))
 
     config = get_config()
     if args.load:
