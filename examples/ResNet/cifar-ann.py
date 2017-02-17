@@ -6,7 +6,8 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-import tensorpack.utils.anytime_loss as anytime_loss
+from tensorpack.models import Exp3 
+from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 
 from tensorflow.contrib.layers import variance_scaling_initializer
@@ -14,6 +15,7 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 """
 """
 
+# Network structure
 BATCH_SIZE = 128
 NUM_RES_BLOCKS = 3
 NUM_UNITS = 5
@@ -21,13 +23,22 @@ WIDTH = 1
 INIT_CHANNEL = 16
 NUM_CLASSES=10
 
+# anytime loss skip (num units per stack/prediction)
 NUM_UNITS_PER_STACK=1
 
+# Random loss sample params
 RAND_WEIGHT=False
+EXP3_WEIGHT=False
+WM_WEIGHT=False
+EXP3_GAMMA=0.1
+SUM_RAND_RATIO=2.0
 
+# Stop gradients params
 STOP_GRADIENTS=False
 STOP_GRADIENTS_PARTIAL=False
 SG_GAMMA = 0.3
+
+TRACK_GRADIENTS=False
 
 def loss_weights(N):
     return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
@@ -139,6 +150,14 @@ class Model(ModelDesc):
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
+        if EXP3_WEIGHT:
+            ls_K = np.sum(np.asarray(self.weights) > 0)
+            loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA)
+            ls_i, ls_p = loss_selector.sample()
+            for i in range(ls_K):
+                weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
+                add_moving_summary(weight_i)
+
         l_feats = [] 
         for w in range(self.width):
             with tf.variable_scope('init_conv'+str(w)) as scope:
@@ -152,6 +171,7 @@ class Model(ModelDesc):
         wd_cost = 0
         cost = 0
         unit_idx = 0
+        anytime_idx = 0
         for res_block_i in range(NUM_RES_BLOCKS):
             for k in range(self.n):
                 scope_name = 'res{}.{:02d}'.format(res_block_i, k)
@@ -166,12 +186,29 @@ class Model(ModelDesc):
                     cost_weight = self.weights[unit_idx]
                     unit_idx += 1
                     if cost_weight > 0:
-                        rand_weight = 0
+                        anytime_idx += 1
+                        add_weight = 0
                         if RAND_WEIGHT:
                             prob = 1.0 / len(self.weights)
                             do_rand_weight = tf.multinomial(tf.log([[1-prob, prob]]), 1)[0][0]
-                            rand_weight = self.weights[-1] * tf.to_float(do_rand_weight)
-                        cost += (cost_weight + rand_weight) * c
+                            add_weight = 2 * self.weights[-1] * tf.to_float(do_rand_weight)
+                        elif EXP3_WEIGHT:
+                            def rand_weight_and_update_ls(loss=c):
+                                gs = tf.gradients(loss, tf.trainable_variables()) 
+                                reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                                loss_selector.update(ls_i, ls_p, reward)
+                                return tf.constant(self.weights[-1] * 2, dtype=tf.float32)
+                            add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
+                                rand_weight_and_update_ls, lambda: tf.zeros(()))
+                        if WM_WEIGHT or TRACK_GRADIENTS:
+                            gs = tf.gradients(c, tf.trainable_variables())
+                            reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
+                                               name='l2_grad_{}'.format(anytime_idx))
+                            add_moving_summary(reward)
+                        if RAND_WEIGHT or EXP3_WEIGHT: 
+                            cost += (1.0 / (SUM_RAND_RATIO + 1)) * (SUM_RAND_RATIO * cost_weight + add_weight) * c
+                        else: 
+                            cost += cost_weight * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
@@ -179,7 +216,10 @@ class Model(ModelDesc):
                             l = l_feats[ci]
                             l = (1 - SG_GAMMA) * tf.stop_gradient(l) + SG_GAMMA * l
                             l_feats[ci] = l
-
+                    #endif cost_weight > 0
+                #endfor each width
+            #endfor each n
+        # endfor each block
 
         # weight decay on all W on conv layers
         wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
@@ -218,7 +258,6 @@ def get_data(train_or_test):
 
 
 def get_config():
-
     # prepare dataset
     dataset_train = get_data('train')
     steps_per_epoch = dataset_train.size()
@@ -282,6 +321,14 @@ if __name__ == '__main__':
                         type=bool, default=STOP_GRADIENTS_PARTIAL)
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
                         type=np.float32, default=SG_GAMMA)
+    parser.add_argument('--samloss', help='Sample losses to update',
+                        type=int, default=0)
+    parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
+                        type=np.float32, default=EXP3_GAMMA)
+    parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
+                        type=np.float32, default=SUM_RAND_RATIO)
+    parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
+                        type=bool, default=TRACK_GRADIENTS)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
@@ -294,9 +341,18 @@ if __name__ == '__main__':
     STOP_GRADIENTS = args.stopgrad
     STOP_GRADIENTS_PARTIAL = args.stopgradpartial
     SG_GAMMA = args.sg_gamma
+    EXP3_GAMMA = args.exp_gamma
+    SUM_RAND_RATIO = args.sum_rand_ratio
+    TRACK_GRADIENTS = args.track_grads
+
     if STOP_GRADIENTS:
         STOP_GRADIENTS_PARTIAL = True
         SG_GAMMA = 0.0
+
+    if args.samloss == 1:
+        RAND_WEIGHT = True
+    elif args.samloss == 2:
+        EXP3_WEIGHT = True
     
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
@@ -308,10 +364,11 @@ if __name__ == '__main__':
     if os.getenv('DATA_DIR') is not None:
         os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}".format(\
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
                 NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
-                STOP_GRADIENTS_PARTIAL, SG_GAMMA))
+                STOP_GRADIENTS_PARTIAL, SG_GAMMA, \
+                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO))
 
     config = get_config()
     if args.load:
