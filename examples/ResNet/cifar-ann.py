@@ -207,7 +207,7 @@ class Model(ModelDesc):
                             add_moving_summary(reward)
                         if RAND_WEIGHT or EXP3_WEIGHT: 
                             cost += (1.0 / (SUM_RAND_RATIO + 1)) * (SUM_RAND_RATIO * cost_weight + add_weight) * c
-                        else 
+                        else: 
                             cost += cost_weight * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
