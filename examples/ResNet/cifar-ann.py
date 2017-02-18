@@ -9,6 +9,7 @@ from tensorpack.tfutils.summary import *
 from tensorpack.models import Exp3 
 from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
+from tensorpack.utils import utils
 
 from tensorflow.contrib.layers import variance_scaling_initializer
 
@@ -203,12 +204,9 @@ class Model(ModelDesc):
                         if WM_WEIGHT or TRACK_GRADIENTS:
                             gs = tf.gradients(c, tf.trainable_variables())
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
-                                               name='l2_grad_{}'.format(anytime_idx))
+                                               name='l2_grad_{}'.format(anytime_idx-1))
                             add_moving_summary(reward)
-                        if RAND_WEIGHT or EXP3_WEIGHT: 
-                            cost += (1.0 / (SUM_RAND_RATIO + 1)) * (SUM_RAND_RATIO * cost_weight + add_weight) * c
-                        else: 
-                            cost += cost_weight * c
+                        cost += (cost_weight + add_weight / SUM_RAND_RATIO) * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
@@ -298,6 +296,10 @@ def get_config():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--log_dir', help='log_dir position',
+                        type=str, default=None)
+    parser.add_argument('--data_dir', help='data_dir position',
+                        type=str, default=None)
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=BATCH_SIZE)
     parser.add_argument('-n', '--num_units',
@@ -357,12 +359,8 @@ if __name__ == '__main__':
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-    if os.getenv('LOG_DIR') is None:
-        logger.auto_set_dir()
-    else:
-        logger.auto_set_dir(log_root = os.environ['LOG_DIR'])
-    if os.getenv('DATA_DIR') is not None:
-        os.environ['TENSORPACK_DATASET'] = os.environ['DATA_DIR']
+    logger.auto_set_dir(log_root=args.log_dir)
+    utils.set_dataset_path(path=args.data_dir, auto_download=False)
 
     logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
