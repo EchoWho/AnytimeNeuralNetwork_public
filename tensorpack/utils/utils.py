@@ -78,6 +78,15 @@ def execute_only_once():
     _EXECUTE_HISTORY.add(ident)
     return True
 
+global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
+TENSORPACK_DATASET = None
+DATASET_AUTO_DOWNLOAD=False
+
+def set_dataset_path(path, auto_download=False):
+    global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
+    assert os.path.isdir(path)
+    TENSORPACK_DATASET = path
+    DATASET_AUTO_DOWNLOAD=auto_download
 
 def get_dataset_path(*args):
     """
@@ -90,6 +99,8 @@ def get_dataset_path(*args):
         str: path to the dataset.
     """
     d = os.environ.get('TENSORPACK_DATASET', None)
+    if TENSORPACK_DATASET is not None:
+        d = TENSORPACK_DATASET
     if d is None:
         d = os.path.abspath(os.path.join(
             os.path.dirname(__file__), '..', 'dataflow', 'dataset'))
