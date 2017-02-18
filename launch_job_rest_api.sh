@@ -3,8 +3,8 @@
 USERNAME="dedey"
 PASSWORD="Yoga2god?"
 CLUSTER="gcr"
-JOBSCRIPT="run_exp_30.sh"
-SPECIAL_NAME="_rerun"
+JOBSCRIPT="run_exp_107.sh"
+SPECIAL_NAME="_ann"
 
 VC="pnrsy"
 CMD="https://philly/api/submit?"
