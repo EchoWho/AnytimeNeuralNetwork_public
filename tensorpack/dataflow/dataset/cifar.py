@@ -12,6 +12,7 @@ from six.moves import range
 import copy
 
 from ...utils import logger, get_dataset_path
+from ...utils.utils import DATASET_AUTO_DOWNLOAD
 from ...utils.fs import download
 from ..base import RNGDataFlow
 
@@ -34,6 +35,8 @@ def maybe_download_and_extract(dest_directory, cifar_classnum):
         logger.info("Found cifar{} data in {}.".format(cifar_classnum, dest_directory))
         return
     else:
+        if not DATASET_AUTO_DOWNLOAD:
+            raise Exception("CIFAR data doesn't exist")
         DATA_URL = DATA_URL_CIFAR_10 if cifar_classnum == 10 else DATA_URL_CIFAR_100
         download(DATA_URL, dest_directory)
         filename = DATA_URL.split('/')[-1]
