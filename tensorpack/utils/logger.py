@@ -121,7 +121,10 @@ def auto_set_dir(log_root=None, action=None, overwrite=False, append_time=True):
     if LOG_DIR is not None and not overwrite:
         # dir already set
         return
-    if log_root is None:
+    if log_root is not None:
+        assert os.path.isdir(log_root) 
+    else:
+        print "Warning: no log root specified. Setting log root to be train_log"
         log_root = 'train_log'
     mod = sys.modules['__main__']
     basename = os.path.basename(mod.__file__)
