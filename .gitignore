@@ -1,3 +1,4 @@
+*.swp
 *.gz
 *.npy
 train_log
