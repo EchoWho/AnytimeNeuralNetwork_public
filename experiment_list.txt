@@ -1,0 +1,107 @@
+Experiment_name:
+CIFAR10, ANN-res, stop_gradient, stack=1, depth=15 res-blocks
+CIFAR10, ANN-res, stop_gradient, stack=2
+CIFAR10, ANN-res, stop_gradient, stack=3
+CIFAR10, ANN-res, stop_gradient, stack=5
+
+CIFAR10, ANN-res, predict at func=x:x**2, depth= 15 res-blocks
+CIFAR10, ANN-res, predict at func=x:2**x
+
+CIFAR10, ANN-res, exponential weight scheme, base=2.0
+CIFAR10, ANN-res, exponential weight scheme, base=0.5
+
+CIFAR10, ANN-res, stack=2, depth=15 res blocks
+CIFAR10, ANN-res, stack=3
+CIFAR10, ANN-res, stack=5
+
+CIFAR10, ANN-res, width=2
+CIFAR10, ANN-res, width=4
+CIFAR10, ANN-res, width=8
+CIFAR10, ANN-res, width=10
+
+
+CIFAR10, resnet, init_channel*=2
+CIFAR10, resnet, init_channel*=4
+CIFAR10, resnet, init_channel*=8
+CIFAR10, resnet, init_channel*=10
+CIFAR10, ANN-res, width=2, optimal_at_end
+CIFAR10, ANN-res, width=4, optimal_at_end
+CIFAR10, ANN-res, width=8, optimal_at_end
+CIFAR10, ANN-res, width=10, optimal_at_end
+
+CIFAR10, ANN-res, width=10, c=16, n=9 
+CIFAR10, resnet, init_c*=10, n=9 
+CIFAR10, optimal_at_end, width=10, c=16, n=9 
+
+Experiment batch 2  cifar100s
+CIFAR100, ANN-res, stop_gradient, stack=1, depth=15 res-blocks
+CIFAR100, ANN-res, stop_gradient, stack=2
+CIFAR100, ANN-res, stop_gradient, stack=3
+CIFAR100, ANN-res, stop_gradient, stack=5
+
+CIFAR100, ANN-res, predict at func=x:x**2, depth= 15 res-blocks
+CIFAR100, ANN-res, predict at func=x:2**x
+
+CIFAR100, ANN-res, exponential weight scheme, base=2.0
+CIFAR100, ANN-res, exponential weight scheme, base=0.5
+CIFAR100, ANN-res, constant scheme,
+CIFAR100, ANN-res, sieve
+
+CIFAR100 optimal at 0
+CIFAR100 optimal at 1
+CIFAR100 optimal at 2
+CIFAR100 optimal at 3
+CIFAR100 optimal at 4
+CIFAR100 optimal at 5
+CIFAR100 optimal at 6
+CIFAR100 optimal at 7
+CIFAR100 optimal at 8
+CIFAR100 optimal at 9
+CIFAR100 optimal at 10
+CIFAR100 optimal at 11
+CIFAR100 optimal at 12
+CIFAR100 optimal at 13
+CIFAR100 optimal at 14
+
+
+CIFAR100, ANN-res, stack=2, depth=15 res blocks
+CIFAR100, ANN-res, stack=3
+CIFAR100, ANN-res, stack=5
+
+CIFAR100, resnet, init_channel*=2
+CIFAR100, resnet, init_channel*=4
+CIFAR100, resnet, init_channel*=8
+CIFAR100, resnet, init_channel*=10
+CIFAR100, ann, init_channel*=2
+CIFAR100, ann, init_channel*=4
+CIFAR100, ann, init_channel*=8
+CIFAR100, ann, init_channel*=10
+
+CIFAR100, resnet, init_c*=10, n=9 
+CIFAR100, ANN-res, c=160, n=9
+
+Experiment 3; exp3 parameter tune
+eg=0.1, srr=2.0
+eg=0.1, srr=1.0
+eg=0.1, srr=0.5
+eg=0.1, srr=0.0
+eg=0.2, srr=2.0
+eg=0.2, srr=1.0
+eg=0.2, srr=0.5
+eg=0.2, srr=0.0
+eg=0.4, srr=2.0
+eg=0.4, srr=1.0
+eg=0.4, srr=0.5
+eg=0.4, srr=0.0
+eg=0.6, srr=2.0
+eg=0.6, srr=1.0
+eg=0.6, srr=0.5
+eg=0.6, srr=0.0
+eg=0.8, srr=2.0
+eg=0.8, srr=1.0
+eg=0.8, srr=0.5
+eg=0.8, srr=0.0
+eg=1.0, srr=2.0
+eg=1.0, srr=1.0
+eg=1.0, srr=0.5
+eg=1.0 srr=0.0
