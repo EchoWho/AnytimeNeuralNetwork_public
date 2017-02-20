@@ -1,7 +1,9 @@
 import numpy as np
 
 __all__ = ['sieve_loss_weights',  'optimal_at',
-    'exponential_weights', 'at_func', 'constant_weights', 'stack_loss_weights']
+    'exponential_weights', 'at_func', 
+    'constant_weights', 'stack_loss_weights',
+    'half_constant_half_optimal', 'linear']
 
 def sieve_loss_weights(N):
     if N == 1:
@@ -25,6 +27,18 @@ def optimal_at(N, optimal_l):
     """ Note that optimal_l is zero-based """
     weights = np.zeros(N)
     weights[optimal_l] = 1.0
+    return weights
+
+def half_constant_half_optimal(N, optimal_l=-1):
+    weights = np.ones(N, dtype=np.float32)
+    if N > 1:
+        weights[optimal_l] = N-1
+    weights /= np.float(N-1)
+    return weights
+
+def linear(N, a=0.25, b=1.0):
+    delta = (b-a) / (N-1.0)
+    weights = np.arange(N, dtype=np.float32) * delta + a
     return weights
 
 def exponential_weights(N, base=2.0):
