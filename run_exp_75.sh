@@ -55,7 +55,7 @@ export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
 python $CONFIG_DIR/examples/ResNet/cifar-ann.py \
---data_dir=$DATA_DR \
---log_dir=$LOG_DR \
+--data_dir=$DATA_DIR \
+--log_dir=$LOG_DIR \
 -c=32 \
 --num_classes=100
