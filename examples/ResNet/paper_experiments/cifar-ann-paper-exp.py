@@ -295,7 +295,8 @@ if __name__ == '__main__':
     parser.add_argument('--base', 
                         help='Exponential base',
                         type=np.float32, default=EXP_BASE)
-    parser.add_argument('--opt_at', help='Optimal at', type=int, default=OPTIMAL_AT)
+    parser.add_argument('--opt_at', help='Optimal at', 
+                        type=int, default=OPTIMAL_AT)
     parser.add_argument('-f', '--func_type', 
                         help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
                         type=int, default=0)
