@@ -320,6 +320,7 @@ if __name__ == '__main__':
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
+    print args.log_dir
     logger.auto_set_dir(log_root=args.log_dir)
     utils.set_dataset_path(path=args.data_dir, auto_download=False)
 
