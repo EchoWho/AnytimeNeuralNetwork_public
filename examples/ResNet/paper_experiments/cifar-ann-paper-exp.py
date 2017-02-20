@@ -207,6 +207,8 @@ def loss_weights(N):
         return anytime_loss.linear(N, a=0.25, b=1.0)
     elif FUNC_TYPE == 7: # half constant, half optimal at -1
         return anytime_loss.half_constant_half_optimal(N, -1)
+    elif FUNC_TYPE == 8: # quater constant, half optimal
+        return anytime_loss.quater_constant_half_optimal(N)
     else:
         raise NameError('func type must be either 0: exponential or 1: square\
             or 2: optimal at --opt_at, or 3: exponential weight with base --base')

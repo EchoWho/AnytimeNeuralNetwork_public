@@ -3,7 +3,8 @@ import numpy as np
 __all__ = ['sieve_loss_weights',  'optimal_at',
     'exponential_weights', 'at_func', 
     'constant_weights', 'stack_loss_weights',
-    'half_constant_half_optimal', 'linear']
+    'half_constant_half_optimal', 'linear',
+    'quater_constant_half_optimal']
 
 def sieve_loss_weights(N):
     if N == 1:
@@ -34,6 +35,15 @@ def half_constant_half_optimal(N, optimal_l=-1):
     if N > 1:
         weights[optimal_l] = N-1
     weights /= np.float(N-1)
+    return weights
+
+def quater_constant_half_optimal(N):
+    weights = np.ones(N, dtype=np.float32)
+    if N <= 2: 
+        return weights
+    weights[-1] = 2*N-4
+    weights[0] = N-2
+    weights /= np.float(4 * N - 8)
     return weights
 
 def linear(N, a=0.25, b=1.0):
