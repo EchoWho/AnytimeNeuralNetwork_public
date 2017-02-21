@@ -31,21 +31,25 @@ img_dir='/home/hanzhang/Dropbox/research/ann/img'
 weights = np.asarray(weights)
 grads = np.asarray(grads)
 n_iter = weights.shape[1]
-x = np.arange(n_iter)
-plt.close('all')
-fig1 = plt.figure()
-ax1 = fig1.add_subplot(111)
-for li in range(L):
-    ax1.plot(x, weights[li, :], label='p{}'.format(li))
+if n_iter > 0:
+    x = np.arange(n_iter)
+    plt.close('all')
+    fig1 = plt.figure()
+    ax1 = fig1.add_subplot(111)
+    for li in range(L):
+        ax1.plot(x, weights[li, :], label='p{}'.format(li))
 
-plt.savefig(os.path.join(img_dir,'weights.png'), 
-    bbox_inches='tight', dpi=fig1.dpi)
+    plt.savefig(os.path.join(img_dir,'weights.png'), 
+        bbox_inches='tight', dpi=fig1.dpi)
 
 
-if grads.shape[1] != n_iter:
-    print "NO grad val found." 
-    plt.show()
-    sys.exit()
+    if grads.shape[1] != n_iter:
+        print "NO grad val found." 
+        plt.show()
+        sys.exit()
+else:
+    n_iter = grads.shape[1]
+    x = np.arange(n_iter)
 
 fig2 = plt.figure()
 ax2 = fig2.add_subplot(111)
