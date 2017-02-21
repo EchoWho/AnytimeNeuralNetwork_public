@@ -58,4 +58,4 @@ python $CONFIG_DIR/examples/ResNet/cifar-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --num_classes=10 \
--f=5 -n=9 -w=2 -c=64 --samloss=2
+-n=9 -w=2 -c=64 --samloss=2
