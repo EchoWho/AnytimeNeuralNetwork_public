@@ -58,4 +58,4 @@ python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar-ann-paper-exp.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --num_classes=100 \
--f=5 -n=9 -w=4 -c=32
+-f=5 -n=9 -w=4 -c=32 --batch_size=64
