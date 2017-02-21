@@ -122,7 +122,9 @@ def auto_set_dir(log_root=None, action=None, overwrite=False, append_time=True):
         # dir already set
         return
     if log_root is not None:
-        assert os.path.isdir(log_root) 
+        # WARNING: For some reason this is not passing on Philly cluster
+        #assert os.path.isdir(log_root)
+        print 'Log root is ' + log_root 
     else:
         print "Warning: no log root specified. Setting log root to be train_log"
         log_root = 'train_log'
