@@ -57,6 +57,5 @@ export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar-ann-paper-exp.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
--f=2 \
--c=32 \
---num_classes=100
+--num_classes=100 \
+-f=5 -n=9 -w=4 -c=16
