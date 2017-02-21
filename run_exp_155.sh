@@ -54,9 +54,8 @@ echo "CONFIG_DIR=$CONFIG_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/paper_experiments/cifar-ann-paper-exp.py \
+python $CONFIG_DIR/examples/ResNet/paper_experiments/svhn-ann-paper-exp.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
--f=2 \
--c=32 \
---num_classes=100
+--num_classes=10 \
+-f=2 --opt_at=26 -n=9 -c=128
