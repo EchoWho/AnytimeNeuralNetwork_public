@@ -58,4 +58,4 @@ python $CONFIG_DIR/examples/ResNet/paper_experiments/svhn-ann-paper-exp.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --num_classes=10 \
--f=5 -n=9 -w=2 -c=64 --samloss=3 --batch_size=64
+-f=5 -n=17 -w=1 -c=16 --samloss=3 --batch_size=64

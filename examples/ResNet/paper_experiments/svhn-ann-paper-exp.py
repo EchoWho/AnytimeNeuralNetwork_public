@@ -10,7 +10,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.models import Exp3 
+from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect 
 from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 from tensorpack.utils import utils
@@ -33,9 +33,7 @@ FUNC_TYPE=5
 OPTIMAL_AT=-1
 
 # Random loss sample params
-RAND_WEIGHT=False
-EXP3_WEIGHT=False
-WM_WEIGHT=False
+SAMLOSS=0
 EXP3_GAMMA=0.1
 SUM_RAND_RATIO=2.0
 
@@ -176,9 +174,17 @@ class Model(ModelDesc):
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
-        if EXP3_WEIGHT:
+        logger.info("sampling loss with method {}".format(SAMLOSS))
+        if SAMLOSS > 0:
             ls_K = np.sum(np.asarray(self.weights) > 0)
-            loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA)
+            if SAMLOSS == 1:
+                loss_selector = RandSelect('rand', ls_K)
+            elif SAMLOSS == 2:
+                loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA)
+            elif SAMLOSS == 3:
+                loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
+            else:
+                raise Exception("Undefined loss selector")
             ls_i, ls_p = loss_selector.sample()
             for i in range(ls_K):
                 weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
@@ -214,11 +220,7 @@ class Model(ModelDesc):
                     if cost_weight > 0:
                         anytime_idx += 1
                         add_weight = 0
-                        if RAND_WEIGHT:
-                            prob = 1.0 / len(self.weights)
-                            do_rand_weight = tf.multinomial(tf.log([[1-prob, prob]]), 1)[0][0]
-                            add_weight = 2 * self.weights[-1] * tf.to_float(do_rand_weight)
-                        elif EXP3_WEIGHT:
+                        if SAMLOSS > 0:
                             def rand_weight_and_update_ls(loss=c):
                                 gs = tf.gradients(loss, tf.trainable_variables()) 
                                 reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
@@ -226,7 +228,7 @@ class Model(ModelDesc):
                                 return tf.constant(self.weights[-1] * 2, dtype=tf.float32)
                             add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
                                 rand_weight_and_update_ls, lambda: tf.zeros(()))
-                        if WM_WEIGHT or TRACK_GRADIENTS:
+                        if TRACK_GRADIENTS:
                             gs = tf.gradients(c, tf.trainable_variables())
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
                                                name='l2_grad_{}'.format(anytime_idx-1))
@@ -251,8 +253,6 @@ class Model(ModelDesc):
 
         add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([cost, wd_cost], name='cost')
-
-
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -355,8 +355,8 @@ if __name__ == '__main__':
                         type=bool, default=STOP_GRADIENTS_PARTIAL)
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
                         type=np.float32, default=SG_GAMMA)
-    parser.add_argument('--samloss', help='Sample losses to update',
-                        type=int, default=0)
+    parser.add_argument('--samloss', help='Method to Sample losses to update',
+                        type=int, default=SAMLOSS)
     parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
                         type=np.float32, default=EXP3_GAMMA)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
@@ -372,6 +372,7 @@ if __name__ == '__main__':
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     FUNC_TYPE = args.func_type
+    SAMLOSS = args.samloss
     OPTIMAL_AT = args.opt_at
     BATCH_SIZE = args.batch_size
     NUM_UNITS = args.num_units
@@ -389,11 +390,6 @@ if __name__ == '__main__':
     if STOP_GRADIENTS:
         STOP_GRADIENTS_PARTIAL = True
         SG_GAMMA = 0.0
-
-    if args.samloss == 1:
-        RAND_WEIGHT = True
-    elif args.samloss == 2:
-        EXP3_WEIGHT = True
     
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
