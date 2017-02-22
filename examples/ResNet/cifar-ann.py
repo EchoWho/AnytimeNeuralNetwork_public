@@ -15,6 +15,8 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 """
+# Whether use validation set:
+DO_VALID=False
 
 # Network structure
 BATCH_SIZE = 128
@@ -231,11 +233,13 @@ class Model(ModelDesc):
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
     if NUM_CLASSES == 10:
-        ds = dataset.Cifar10(train_or_test)
+        ds = dataset.Cifar10(train_or_test, do_validation=DO_VALID)
     elif NUM_CLASSES == 100:
-        ds = dataset.Cifar100(train_or_test)
+        ds = dataset.Cifar100(train_or_test, do_validation=DO_VALID)
     else:
         raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
+    if DO_VALID: 
+        print '{} {}'.format(isTrain, len(ds.data))
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -331,6 +335,8 @@ if __name__ == '__main__':
                         type=np.float32, default=SUM_RAND_RATIO)
     parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
                         type=bool, default=TRACK_GRADIENTS)
+    parser.add_argument('--do_validation', help='Whether use validation set. Default not',
+                        type=bool, default=DO_VALID)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
@@ -346,6 +352,7 @@ if __name__ == '__main__':
     EXP3_GAMMA = args.exp_gamma
     SUM_RAND_RATIO = args.sum_rand_ratio
     TRACK_GRADIENTS = args.track_grads
+    DO_VALID = args.do_validation
 
     if STOP_GRADIENTS:
         STOP_GRADIENTS_PARTIAL = True
@@ -362,11 +369,11 @@ if __name__ == '__main__':
     logger.auto_set_dir(log_root=args.log_dir)
     utils.set_dataset_path(path=args.data_dir, auto_download=False)
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {}".format(\
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {} do_validation= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
                 NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
                 STOP_GRADIENTS_PARTIAL, SG_GAMMA, \
-                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO))
+                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO, DO_VALID))
 
     config = get_config()
     if args.load:

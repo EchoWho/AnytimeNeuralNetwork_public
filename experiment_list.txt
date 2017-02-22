@@ -1,4 +1,4 @@
-Experiment_name:
+Exepriment Name
 CIFAR10, ANN-res, stop_gradient, stack=1, depth=15 res-blocks
 CIFAR10, ANN-res, stop_gradient, stack=2
 CIFAR10, ANN-res, stop_gradient, stack=3
@@ -105,3 +105,140 @@ eg=1.0, srr=2.0
 eg=1.0, srr=1.0
 eg=1.0, srr=0.5
 eg=1.0 srr=0.0
+
+Experiment 4;
+CIFAR10, ANN-res, stack=1, n=13
+CIFAR10, ANN-res, stack=2, n=13
+CIFAR10, ANN-res, stack=3
+CIFAR10, ANN-res, stack=4
+CIFAR10, ANN-res, stack=5
+CIFAR10, ANN-res, stack=8
+CIFAR10, ANN-res, stack=10
+CIFAR100, ANN-res, stack=1, n=13
+CIFAR100, ANN-res, stack=2, n=13
+CIFAR100, ANN-res, stack=3
+CIFAR100, ANN-res, stack=4
+CIFAR100, ANN-res, stack=5
+CIFAR100, ANN-res, stack=8
+CIFAR100, ANN-res, stack=10
+CIFAR10, ANN-res, stack=1, n=9
+CIFAR10, ANN-res, stack=2, n=9
+CIFAR10, ANN-res, stack=3
+CIFAR10, ANN-res, stack=5
+CIFAR10, ANN-res, stack=7
+CIFAR100, ANN-res, stack=1, n=9
+CIFAR100, ANN-res, stack=2, n=9
+CIFAR100, ANN-res, stack=3
+CIFAR100, ANN-res, stack=5
+CIFAR100, ANN-res, stack=7
+134 n=7 class=10 s=1
+135 7 10 2
+136 7 10 3
+137 7 10 5
+138 7 100 1
+139 7 100 2
+140 7 100 3
+141 7 100 5
+
+
+Experiment 5 
+
+at  [17*3 / 4]  -1= 12
+at  [17*3 /2] - 1 = 25
+at [ 17*3*3 /4] - 1= 37
+at 50
+ANN, n=17, c=16
+
+at [27 /4] -1 = 6
+at 13
+at 19
+at 26
+WANN, n=9, w=4, c=32
+WANN, n=9, w=2, c=64
+WANN, n=9, w=1
+WANN$, n= 9, w=2, c =64
+WANN$, n=9, w=4, c=32
+
+at [27 /4] -1 = 6
+at 13
+at 19
+at 26
+WANN, n=9, w=4, c=16
+WANN, n=9, w=2, c=32
+WANN, n=9, w=1, c=64
+WANN$, n= 9, w=2, c=32
+WANN$, n=9, w=4, c=16
+WANN + EXP3, n=9, w=2, c=64 
+WANN +EXP3, n=9, w=2, c=32 
+
+
+
+at  [17*3 / 4]  -1= 12
+at  [17*3 /2] - 1 = 25
+at [ 17*3*3 /4] - 1= 37
+at 50
+ANN, n=17, c=16
+
+at [27 /4] -1 = 6
+at 13
+at 19
+at 26
+WANN, n=9, w=4, c=32
+WANN, n=9, w=2, c=64
+WANN, n=9, w=1
+WANN$, n= 9, w=2, c =64
+WANN$, n=9, w=4, c=32
+
+at [27 /4] -1 = 6
+at 13
+at 19
+at 26
+WANN, n=9, w=4, c=16
+WANN, n=9, w=2, c=32
+WANN, n=9, w=1, c=64
+WANN$, n= 9, w=2, c=32
+WANN$, n=9, w=4, c=16
+WANN + EXP3, n=9, w=2, c=64 
+WANN +EXP3, n=9, w=2, c=32 
+
+
+
+at  [17*3 / 4]  -1= 12
+at  [17*3 /2] - 1 = 25
+at [ 17*3*3 /4] - 1= 37
+at 50
+ANN, n=17, c=16
+
+at [27 /4] -1 = 6
+at 13
+at 19
+at 26
+WANN, n=9, w=4, c=32
+WANN, n=9, w=2, c=64
+WANN, n=9, w=1
+WANN$, n= 9, w=2, c =64
+WANN$, n=9, w=4, c=32
+
+at [27 /4] -1 = 6
+at 13
+at 19
+at 26
+WANN, n=9, w=4, c=16
+WANN, n=9, w=2, c=32
+WANN, n=9, w=1, c=64
+WANN$, n= 9, w=2, c=32
+WANN$, n=9, w=4, c=16
+WANN + EXP3, n=9, w=2, c=64 
+WANN +EXP3, n=9, w=2, c=32 
+
+Experiment 6
+
+ANN, n=17, c=20, -f=constant, dataset = ?
+ANN, n=17, c=24
+ANN, n=17, c=28
+ANN, n=17, c=32
+
+ANN, n=17, c=20, -f=constant
+ANN, n=17, c=24
+ANN, n=17, c=28
+ANN, n=17, c=32
