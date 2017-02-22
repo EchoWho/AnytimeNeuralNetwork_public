@@ -4,7 +4,7 @@ import numpy as np
 from ..tfutils.tower import get_current_tower_context
 from ..utils import logger
 
-__all__ = ['Exp3', 'HalfEndHalfExp3']
+__all__ = ['Exp3', 'HalfEndHalfExp3', 'RandSelect']
 
 class Exp3(object):
     def __init__(self, name, K, gamma):
@@ -40,6 +40,25 @@ class Exp3(object):
             tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, tf.identity(self.w))
 
         return tf.zeros(())
+
+class RandSelect(object):
+    def __init__(self, name, K):
+        with tf.variable_scope(name) as scope:
+            self.name = name
+            self.K = K
+            self.probs = tf.constant(np.ones([1,K], dtype=np.float32)/K)
+            ctx = get_current_tower_context()
+            self.inactive = ctx.is_training is not None and not ctx.is_training
+
+    def sample(self):
+        if self.inactive:
+            return -1, 0.0
+        with tf.variable_scope(self.name) as scope:
+            idx = tf.cast(tf.multinomial(tf.log(self.probs), 1)[0][0], np.int32)
+            return idx, self.probs[idx]
+
+    def update(self, *args):
+        return
 
 class HalfEndHalfExp3(object):
     def __init__(self, name, K, gamma):
