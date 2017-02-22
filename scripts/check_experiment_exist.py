@@ -15,7 +15,7 @@ else:
     dey_log_dir='/home/debadeepta/ann_models_logs'
     dey_log_basename='cust-p-run_exp_'
 
-exceptions = [1, 36, 83] +[71,72,73, 75,76,77]
+exceptions = [1, 36, 83, 234, 144, 109] + []
 
 with open(fn, 'r') as fin:
     for li, line in enumerate(fin):
