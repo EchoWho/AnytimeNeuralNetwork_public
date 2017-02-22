@@ -3,7 +3,7 @@
 USERNAME="dedey"
 PASSWORD="Yoga2god?"
 CLUSTER="gcr"
-JOBSCRIPT="run_exp_141.sh"
+JOBSCRIPT="run_exp_232.sh"
 SPECIAL_NAME="_ann"
 
 VC="pnrsy"
