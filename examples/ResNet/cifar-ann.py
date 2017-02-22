@@ -290,7 +290,7 @@ def get_config():
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)])
+                                      [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)])
         ],
         model=Model(NUM_UNITS,WIDTH,INIT_CHANNEL,NUM_CLASSES,weights),
         steps_per_epoch=steps_per_epoch,
