@@ -310,6 +310,10 @@ def get_config():
     logger.info('weights: {}'.format(weights))
 
     lr = get_scalar_var('learning_rate', 0.01, summary=True)
+    if SAMLOSS > 0:
+        lr_schedule = [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)] 
+    else:
+        lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
     return TrainConfig(
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
@@ -317,8 +321,7 @@ def get_config():
             ModelSaver(),
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
-            ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (20, 0.01), (28, 0.001), (50, 0.0001)])
+            ScheduledHyperParamSetter('learning_rate', lr_schedule)
         ],
         model=Model(NUM_UNITS,WIDTH,INIT_CHANNEL,NUM_CLASSES,weights),
         steps_per_epoch=steps_per_epoch,
