@@ -83,7 +83,7 @@ def get_filenames(dir, cifar_classnum):
 
 
 class CifarBase(RNGDataFlow):
-    def __init__(self, train_or_test, shuffle=True, dir=None, cifar_classnum=10):
+    def __init__(self, train_or_test, shuffle=True, dir=None, cifar_classnum=10, do_validation=False):
         assert train_or_test in ['train', 'test']
         assert cifar_classnum == 10 or cifar_classnum == 100
         self.cifar_classnum = cifar_classnum
@@ -91,7 +91,8 @@ class CifarBase(RNGDataFlow):
             dir = get_dataset_path('cifar{}_data'.format(cifar_classnum))
         maybe_download_and_extract(dir, self.cifar_classnum)
         fnames = get_filenames(dir, cifar_classnum)
-        if train_or_test == 'train':
+        self.do_validation = do_validation
+        if train_or_test == 'train' or do_validation:
             self.fs = fnames[:-1]
         else:
             self.fs = [fnames[-1]]
@@ -100,10 +101,17 @@ class CifarBase(RNGDataFlow):
                 raise ValueError('Failed to find file: ' + f)
         self.train_or_test = train_or_test
         self.data = read_cifar(self.fs, cifar_classnum)
+        if do_validation:
+            if train_or_test == 'train':
+                self.data = self.data[:45000]
+            else:
+                self.data = self.data[45000:]
         self.dir = dir
         self.shuffle = shuffle
 
     def size(self):
+        if self.do_validation:
+            return 45000 if self.train_or_test == 'train' else 5000
         return 50000 if self.train_or_test == 'train' else 10000
 
     def get_data(self):
@@ -137,19 +145,19 @@ class Cifar10(CifarBase):
     image is 32x32x3 in the range [0,255].
     label is an int.
     """
-    def __init__(self, train_or_test, shuffle=True, dir=None):
+    def __init__(self, train_or_test, shuffle=True, dir=None, do_validation=False):
         """
         Args:
             train_or_test (str): either 'train' or 'test'.
             shuffle (bool): shuffle the dataset.
         """
-        super(Cifar10, self).__init__(train_or_test, shuffle, dir, 10)
+        super(Cifar10, self).__init__(train_or_test, shuffle, dir, 10, do_validation)
 
 
 class Cifar100(CifarBase):
     """ Similar to Cifar10"""
-    def __init__(self, train_or_test, shuffle=True, dir=None):
-        super(Cifar100, self).__init__(train_or_test, shuffle, dir, 100)
+    def __init__(self, train_or_test, shuffle=True, dir=None, do_validation=False):
+        super(Cifar100, self).__init__(train_or_test, shuffle, dir, 100, do_validation)
 
 
 if __name__ == '__main__':

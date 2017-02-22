@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.models import Exp3 
+from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect 
 from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 from tensorpack.utils import utils
@@ -15,6 +15,8 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 """
+# Whether use validation set:
+DO_VALID=False
 
 # Network structure
 BATCH_SIZE = 128
@@ -28,9 +30,8 @@ NUM_CLASSES=10
 NUM_UNITS_PER_STACK=1
 
 # Random loss sample params
-RAND_WEIGHT=False
-EXP3_WEIGHT=False
-WM_WEIGHT=False
+##0: nothing; 1: rand; 2:exp3; 3:HEHE3
+SAMLOSS=0  
 EXP3_GAMMA=0.1
 SUM_RAND_RATIO=2.0
 
@@ -151,9 +152,17 @@ class Model(ModelDesc):
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
-        if EXP3_WEIGHT:
+        logger.info("sampling loss with method {}".format(SAMLOSS))
+        if SAMLOSS > 0:
             ls_K = np.sum(np.asarray(self.weights) > 0)
-            loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA)
+            if SAMLOSS == 1:
+                loss_selector = RandSelect('rand', ls_K)
+            elif SAMLOSS == 2:
+                loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA) 
+            elif SAMLOSS == 3:
+                loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
+            else:
+                raise Exception("Undefined loss selector")
             ls_i, ls_p = loss_selector.sample()
             for i in range(ls_K):
                 weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
@@ -189,11 +198,7 @@ class Model(ModelDesc):
                     if cost_weight > 0:
                         anytime_idx += 1
                         add_weight = 0
-                        if RAND_WEIGHT:
-                            prob = 1.0 / len(self.weights)
-                            do_rand_weight = tf.multinomial(tf.log([[1-prob, prob]]), 1)[0][0]
-                            add_weight = 2 * self.weights[-1] * tf.to_float(do_rand_weight)
-                        elif EXP3_WEIGHT:
+                        if SAMLOSS > 0:
                             def rand_weight_and_update_ls(loss=c):
                                 gs = tf.gradients(loss, tf.trainable_variables()) 
                                 reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
@@ -201,7 +206,7 @@ class Model(ModelDesc):
                                 return tf.constant(self.weights[-1] * 2, dtype=tf.float32)
                             add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
                                 rand_weight_and_update_ls, lambda: tf.zeros(()))
-                        if WM_WEIGHT or TRACK_GRADIENTS:
+                        if TRACK_GRADIENTS:
                             gs = tf.gradients(c, tf.trainable_variables())
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
                                                name='l2_grad_{}'.format(anytime_idx-1))
@@ -231,11 +236,13 @@ class Model(ModelDesc):
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
     if NUM_CLASSES == 10:
-        ds = dataset.Cifar10(train_or_test)
+        ds = dataset.Cifar10(train_or_test, do_validation=DO_VALID)
     elif NUM_CLASSES == 100:
-        ds = dataset.Cifar100(train_or_test)
+        ds = dataset.Cifar100(train_or_test, do_validation=DO_VALID)
     else:
         raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
+    if DO_VALID: 
+        print '{} {}'.format(isTrain, len(ds.data))
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -278,6 +285,10 @@ def get_config():
 
     logger.info('weights: {}'.format(weights))
     lr = get_scalar_var('learning_rate', 0.01, summary=True)
+    if SAMLOSS > 0:
+        lr_schedule = [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)] 
+    else:
+        lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
     return TrainConfig(
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
@@ -285,8 +296,7 @@ def get_config():
             ModelSaver(),
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
-            ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)])
+            ScheduledHyperParamSetter('learning_rate', lr_schedule)
         ],
         model=Model(NUM_UNITS,WIDTH,INIT_CHANNEL,NUM_CLASSES,weights),
         steps_per_epoch=steps_per_epoch,
@@ -323,14 +333,16 @@ if __name__ == '__main__':
                         type=bool, default=STOP_GRADIENTS_PARTIAL)
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
                         type=np.float32, default=SG_GAMMA)
-    parser.add_argument('--samloss', help='Sample losses to update',
-                        type=int, default=0)
+    parser.add_argument('--samloss', help='Method to Sample losses to update',
+                        type=int, default=SAMLOSS)
     parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
                         type=np.float32, default=EXP3_GAMMA)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
                         type=np.float32, default=SUM_RAND_RATIO)
     parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
                         type=bool, default=TRACK_GRADIENTS)
+    parser.add_argument('--do_validation', help='Whether use validation set. Default not',
+                        type=bool, default=DO_VALID)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
@@ -343,30 +355,27 @@ if __name__ == '__main__':
     STOP_GRADIENTS = args.stopgrad
     STOP_GRADIENTS_PARTIAL = args.stopgradpartial
     SG_GAMMA = args.sg_gamma
+    SAMLOSS = args.samloss
     EXP3_GAMMA = args.exp_gamma
     SUM_RAND_RATIO = args.sum_rand_ratio
     TRACK_GRADIENTS = args.track_grads
+    DO_VALID = args.do_validation
 
     if STOP_GRADIENTS:
         STOP_GRADIENTS_PARTIAL = True
         SG_GAMMA = 0.0
 
-    if args.samloss == 1:
-        RAND_WEIGHT = True
-    elif args.samloss == 2:
-        EXP3_WEIGHT = True
-    
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     logger.auto_set_dir(log_root=args.log_dir)
     utils.set_dataset_path(path=args.data_dir, auto_download=False)
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {}".format(\
+    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {} do_validation= {}".format(\
                 NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
                 NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
                 STOP_GRADIENTS_PARTIAL, SG_GAMMA, \
-                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO))
+                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO, DO_VALID))
 
     config = get_config()
     if args.load:
