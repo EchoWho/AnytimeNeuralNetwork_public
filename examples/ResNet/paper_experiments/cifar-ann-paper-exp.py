@@ -17,11 +17,7 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 """
-#import imp
-#dir_name = os.path.dirname(__file__)
-#cifar_example = imp.load_source('cifar_example',
-#                                os.path.join(dir_name[:dir_name.rfind('/')], 'cifar-ann.py'))
-#Model = cifar_example.Model
+DO_VALID=False
 
 BATCH_SIZE = 128
 NUM_RES_BLOCKS = 3
@@ -216,11 +212,12 @@ def loss_weights(N):
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
     if NUM_CLASSES == 10:
-        ds = dataset.Cifar10(train_or_test)
+        ds = dataset.Cifar10(train_or_test, do_validation=DO_VALID)
     elif NUM_CLASSES == 100:
-        ds = dataset.Cifar100(train_or_test)
+        ds = dataset.Cifar100(train_or_test, do_validation=DO_VALID)
     else:
         raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
+    logger.info("Data {} has {} samples".format(train_or_test, len(ds.data)))
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -306,6 +303,8 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--func_type', 
                         help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
                         type=int, default=0)
+    parser.add_argument('--do_validation', help='Whether to do validation',
+                        type=bool, default=DO_VALID)
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
     BATCH_SIZE = args.batch_size
@@ -316,6 +315,7 @@ if __name__ == '__main__':
     NUM_CLASSES = args.num_classes
     OPTIMAL_AT = args.opt_at
     EXP_BASE = args.base
+    DO_VALID = args.do_validation
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
