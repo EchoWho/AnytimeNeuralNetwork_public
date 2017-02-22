@@ -110,6 +110,8 @@ class CifarBase(RNGDataFlow):
         self.shuffle = shuffle
 
     def size(self):
+        if self.do_validation:
+            return 45000 if self.train_or_test == 'train' else 5000
         return 50000 if self.train_or_test == 'train' else 10000
 
     def get_data(self):
