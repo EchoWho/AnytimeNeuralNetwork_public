@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.models import Exp3 
+from tensorpack.models import Exp3,HalfEndHalfExp3 
 from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 from tensorpack.utils import utils
@@ -155,7 +155,7 @@ class Model(ModelDesc):
 
         if EXP3_WEIGHT:
             ls_K = np.sum(np.asarray(self.weights) > 0)
-            loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA)
+            loss_selector = HalfEndHalfExp3('exp3', ls_K, EXP3_GAMMA)
             ls_i, ls_p = loss_selector.sample()
             for i in range(ls_K):
                 weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
@@ -290,7 +290,7 @@ def get_config():
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)])
+                                      [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)])
         ],
         model=Model(NUM_UNITS,WIDTH,INIT_CHANNEL,NUM_CLASSES,weights),
         steps_per_epoch=steps_per_epoch,
