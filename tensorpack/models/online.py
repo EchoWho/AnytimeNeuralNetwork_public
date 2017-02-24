@@ -4,7 +4,7 @@ import numpy as np
 from ..tfutils.tower import get_current_tower_context
 from ..utils import logger
 
-__all__ = ['Exp3', 'HalfEndHalfExp3', 'RandSelect']
+__all__ = ['Exp3', 'HalfEndHalfExp3', 'RandSelect', 'RWM']
 
 class Exp3(object):
     def __init__(self, name, K, gamma):
@@ -34,6 +34,44 @@ class Exp3(object):
         with tf.variable_scope(self.name):
             reward = reward / p_idx
             r_vec = tf.one_hot(idx, self.K, tf.exp(self.gamma * reward /self.K), 1.0)
+            self.w = tf.multiply(self.w, r_vec)
+            w_sum = tf.reduce_sum(self.w)
+            self.w = self.w / w_sum
+            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, tf.identity(self.w))
+
+        return tf.zeros(())
+
+class RWM(object):
+    def __init__(self, name, K, gamma, weights):
+        with tf.variable_scope(name) as scope:
+            ctx = get_current_tower_context()
+            self.inactive = ctx.is_training is not None and not ctx.is_training
+            if self.inactive:
+                return
+            self.name = name
+            self.K = K
+            self.gamma = gamma
+            self.w = tf.get_variable("w", [1, self.K], trainable=False) 
+            self.default_w = weights.reshape((1,self.K))/np.sum(weights)
+            self.w.assign(self.default_w)
+    
+    def sample(self):
+        if self.inactive:
+            return -1, 0.0
+
+        with tf.variable_scope(self.name):
+            probs = (1.0 - self.gamma) * self.w + self.gamma * self.default_w
+            idx = tf.cast(tf.multinomial(tf.log(probs), 1)[0][0], tf.int32)
+            p_idx = probs[idx]
+            return idx, p_idx
+
+    def update(self, idx, reward):
+        if self.inactive:
+            return tf.zeros(())
+            
+        with tf.variable_scope(self.name):
+            reward = reward 
+            r_vec = tf.one_hot(idx, self.K, tf.exp(self.gamma * reward / self.K), 1.0)
             self.w = tf.multiply(self.w, r_vec)
             w_sum = tf.reduce_sum(self.w)
             self.w = self.w / w_sum
