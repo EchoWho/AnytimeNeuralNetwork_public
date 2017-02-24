@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect 
+from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect,RWM
 from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 from tensorpack.utils import utils
@@ -185,6 +185,8 @@ class Model(ModelDesc):
                 loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA) 
             elif SAMLOSS == 3:
                 loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
+            elif SAMLOSS == 4:
+                loss_selector = RWM('rwm', ls_K, EXP3_GAMMA, self.weights)
             else:
                 raise Exception("Undefined loss selector")
             ls_i, ls_p = loss_selector.sample()
@@ -222,7 +224,7 @@ class Model(ModelDesc):
                     if cost_weight > 0:
                         anytime_idx += 1
                         add_weight = 0
-                        if SAMLOSS > 0:
+                        if SAMLOSS in [1,2,3]:
                             def rand_weight_and_update_ls(loss=c):
                                 gs = tf.gradients(loss, tf.trainable_variables()) 
                                 reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
@@ -230,10 +232,12 @@ class Model(ModelDesc):
                                 return tf.constant(self.weights[-1] * 2, dtype=tf.float32)
                             add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
                                 rand_weight_and_update_ls, lambda: tf.zeros(()))
-                        if TRACK_GRADIENTS:
+                        if TRACK_GRADIENTS or SAMLOSS == 4:
                             gs = tf.gradients(c, tf.trainable_variables())
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
                                                name='l2_grad_{}'.format(anytime_idx-1))
+                            if SAMLOSS == 4: # RWM
+                                loss_selector.update(ls_i, reward)
                             add_moving_summary(reward)
                         cost += (cost_weight + add_weight / SUM_RAND_RATIO) * c
                         # Regularize weights from FC layers. Should use 
