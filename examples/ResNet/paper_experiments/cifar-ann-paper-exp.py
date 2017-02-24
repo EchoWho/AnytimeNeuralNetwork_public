@@ -1,15 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: UTF-8 -*-
-
 import numpy as np
 import argparse
-import os
+import os, sys, datetime
 
 import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-import tensorpack.utils.anytime_loss as anytime_loss
+from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect 
+from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 from tensorpack.utils import utils
 
@@ -17,21 +15,59 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 """
+# Whether use validation set:
 DO_VALID=False
 
+# Network structure
 BATCH_SIZE = 128
 NUM_RES_BLOCKS = 3
 NUM_UNITS = 5
 WIDTH = 1
 INIT_CHANNEL = 16
-NUM_CLASSES = 10
+NUM_CLASSES=10
 
-FUNC_TYPE=2
+# anytime loss skip (num units per stack/prediction)
+NUM_UNITS_PER_STACK=1
+
+# Random loss sample params
+##0: nothing; 1: rand; 2:exp3; 3:HEHE3
+SAMLOSS=0  
+EXP3_GAMMA=0.1
+SUM_RAND_RATIO=2.0
+
+# Stop gradients params
+STOP_GRADIENTS=False
+STOP_GRADIENTS_PARTIAL=False
+SG_GAMMA = 0.3
+
+TRACK_GRADIENTS=False
+
+FUNC_TYPE=5
 OPTIMAL_AT=-1
 EXP_BASE=2.0
 
-STOP_GRADIENTS=False
-STOP_GRADIENTS_PARTIAL=False
+def loss_weights(N):
+    if FUNC_TYPE == 0: # exponential spacing
+        return anytime_loss.at_func(N, func=lambda x:2**x)
+    elif FUNC_TYPE == 1: # square spacing
+        return anytime_loss.at_func(N, func=lambda x:x**2)
+    elif FUNC_TYPE == 2: #optimal at ?
+        return anytime_loss.optimal_at(N, OPTIMAL_AT)
+    elif FUNC_TYPE == 3: #exponential weights
+        return anytime_loss.exponential_weights(N, base=EXP_BASE)
+    elif FUNC_TYPE == 4: #constant weights
+        return anytime_loss.constant_weights(N) 
+    elif FUNC_TYPE == 5: # sieve
+        return anytime_loss.sieve_loss_weights(N)
+    elif FUNC_TYPE == 6: # linear
+        return anytime_loss.linear(N, a=0.25, b=1.0)
+    elif FUNC_TYPE == 7: # half constant, half optimal at -1
+        return anytime_loss.half_constant_half_optimal(N, -1)
+    elif FUNC_TYPE == 8: # quater constant, half optimal
+        return anytime_loss.quater_constant_half_optimal(N)
+    else:
+        raise NameError('func type must be either 0: exponential or 1: square\
+            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
 
 class Model(ModelDesc):
 
@@ -140,6 +176,22 @@ class Model(ModelDesc):
                     l_wrong.append(wrong)
             return l_costs, l_wrong
 
+        logger.info("sampling loss with method {}".format(SAMLOSS))
+        if SAMLOSS > 0:
+            ls_K = np.sum(np.asarray(self.weights) > 0)
+            if SAMLOSS == 1:
+                loss_selector = RandSelect('rand', ls_K)
+            elif SAMLOSS == 2:
+                loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA) 
+            elif SAMLOSS == 3:
+                loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
+            else:
+                raise Exception("Undefined loss selector")
+            ls_i, ls_p = loss_selector.sample()
+            for i in range(ls_K):
+                weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
+                add_moving_summary(weight_i)
+
         l_feats = [] 
         for w in range(self.width):
             with tf.variable_scope('init_conv'+str(w)) as scope:
@@ -153,6 +205,7 @@ class Model(ModelDesc):
         wd_cost = 0
         cost = 0
         unit_idx = 0
+        anytime_idx = 0
         for res_block_i in range(NUM_RES_BLOCKS):
             for k in range(self.n):
                 scope_name = 'res{}.{:02d}'.format(res_block_i, k)
@@ -167,7 +220,22 @@ class Model(ModelDesc):
                     cost_weight = self.weights[unit_idx]
                     unit_idx += 1
                     if cost_weight > 0:
-                        cost += cost_weight * c
+                        anytime_idx += 1
+                        add_weight = 0
+                        if SAMLOSS > 0:
+                            def rand_weight_and_update_ls(loss=c):
+                                gs = tf.gradients(loss, tf.trainable_variables()) 
+                                reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                                loss_selector.update(ls_i, ls_p, reward)
+                                return tf.constant(self.weights[-1] * 2, dtype=tf.float32)
+                            add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
+                                rand_weight_and_update_ls, lambda: tf.zeros(()))
+                        if TRACK_GRADIENTS:
+                            gs = tf.gradients(c, tf.trainable_variables())
+                            reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
+                                               name='l2_grad_{}'.format(anytime_idx-1))
+                            add_moving_summary(reward)
+                        cost += (cost_weight + add_weight / SUM_RAND_RATIO) * c
                         # Regularize weights from FC layers. Should use 
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
@@ -175,7 +243,10 @@ class Model(ModelDesc):
                             l = l_feats[ci]
                             l = (1 - SG_GAMMA) * tf.stop_gradient(l) + SG_GAMMA * l
                             l_feats[ci] = l
-
+                    #endif cost_weight > 0
+                #endfor each width
+            #endfor each n
+        # endfor each block
 
         # weight decay on all W on conv layers
         wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
@@ -186,29 +257,6 @@ class Model(ModelDesc):
         self.cost = tf.add_n([cost, wd_cost], name='cost')
 
 
-def loss_weights(N):
-    if FUNC_TYPE == 0: # exponential spacing
-        return anytime_loss.at_func(N, func=lambda x:2**x)
-    elif FUNC_TYPE == 1: # square spacing
-        return anytime_loss.at_func(N, func=lambda x:x**2)
-    elif FUNC_TYPE == 2: #optimal at ?
-        return anytime_loss.optimal_at(N, OPTIMAL_AT)
-    elif FUNC_TYPE == 3: #exponential weights
-        return anytime_loss.exponential_weights(N, base=EXP_BASE)
-    elif FUNC_TYPE == 4: #constant weights
-        return anytime_loss.constant_weights(N) 
-    elif FUNC_TYPE == 5: # sieve
-        return anytime_loss.sieve_loss_weights(N)
-    elif FUNC_TYPE == 6: # linear
-        return anytime_loss.linear(N, a=0.25, b=1.0)
-    elif FUNC_TYPE == 7: # half constant, half optimal at -1
-        return anytime_loss.half_constant_half_optimal(N, -1)
-    elif FUNC_TYPE == 8: # quater constant, half optimal
-        return anytime_loss.quater_constant_half_optimal(N)
-    else:
-        raise NameError('func type must be either 0: exponential or 1: square\
-            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
-
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
     if NUM_CLASSES == 10:
@@ -217,7 +265,8 @@ def get_data(train_or_test):
         ds = dataset.Cifar100(train_or_test, do_validation=DO_VALID)
     else:
         raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
-    logger.info("Data {} has {} samples".format(train_or_test, len(ds.data)))
+    if DO_VALID: 
+        print '{} {}'.format(isTrain, len(ds.data))
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -235,6 +284,7 @@ def get_data(train_or_test):
     if isTrain:
         ds = PrefetchData(ds, 3, 2)
     return ds
+
 
 def get_config():
     # prepare dataset
@@ -259,6 +309,10 @@ def get_config():
 
     logger.info('weights: {}'.format(weights))
     lr = get_scalar_var('learning_rate', 0.01, summary=True)
+    if SAMLOSS > 0:
+        lr_schedule = [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)] 
+    else:
+        lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
     return TrainConfig(
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
@@ -266,8 +320,7 @@ def get_config():
             ModelSaver(),
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
-            ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)])
+            ScheduledHyperParamSetter('learning_rate', lr_schedule)
         ],
         model=Model(NUM_UNITS,WIDTH,INIT_CHANNEL,NUM_CLASSES,weights),
         steps_per_epoch=steps_per_epoch,
@@ -277,7 +330,6 @@ def get_config():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--log_dir', help='log_dir position',
                         type=str, default=None)
     parser.add_argument('--data_dir', help='data_dir position',
@@ -293,39 +345,73 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--init_channel',
                         help='channel at beginning of each width of the network',
                         type=int, default=INIT_CHANNEL)
+    parser.add_argument('-s', '--stack', 
+                        help='number of units per stack, \
+                              i.e., number of units per prediction',
+                        type=int, default=NUM_UNITS_PER_STACK)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=NUM_CLASSES)
+    parser.add_argument('--stopgrad', help='Whether to stop gradients.',
+                        type=bool, default=STOP_GRADIENTS)
+    parser.add_argument('--stopgradpartial', help='Whether to stop gradients for other width.',
+                        type=bool, default=STOP_GRADIENTS_PARTIAL)
+    parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
+                        type=np.float32, default=SG_GAMMA)
+    parser.add_argument('--samloss', help='Method to Sample losses to update',
+                        type=int, default=SAMLOSS)
+    parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
+                        type=np.float32, default=EXP3_GAMMA)
+    parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
+                        type=np.float32, default=SUM_RAND_RATIO)
+    parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
+                        type=bool, default=TRACK_GRADIENTS)
+    parser.add_argument('--do_validation', help='Whether use validation set. Default not',
+                        type=bool, default=DO_VALID)
+    parser.add_argument('-f', '--func_type', 
+                        help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
+                        type=int, default=FUNC_TYPE)
     parser.add_argument('--base', 
                         help='Exponential base',
                         type=np.float32, default=EXP_BASE)
     parser.add_argument('--opt_at', help='Optimal at', 
                         type=int, default=OPTIMAL_AT)
-    parser.add_argument('-f', '--func_type', 
-                        help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
-                        type=int, default=0)
-    parser.add_argument('--do_validation', help='Whether to do validation',
-                        type=bool, default=DO_VALID)
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
+    FUNC_TYPE = args.func_type
+    EXP_BASE = args.base
+    OPTIMAL_AT = args.opt_at
     BATCH_SIZE = args.batch_size
     NUM_UNITS = args.num_units
     WIDTH = args.width
     INIT_CHANNEL = args.init_channel
-    FUNC_TYPE = args.func_type
+    NUM_UNITS_PER_STACK = args.stack
     NUM_CLASSES = args.num_classes
-    OPTIMAL_AT = args.opt_at
-    EXP_BASE = args.base
+    STOP_GRADIENTS = args.stopgrad
+    STOP_GRADIENTS_PARTIAL = args.stopgradpartial
+    SG_GAMMA = args.sg_gamma
+    SAMLOSS = args.samloss
+    EXP3_GAMMA = args.exp_gamma
+    SUM_RAND_RATIO = args.sum_rand_ratio
+    TRACK_GRADIENTS = args.track_grads
     DO_VALID = args.do_validation
+
+    if STOP_GRADIENTS:
+        STOP_GRADIENTS_PARTIAL = True
+        SG_GAMMA = 0.0
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-    print args.log_dir
     logger.auto_set_dir(log_root=args.log_dir)
     utils.set_dataset_path(path=args.data_dir, auto_download=False)
 
-    logger.info("Parameters: n= {}, w= {}, c= {}, batch_size={}, -f= {}, -b= {}, --opt_at= {}".format(NUM_UNITS,\
-        WIDTH, INIT_CHANNEL, BATCH_SIZE, FUNC_TYPE, EXP_BASE, OPTIMAL_AT))
+    logger.info("On Dataset CIFAR{}, Parameters: f= {}, n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {} do_validation= {} exp_base= {} opt_at= {}".format(\
+                NUM_CLASSES, FUNC_TYPE, NUM_UNITS, WIDTH, INIT_CHANNEL, \
+                NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
+                STOP_GRADIENTS_PARTIAL, SG_GAMMA, \
+                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO, DO_VALID, \
+                EXP_BASE, OPTIMAL_AT))
 
     config = get_config()
     if args.load:
