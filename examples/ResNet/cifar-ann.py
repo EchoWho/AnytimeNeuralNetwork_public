@@ -162,7 +162,7 @@ class Model(ModelDesc):
             elif SAMLOSS == 3:
                 loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
             elif SAMLOSS == 4:
-                loss_selector = RWM('rwm', ls_K, EXP3_GAMMA, self.weights)
+                loss_selector = RWM('rwm', ls_K, EXP3_GAMMA)
             else:
                 raise Exception("Undefined loss selector")
             ls_i, ls_p = loss_selector.sample()
@@ -203,17 +203,23 @@ class Model(ModelDesc):
                         if SAMLOSS in [1,2,3]:
                             def rand_weight_and_update_ls(loss=c):
                                 gs = tf.gradients(loss, tf.trainable_variables()) 
-                                reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
-                                loss_selector.update(ls_i, ls_p, reward)
-                                return tf.constant(self.weights[-1] * 2, dtype=tf.float32)
+                                reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                                #reward = tf.Print(reward, [reward], "reward")
+                                update_ret = loss_selector.update(ls_i, ls_p, reward)
+                                with tf.control_dependencies([update_ret]):
+                                    add_weight = tf.constant(self.weights[-1] * 2.0, dtype=tf.float32)
+                                return add_weight
                             add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
-                                rand_weight_and_update_ls, lambda: tf.zeros(()))
+                                lambda: rand_weight_and_update_ls(), lambda: tf.zeros(()))
                         if TRACK_GRADIENTS or SAMLOSS == 4:
                             gs = tf.gradients(c, tf.trainable_variables())
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
                                                name='l2_grad_{}'.format(anytime_idx-1))
                             if SAMLOSS == 4: # RWM
-                                loss_selector.update(ls_i, reward)
+                                #reward = tf.Print(reward, [reward], "reward")
+                                update_ret = loss_selector.update(ls_i, reward)
+                                with tf.control_dependencies([update_ret]):
+                                    add_weight = tf.zeros(())
                             add_moving_summary(reward)
                         cost += (cost_weight + add_weight / SUM_RAND_RATIO) * c
                         # Regularize weights from FC layers. Should use 
