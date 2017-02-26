@@ -66,7 +66,9 @@ def _set_file(path):
         filename=path, encoding='utf-8', mode='w')
     hdl.setFormatter(_MyFormatter(datefmt='%m%d %H:%M:%S'))
     _logger.addHandler(hdl)
+    _logger.info("Save logs to file: {}".format(path))
     _logger.info("Argv: " + ' '.join(sys.argv))
+
 
 
 def set_logger_dir(dirname, action=None):
