@@ -229,10 +229,10 @@ class Model(ModelDesc):
                         add_weight = 0
                         if SAMLOSS in [1,2,3]:
                             def rand_weight_and_update_ls(loss=c):
-                                #gs = tf.gradients(loss, tf.trainable_variables()) 
-                                #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                                gs = tf.gradients(loss, tf.trainable_variables()) 
+                                reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
                                 #reward /= np.float32(ls_K - anytime_idx + 1)
-                                reward = loss / np.float32(ls_K - anytime_idx + 2)
+                                #reward = loss / np.float32(ls_K - anytime_idx + 2)
                                 #reward = tf.Print(reward, [reward], "reward")
                                 update_ret = loss_selector.update(ls_i, ls_p, reward)
                                 with tf.control_dependencies([update_ret]):
