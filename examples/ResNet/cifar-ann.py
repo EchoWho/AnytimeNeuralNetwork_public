@@ -33,7 +33,7 @@ NUM_UNITS_PER_STACK=1
 # Random loss sample params
 ##0: nothing; 1: rand; 2:exp3; 3:HEHE3
 SAMLOSS=0  
-EXP3_GAMMA=0.1
+EXP3_GAMMA=0.5
 SUM_RAND_RATIO=2.0
 
 # Stop gradients params
