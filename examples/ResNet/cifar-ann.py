@@ -15,6 +15,7 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 """
+MODEL_DIR=None
 # Whether use validation set:
 DO_VALID=False
 
@@ -42,8 +43,34 @@ SG_GAMMA = 0.3
 
 TRACK_GRADIENTS=False
 
+# For other loss weight assignments
+FUNC_TYPE=5
+OPTIMAL_AT=-1
+EXP_BASE=2.0
+
+
 def loss_weights(N):
-    return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
+    if FUNC_TYPE == 0: # exponential spacing
+        return anytime_loss.at_func(N, func=lambda x:2**x)
+    elif FUNC_TYPE == 1: # square spacing
+        return anytime_loss.at_func(N, func=lambda x:x**2)
+    elif FUNC_TYPE == 2: #optimal at ?
+        return anytime_loss.optimal_at(N, OPTIMAL_AT)
+    elif FUNC_TYPE == 3: #exponential weights
+        return anytime_loss.exponential_weights(N, base=EXP_BASE)
+    elif FUNC_TYPE == 4: #constant weights
+        return anytime_loss.constant_weights(N) 
+    elif FUNC_TYPE == 5: # sieve with stack
+        return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
+    elif FUNC_TYPE == 6: # linear
+        return anytime_loss.linear(N, a=0.25, b=1.0)
+    elif FUNC_TYPE == 7: # half constant, half optimal at -1
+        return anytime_loss.half_constant_half_optimal(N, -1)
+    elif FUNC_TYPE == 8: # quater constant, half optimal
+        return anytime_loss.quater_constant_half_optimal(N)
+    else:
+        raise NameError('func type must be either 0: exponential or 1: square\
+            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
 
 class Model(ModelDesc):
 
@@ -202,8 +229,10 @@ class Model(ModelDesc):
                         add_weight = 0
                         if SAMLOSS in [1,2,3]:
                             def rand_weight_and_update_ls(loss=c):
-                                gs = tf.gradients(loss, tf.trainable_variables()) 
-                                reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                                #gs = tf.gradients(loss, tf.trainable_variables()) 
+                                #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                                #reward /= np.float32(ls_K - anytime_idx + 1)
+                                reward = loss / np.float32(ls_K - anytime_idx + 2)
                                 #reward = tf.Print(reward, [reward], "reward")
                                 update_ret = loss_selector.update(ls_i, ls_p, reward)
                                 with tf.control_dependencies([update_ret]):
@@ -215,6 +244,7 @@ class Model(ModelDesc):
                             gs = tf.gradients(c, tf.trainable_variables())
                             reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
                                                name='l2_grad_{}'.format(anytime_idx-1))
+                            reward /= np.float32(ls_K - anytime_idx + 1)
                             if SAMLOSS == 4: # RWM
                                 #reward = tf.Print(reward, [reward], "reward")
                                 update_ret = loss_selector.update(ls_i, reward)
@@ -303,7 +333,7 @@ def get_config():
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
         callbacks=[
-            ModelSaver(),
+            ModelSaver(checkpoint_dir=MODEL_DIR),
             InferenceRunner(dataset_test,
                             [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule)
@@ -319,6 +349,8 @@ if __name__ == '__main__':
     parser.add_argument('--log_dir', help='log_dir position',
                         type=str, default=None)
     parser.add_argument('--data_dir', help='data_dir position',
+                        type=str, default=None)
+    parser.add_argument('--model_dir', help='model_dir position',
                         type=str, default=None)
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=BATCH_SIZE)
@@ -353,9 +385,17 @@ if __name__ == '__main__':
                         type=bool, default=TRACK_GRADIENTS)
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
                         type=bool, default=DO_VALID)
+    parser.add_argument('-f', '--func_type', 
+                        help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
+                        type=int, default=FUNC_TYPE)
+    parser.add_argument('--base', help='Exponential base',
+                        type=np.float32, default=EXP_BASE)
+    parser.add_argument('--opt_at', help='Optimal at', 
+                        type=int, default=OPTIMAL_AT)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
+    FUNC_TYPE = args.func_type
     BATCH_SIZE = args.batch_size
     NUM_UNITS = args.num_units
     WIDTH = args.width
@@ -370,6 +410,8 @@ if __name__ == '__main__':
     SUM_RAND_RATIO = args.sum_rand_ratio
     TRACK_GRADIENTS = args.track_grads
     DO_VALID = args.do_validation
+    EXP_BASE = args.base
+    OPTIMAL_AT = args.opt_at
 
     if STOP_GRADIENTS:
         STOP_GRADIENTS_PARTIAL = True
@@ -380,12 +422,14 @@ if __name__ == '__main__':
 
     logger.auto_set_dir(log_root=args.log_dir)
     utils.set_dataset_path(path=args.data_dir, auto_download=False)
+    MODEL_DIR = args.model_dir
 
-    logger.info("On Dataset CIFAR{}, Parameters: n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {} do_validation= {}".format(\
-                NUM_CLASSES, NUM_UNITS, WIDTH, INIT_CHANNEL, \
+    logger.info("On Dataset CIFAR{}, Parameters: f= {}, n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {} do_validation= {} exp_base= {} opt_at= {}".format(\
+                NUM_CLASSES, FUNC_TYPE, NUM_UNITS, WIDTH, INIT_CHANNEL, \
                 NUM_UNITS_PER_STACK, BATCH_SIZE, STOP_GRADIENTS, \
                 STOP_GRADIENTS_PARTIAL, SG_GAMMA, \
-                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO, DO_VALID))
+                args.samloss, EXP3_GAMMA, SUM_RAND_RATIO, DO_VALID, \
+                EXP_BASE, OPTIMAL_AT))
 
     config = get_config()
     if args.load:
