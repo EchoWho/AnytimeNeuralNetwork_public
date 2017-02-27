@@ -34,6 +34,7 @@ case $key in
     -p|--config-file-dir)
     CONFIG_DIR="$2"
     shift # pass argument
+    ;;
     -m|--model-dir)
     MODEL_DIR="$2"
     shift # pass argument
