@@ -46,7 +46,7 @@ class Exp3(object):
                 #reg_w = tf.exp( (self.gamma * 1e-3/ self.K) / w )
                 r_vec = tf.reshape(tf.one_hot(idx, self.K, 
                     tf.exp(self.gamma * reward / (p_idx * self.K)), 1.0), [1,self.K])
-                un_w = w * r_vec * reg_w
+                un_w = w * r_vec #* reg_w
                 op = tf.assign(w, un_w / tf.reduce_sum(un_w)) 
 
                 #op = tf.assign(w, tf.reshape(tf.one_hot(idx, self.K, 1., 0.), [1,self.K]))
