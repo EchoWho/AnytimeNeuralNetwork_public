@@ -43,7 +43,7 @@ class Exp3(object):
             with tf.control_dependencies([idx, p_idx, reward]):
                 scope.reuse_variables()
                 w = tf.get_variable("w")
-                reg_w = tf.exp( (self.gamma * 1e-3/ self.K) / w )
+                #reg_w = tf.exp( (self.gamma * 1e-3/ self.K) / w )
                 r_vec = tf.reshape(tf.one_hot(idx, self.K, 
                     tf.exp(self.gamma * reward / (p_idx * self.K)), 1.0), [1,self.K])
                 un_w = w * r_vec * reg_w
