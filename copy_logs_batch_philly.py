@@ -35,6 +35,8 @@ def collect_info():
 
 def copy_passed_logs_from_json(json_data=None):
 	# Extract list of finished jobs
+	# Finished jobs contain all jobs which are not running
+	# including 'Failed', 'Killed' etc
 	fin_jobs_list = json_data['finishedJobs']
 
 	# Copy jobs over to local disk 
