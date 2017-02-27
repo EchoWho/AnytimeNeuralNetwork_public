@@ -67,4 +67,5 @@ python $CONFIG_DIR/examples/ResNet/cifar-ann.py \
 -f=5 \
 --samloss=2 \
 --num_classes=100 \
+--do_validation=True \
 --exp_gamma=0.2 --sum_rand_ratio=1.0
