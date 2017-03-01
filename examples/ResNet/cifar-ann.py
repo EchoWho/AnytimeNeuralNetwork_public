@@ -325,10 +325,10 @@ def get_config():
 
     logger.info('weights: {}'.format(weights))
     lr = get_scalar_var('learning_rate', 0.01, summary=True)
-    if SAMLOSS > 0:
-        lr_schedule = [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)] 
-    else:
-        lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
+    #if SAMLOSS > 0:
+    #    lr_schedule = [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)] 
+    #else:
+    lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
     return TrainConfig(
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9),
