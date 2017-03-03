@@ -18,7 +18,7 @@ class ModelSaver(Triggerable):
     Save the model every epoch.
     """
 
-    def __init__(self, keep_recent=10, keep_freq=2,
+    def __init__(self, keep_recent=1, keep_freq=24,
                  checkpoint_dir=None,
                  var_collections=tf.GraphKeys.GLOBAL_VARIABLES):
         """
