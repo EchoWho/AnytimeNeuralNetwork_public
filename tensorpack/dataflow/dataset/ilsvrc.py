@@ -31,7 +31,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('num_preprocess_threads', 4,
                             """Number of preprocessing threads per tower. """
                             """Please make this a multiple of 4.""")
-tf.app.flags.DEFINE_integer('num_readers', 1,
+tf.app.flags.DEFINE_integer('num_readers', 4,
                             """Number of parallel readers during train.""")
 # Images are preprocessed asynchronously using multiple threads specified by
 # --num_preprocss_threads and the resulting processed images are stored in a
@@ -255,19 +255,269 @@ class ILSVRC12(RNGDataFlow):
             logger.info("{}/{} images have bounding box.".format(cnt, len(imglist)))
         return ret
 
+from tensorflow.python.ops import control_flow_ops
+def apply_with_random_selector(x, func, num_cases):
+  """Computes func(x, sel), with sel sampled from [0...num_cases-1].
+  Args:
+    x: input Tensor.
+    func: Python function to apply.
+    num_cases: Python int32, number of cases to sample sel from.
+  Returns:
+    The result of func(x, sel), where func receives the value of the
+    selector as a python integer, but sel is sampled dynamically.
+  """
+  sel = tf.random_uniform([], maxval=num_cases, dtype=tf.int32)
+  # Pass the real x only to one of the func calls.
+  return control_flow_ops.merge([
+      func(control_flow_ops.switch(x, tf.equal(sel, case))[1], case)
+      for case in range(num_cases)])[0]
+
+
+def distort_color(image, color_ordering=0, fast_mode=True, scope=None):
+  """Distort the color of a Tensor image.
+  Each color distortion is non-commutative and thus ordering of the color ops
+  matters. Ideally we would randomly permute the ordering of the color ops.
+  Rather then adding that level of complication, we select a distinct ordering
+  of color ops for each preprocessing thread.
+  Args:
+    image: 3-D Tensor containing single image in [0, 1].
+    color_ordering: Python int, a type of distortion (valid values: 0-3).
+    fast_mode: Avoids slower ops (random_hue and random_contrast)
+    scope: Optional scope for name_scope.
+  Returns:
+    3-D Tensor color-distorted image on range [0, 1]
+  Raises:
+    ValueError: if color_ordering not in [0, 3]
+  """
+  with tf.name_scope(scope, 'distort_color', [image]):
+    if fast_mode:
+      if color_ordering == 0:
+        image = tf.image.random_brightness(image, max_delta=32. / 255.)
+        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+      else:
+        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+        image = tf.image.random_brightness(image, max_delta=32. / 255.)
+    else:
+      if color_ordering == 0:
+        image = tf.image.random_brightness(image, max_delta=32. / 255.)
+        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+        image = tf.image.random_hue(image, max_delta=0.2)
+        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+      elif color_ordering == 1:
+        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+        image = tf.image.random_brightness(image, max_delta=32. / 255.)
+        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        image = tf.image.random_hue(image, max_delta=0.2)
+      elif color_ordering == 2:
+        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        image = tf.image.random_hue(image, max_delta=0.2)
+        image = tf.image.random_brightness(image, max_delta=32. / 255.)
+        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+      elif color_ordering == 3:
+        image = tf.image.random_hue(image, max_delta=0.2)
+        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        image = tf.image.random_brightness(image, max_delta=32. / 255.)
+      else:
+        raise ValueError('color_ordering must be in [0, 3]')
+
+    # The random_* ops do not necessarily clamp.
+    return tf.clip_by_value(image, 0.0, 1.0)
+
+
+def distorted_bounding_box_crop(image,
+                                bbox,
+                                min_object_covered=0.1,
+                                aspect_ratio_range=(0.75, 1.33),
+                                area_range=(0.05, 1.0),
+                                max_attempts=100,
+                                scope=None):
+  """Generates cropped_image using a one of the bboxes randomly distorted.
+  See `tf.image.sample_distorted_bounding_box` for more documentation.
+  Args:
+    image: 3-D Tensor of image (it will be converted to floats in [0, 1]).
+    bbox: 3-D float Tensor of bounding boxes arranged [1, num_boxes, coords]
+      where each coordinate is [0, 1) and the coordinates are arranged
+      as [ymin, xmin, ymax, xmax]. If num_boxes is 0 then it would use the whole
+      image.
+    min_object_covered: An optional `float`. Defaults to `0.1`. The cropped
+      area of the image must contain at least this fraction of any bounding box
+      supplied.
+    aspect_ratio_range: An optional list of `floats`. The cropped area of the
+      image must have an aspect ratio = width / height within this range.
+    area_range: An optional list of `floats`. The cropped area of the image
+      must contain a fraction of the supplied image within in this range.
+    max_attempts: An optional `int`. Number of attempts at generating a cropped
+      region of the image of the specified constraints. After `max_attempts`
+      failures, return the entire image.
+    scope: Optional scope for name_scope.
+  Returns:
+    A tuple, a 3-D Tensor cropped_image and the distorted bbox
+  """
+  with tf.name_scope(scope, 'distorted_bounding_box_crop', [image, bbox]):
+    # Each bounding box has shape [1, num_boxes, box coords] and
+    # the coordinates are ordered [ymin, xmin, ymax, xmax].
+
+    # A large fraction of image datasets contain a human-annotated bounding
+    # box delineating the region of the image containing the object of interest.
+    # We choose to create a new bounding box for the object which is a randomly
+    # distorted version of the human-annotated bounding box that obeys an
+    # allowed range of aspect ratios, sizes and overlap with the human-annotated
+    # bounding box. If no box is supplied, then we assume the bounding box is
+    # the entire image.
+    sample_distorted_bounding_box = tf.image.sample_distorted_bounding_box(
+        tf.shape(image),
+        bounding_boxes=bbox,
+        min_object_covered=min_object_covered,
+        aspect_ratio_range=aspect_ratio_range,
+        area_range=area_range,
+        max_attempts=max_attempts,
+        use_image_if_no_bounding_boxes=True)
+    bbox_begin, bbox_size, distort_bbox = sample_distorted_bounding_box
+
+    # Crop the image to the specified bounding box.
+    cropped_image = tf.slice(image, bbox_begin, bbox_size)
+    return cropped_image, distort_bbox
+
+
+def preprocess_for_train(image, height, width, bbox,
+                         fast_mode=True,
+                         scope=None):
+  """Distort one image for training a network.
+  Distorting images provides a useful technique for augmenting the data
+  set during training in order to make the network invariant to aspects
+  of the image that do not effect the label.
+  Additionally it would create image_summaries to display the different
+  transformations applied to the image.
+  Args:
+    image: 3-D Tensor of image. If dtype is tf.float32 then the range should be
+      [0, 1], otherwise it would converted to tf.float32 assuming that the range
+      is [0, MAX], where MAX is largest positive representable number for
+      int(8/16/32) data type (see `tf.image.convert_image_dtype` for details).
+    height: integer
+    width: integer
+    bbox: 3-D float Tensor of bounding boxes arranged [1, num_boxes, coords]
+      where each coordinate is [0, 1) and the coordinates are arranged
+      as [ymin, xmin, ymax, xmax].
+    fast_mode: Optional boolean, if True avoids slower transformations (i.e.
+      bi-cubic resizing, random_hue or random_contrast).
+    scope: Optional scope for name_scope.
+  Returns:
+    3-D float Tensor of distorted image used for training with range [-1, 1].
+  """
+  with tf.name_scope(scope, 'distort_image', [image, height, width, bbox]):
+    if bbox is None:
+      bbox = tf.constant([0.0, 0.0, 1.0, 1.0],
+                         dtype=tf.float32,
+                         shape=[1, 1, 4])
+    if image.dtype != tf.float32:
+      image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+    # Each bounding box has shape [1, num_boxes, box coords] and
+    # the coordinates are ordered [ymin, xmin, ymax, xmax].
+    #image_with_box = tf.image.draw_bounding_boxes(tf.expand_dims(image, 0),
+    #                                              bbox)
+    #tf.image_summary('image_with_bounding_boxes', image_with_box)
+
+    distorted_image, distorted_bbox = distorted_bounding_box_crop(image, bbox)
+    # Restore the shape since the dynamic slice based upon the bbox_size loses
+    # the third dimension.
+    distorted_image.set_shape([None, None, 3])
+    #image_with_distorted_box = tf.image.draw_bounding_boxes(
+    #    tf.expand_dims(image, 0), distorted_bbox)
+    #tf.image_summary('images_with_distorted_bounding_box',
+    #                 image_with_distorted_box)
+
+    # This resizing operation may distort the images because the aspect
+    # ratio is not respected. We select a resize method in a round robin
+    # fashion based on the thread number.
+    # Note that ResizeMethod contains 4 enumerated resizing methods.
+
+    # We select only 1 case for fast_mode bilinear.
+    num_resize_cases = 1 if fast_mode else 4
+    distorted_image = apply_with_random_selector(
+        distorted_image,
+        lambda x, method: tf.image.resize_images(x, [height, width], method=method),
+        num_cases=num_resize_cases)
+
+    #tf.image_summary('cropped_resized_image',
+    #                 tf.expand_dims(distorted_image, 0))
+
+    # Randomly flip the image horizontally.
+    distorted_image = tf.image.random_flip_left_right(distorted_image)
+
+    # Randomly distort the colors. There are 4 ways to do it.
+    distorted_image = apply_with_random_selector(
+        distorted_image,
+        lambda x, ordering: distort_color(x, ordering, fast_mode),
+        num_cases=4)
+
+    #tf.image_summary('final_distorted_image',
+    #                 tf.expand_dims(distorted_image, 0))
+    #distorted_image = tf.sub(distorted_image, 0.5)
+    #distorted_image = tf.mul(distorted_image, 2.0)
+    return distorted_image
+
+
+def preprocess_for_eval(image, height, width,
+                        central_fraction=0.875, scope=None):
+  """Prepare one image for evaluation.
+  If height and width are specified it would output an image with that size by
+  applying resize_bilinear.
+  If central_fraction is specified it would cropt the central fraction of the
+  input image.
+  Args:
+    image: 3-D Tensor of image. If dtype is tf.float32 then the range should be
+      [0, 1], otherwise it would converted to tf.float32 assuming that the range
+      is [0, MAX], where MAX is largest positive representable number for
+      int(8/16/32) data type (see `tf.image.convert_image_dtype` for details)
+    height: integer
+    width: integer
+    central_fraction: Optional Float, fraction of the image to crop.
+    scope: Optional scope for name_scope.
+  Returns:
+    3-D float Tensor of prepared image.
+  """
+  with tf.name_scope(scope, 'eval_image', [image, height, width]):
+    if image.dtype != tf.float32:
+      image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+    # Crop the central region of the image with an area containing 87.5% of
+    # the original image.
+    if central_fraction:
+      image = tf.image.central_crop(image, central_fraction=central_fraction)
+
+    if height and width:
+      # Resize the image to the specified height and width.
+      image = tf.expand_dims(image, 0)
+      image = tf.image.resize_bilinear(image, [height, width],
+                                       align_corners=False)
+      image = tf.squeeze(image, [0])
+    return image
+
+
+
 class ILSVRC12TFRecord(RNGDataFlow):
-    def __init__(self, tfrecord_dir, subset, batch_size):
+    def __init__(self, tfrecord_dir, subset, batch_size, height=224, width=224, ):
         self.subset = subset
         self.tfrecord_dir = tfrecord_dir
         self.batch_size = batch_size
+        self.height = height
+        self.width = width
+      #  self.sess = sess
         self._get_data()
 
     def size(self):
+        n_samples = 0
         if self.subset == 'train':
-            return 1281167
+            n_samples = 1281167
         if self.subset == 'validation':
-            return 50000
-    
+            n_samples = 50000
+        n_batch = n_samples // self.batch_size
+        remainder = n_samples % self.batch_size
+        if remainder == 0:
+            return n_batch
+        return n_batch + int(self.subset == 'validation')
+
+
     def data_files(self):
         tf_record_pattern = os.path.join(self.tfrecord_dir, '%s-*' % self.subset)
         data_files = tf.gfile.Glob(tf_record_pattern)
@@ -333,24 +583,36 @@ class ILSVRC12TFRecord(RNGDataFlow):
                   reader = tf.TFRecordReader()
                   _, example_serialized = reader.read(filename_queue)
 
-                
-                image_buffer, label_index, bbox, _ = ILSVRC12TFRecord.parse_example_proto(
-                    example_serialized)
-                image = ILSVRC12TFRecord.decode_jpeg(image_buffer)
-                if train:
-                    sample_distorted_bounding_box = tf.image.sample_distorted_bounding_box(
-                            tf.shape(image),
-                            bounding_boxes=bbox,
-                            min_object_covered=0.1,
-                            aspect_ratio_range=[0.75, 1.33],
-                            area_range=[0.05, 1.0],
-                            max_attempts=100,
-                            use_image_if_no_bounding_boxes=True)
-                    bbox_begin, bbox_size, distort_bbox = sample_distorted_bounding_box
-                    image = tf.slice(image, bbox_begin, bbox_size)
+                inputs = []
+                for thread_id in range(num_preprocess_threads):
+                    image_buffer, label_index, bbox, _ = ILSVRC12TFRecord.parse_example_proto(
+                        example_serialized)
+                    image = ILSVRC12TFRecord.decode_jpeg(image_buffer)
+                    if train:
+                        image = preprocess_for_train(image, self.height, self.width, bbox)
+                    else:
+                        image = preprocess_for_eval(image, self.height, self.width)
 
-                self.im = image
-                self.label = label_index
+                    image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
+                    image_std_inv = 1.0 / np.array([0.229, 0.224, 0.225], dtype='float32')
+                    image = tf.subtract(image, image_mean)
+                    image = tf.mul(image, image_std_inv)
+                    
+                    inputs.append([image, label_index])
+
+                images, label_index_batch = tf.train.batch_join(
+                    inputs,
+                    batch_size=self.batch_size,
+                    capacity=2 * num_preprocess_threads * self.batch_size,
+                    allow_smaller_final_batch=not train)
+                
+                images = tf.cast(images, tf.float32)
+                images = tf.reshape(images, shape=[self.batch_size, self.height, self.width, 3])
+
+                label_index_batch = tf.reshape(label_index_batch, [self.batch_size])
+                
+                self.im = images
+                self.label = label_index_batch
 
     def get_data(self):
         for _ in range(self.size()):
@@ -362,7 +624,7 @@ class ILSVRC12TFRecord(RNGDataFlow):
                 raise Exception("Expect there is a default session")
 
             # label -1 because imagenet default labels are 1 based. (0 is background)
-            yield [im, label[0]-1]
+            yield [im, label -1]
 
     @staticmethod
     def decode_jpeg(image_buffer, scope=None):
@@ -379,6 +641,8 @@ class ILSVRC12TFRecord(RNGDataFlow):
             # that is set dynamically by decode_jpeg. In other words, the height
             # and width of image is unknown at compile-time.
             image = tf.image.decode_jpeg(image_buffer, channels=3)
+            image = tf.image.convert_image_dtype(image, dtype=tf.float32) 
+            # the returned image is float in range [0, 1)
             return image
 
     @staticmethod
@@ -462,11 +726,5 @@ def test0():
         embed()
         break
 
-def test1():
-    ds = ILSVRC12TFRecord('/data2/ILSVRC2012/tfrecords', 'validation', 1, True)
-    for k in ds.get_data():
-        from ipdb import set_trace
-        set_trace()
-
 if __name__ == '__main__':
-    test1()
+    test0()
