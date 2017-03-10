@@ -147,7 +147,7 @@ class Model(ModelDesc):
             ls_grp3 = layers(ls_grp2[-1], 'group3', block_func, 512, defs[3], 2)
 
         ls = ls_grp0 + ls_grp1 + ls_grp2 + ls_grp3 
-        assert(N == len(ls), N)
+        assert N == len(ls), N
         weights = loss_weights(N)
         loss = 0
         for i in range(N):
@@ -200,6 +200,7 @@ def get_config():
     cfg_N = { 18:8, 34:16, 50:16, 101:33 }
     N = cfg_N[DEPTH]
     weights = loss_weights(N)
+    logger.info("weights: {}".format(weights))
     unit_idx = 0
     for i in range(N):
         if weights[i] > 0:
