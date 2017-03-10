@@ -496,7 +496,7 @@ def preprocess_for_eval(image, height, width,
 
 
 class ILSVRC12TFRecord(RNGDataFlow):
-    def __init__(self, tfrecord_dir, subset, batch_size, height=224, width=224, ):
+    def __init__(self, tfrecord_dir, subset, batch_size, height=224, width=224):
         self.subset = subset
         self.tfrecord_dir = tfrecord_dir
         self.batch_size = batch_size
