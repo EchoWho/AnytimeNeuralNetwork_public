@@ -280,8 +280,10 @@ if __name__ == '__main__':
     #    eval_on_ILSVRC12(args.load, args.data_dir)
     #    sys.exit()
 
-    gpus = os.environ['CUDA_VISIBLE_DEVICES']
-    NR_GPU = len(gpus.split(','))
+    NR_GPU = 1
+    if os.environ.get('CUDA_VISIBLE_DEVICES') is not None:
+        gpus = os.environ['CUDA_VISIBLE_DEVICES']
+        NR_GPU = len(gpus.split(','))
     BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
 
     config = get_config()
