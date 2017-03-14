@@ -149,6 +149,6 @@ class HalfEndHalfExp3(object):
             return tf.zeros(())
 
         with tf.variable_scope(self.name):
-            tf.cond(tf.equal(self.coin, 0), 
+            return tf.cond(tf.equal(self.coin, 0), 
                 lambda: tf.zeros(()), 
                 lambda: self.exp3.update(idx, p_idx, reward)) 
