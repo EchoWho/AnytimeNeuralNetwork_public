@@ -1,9 +1,9 @@
 #!/bin/bash
 
 USERNAME="dedey"
-PASSWORD="Yoga2god?"
+PASSWORD="GoodCarl2god?"
 CLUSTER="gcr"
-JOBSCRIPT="run_exp_313.sh"
+JOBSCRIPT="run_exp_317.sh"
 SPECIAL_NAME="_ann"
 
 VC="pnrsy"
@@ -18,7 +18,7 @@ CMD+="minGPUs=1&"
 CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
 CMD+="isdebug=false&"
 CMD+="iscrossrack=false&"
-CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
+CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fimagenet_tfrecords%2F&"
 CMD+="userName=$USERNAME"
 
 curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
