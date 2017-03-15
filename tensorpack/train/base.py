@@ -178,6 +178,7 @@ class Trainer(object):
                                 (self.epoch_num + 1.0 + \
                                   float(self.local_step) / self.config.steps_per_epoch)\
                                   / self.config.max_epoch * 100.0
+                            print('PROGRESS: {0:05.2f}%'.format(progress_percentage))
                         if self.coord.should_stop():
                             return
                         fetch_data = self.run_step()  # implemented by subclass
