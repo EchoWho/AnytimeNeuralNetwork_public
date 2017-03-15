@@ -173,7 +173,7 @@ class Trainer(object):
                     logger.info("Start Epoch {} ...".format(self.epoch_num))
                     start_time = time.time()
                     for self.local_step in range(self.config.steps_per_epoch):
-                        if (local_step + 1) % 1000 == 0:
+                        if (self.local_step + 1) % 1000 == 0:
                             progress_percentage = \
                                 (self.epoch_num + 1.0 + \
                                   float(self.local_step) / self.config.steps_per_epoch)\
