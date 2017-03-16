@@ -497,7 +497,12 @@ def preprocess_for_eval(image, height, width,
 
 class ILSVRC12TFRecord(RNGDataFlow):
     def __init__(self, tfrecord_dir, subset, batch_size, height=224, width=224):
-        self.subset = subset
+        if subset[:4] == 'toy_':
+            self.subset = subset[4:]
+            self.is_toy = True
+        else:
+            self.subset = subset
+            self.is_toy = False
         self.tfrecord_dir = tfrecord_dir
         self.batch_size = batch_size
         self.height = height
@@ -507,9 +512,11 @@ class ILSVRC12TFRecord(RNGDataFlow):
 
     def size(self):
         n_samples = 0
-        if self.subset == 'train':
+        if self.is_toy:
+            n_samples = 1024
+        elif self.subset == 'train':
             n_samples = 1281167
-        if self.subset == 'validation':
+        elif self.subset == 'validation':
             n_samples = 50000
         n_batch = n_samples // self.batch_size
         remainder = n_samples % self.batch_size

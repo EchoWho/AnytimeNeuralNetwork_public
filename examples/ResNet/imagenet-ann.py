@@ -16,6 +16,8 @@ from tensorpack import *
 from tensorpack.utils.stats import RatioCounter
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
+from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect,RWM
+from tensorpack.utils import anytime_loss
 
 """
 Training code of Pre-Activation version of ResNet on ImageNet.
@@ -37,6 +39,16 @@ EXP_BASE=2.0
 
 # anytime loss skip (num units per stack/prediction)
 NUM_UNITS_PER_STACK=2
+
+# Random loss sample params
+##0: nothing; 1: rand; 2:exp3; 3:HEHE3
+SAMLOSS=0  
+EXP3_GAMMA=0.5
+SUM_RAND_RATIO=2.0
+
+TRACK_GRADIENTS=False
+
+IS_TOY=False
 
 def loss_weights(N):
     if FUNC_TYPE == 0: # exponential spacing
@@ -148,10 +160,31 @@ class Model(ModelDesc):
 
         ls = ls_grp0 + ls_grp1 + ls_grp2 + ls_grp3 
         assert N == len(ls), N
+        
         weights = loss_weights(N)
+        logger.info("sampling loss with method {}".format(SAMLOSS))
+        if SAMLOSS > 0:
+            ls_K = np.sum(np.asarray(weights) > 0)
+            if SAMLOSS == 1:
+                loss_selector = RandSelect('rand', ls_K)
+            elif SAMLOSS == 2:
+                loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA) 
+            elif SAMLOSS == 3:
+                loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
+            elif SAMLOSS == 4:
+                loss_selector = RWM('rwm', ls_K, EXP3_GAMMA)
+            else:
+                raise Exception("Undefined loss selector")
+            ls_i, ls_p = loss_selector.sample()
+            for i in range(ls_K):
+                weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
+                add_moving_summary(weight_i)
+
         loss = 0
+        anytime_idx = 0
         for i in range(N):
             if weights[i] > 0:
+                anytime_idx += 1
                 with tf.variable_scope('pred_{:02d}'.format(i)) as scope:
                     logits = compute_logits(ls[i], 'logits')
                     lossi = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
@@ -163,7 +196,32 @@ class Model(ModelDesc):
                     wrong = prediction_incorrect(logits, label, 5, name='wrong-top5')
                     add_moving_summary(tf.reduce_mean(wrong, name='train-error-top5'))
 
-                    loss += weights[i] * lossi
+                add_weight = 0
+                if SAMLOSS in [1,2,3]:
+                    def rand_weight_and_update_ls(loss=lossi):
+                        gs = tf.gradients(loss, tf.trainable_variables()) 
+                        reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                        #reward /= np.float32(ls_K - anytime_idx + 1)
+                        #reward = loss / np.float32(ls_K - anytime_idx + 2)
+                        #reward = tf.Print(reward, [reward], "reward")
+                        update_ret = loss_selector.update(ls_i, ls_p, reward)
+                        with tf.control_dependencies([update_ret]):
+                            add_weight = tf.constant(self.weights[-1] * 2.0, dtype=tf.float32)
+                        return add_weight
+                    add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
+                        lambda: rand_weight_and_update_ls(), lambda: tf.zeros(()))
+                if TRACK_GRADIENTS or SAMLOSS == 4:
+                    gs = tf.gradients(lossi, tf.trainable_variables())
+                    reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
+                                       name='l2_grad_{}'.format(anytime_idx-1))
+                    reward /= np.float32(ls_K - anytime_idx + 1)
+                    if SAMLOSS == 4: # RWM
+                        #reward = tf.Print(reward, [reward], "reward")
+                        update_ret = loss_selector.update(ls_i, reward)
+                        with tf.control_dependencies([update_ret]):
+                            add_weight = tf.zeros(())
+                    add_moving_summary(reward)
+                loss += (weights[i] + add_weight / SUM_RAND_RATIO)* lossi
 
         wd_cost = regularize_cost('.*/W', l2_regularizer(1e-4), name='l2_regularize_loss')
         loss = tf.identity(loss, name='sum_loss')
@@ -192,9 +250,13 @@ def get_data(train_or_test):
 
 def get_config():
     # prepare dataset
-    dataset_train = get_data('train')
+    if IS_TOY:
+        dataset_train = get_data('toy_train')
+        dataset_val = get_data('toy_validation')
+    else:
+        dataset_train = get_data('train')
+        dataset_val = get_data('validation')
     steps_per_epoch = dataset_train.size() // NR_GPU
-    dataset_val = get_data('validation')
 
     vcs = []
     cfg_N = { 18:8, 34:16, 50:16, 101:33 }
@@ -244,7 +306,6 @@ def eval_on_ILSVRC12(model_file, data_dir):
     print("Top1 Error: {}".format(acc1.ratio))
     print("Top5 Error: {}".format(acc5.ratio))
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
@@ -264,6 +325,17 @@ if __name__ == '__main__':
     parser.add_argument('--opt_at', help='Optimal at', 
                         type=int, default=OPTIMAL_AT)
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--samloss', help='Method to Sample losses to update',
+                        type=int, default=SAMLOSS)
+    parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
+                        type=np.float32, default=EXP3_GAMMA)
+    parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
+                        type=np.float32, default=SUM_RAND_RATIO)
+    parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
+                        type=bool, default=TRACK_GRADIENTS)
+    parser.add_argument('--is_toy', help='Whether to have data size of 1024',
+                        type=bool, default=IS_TOY)
+
     args = parser.parse_args()
     # directory setup
     MODEL_DIR = args.model_dir
@@ -274,7 +346,14 @@ if __name__ == '__main__':
     NUM_UNITS_PER_STACK = args.stack
     DEPTH = args.depth
     OPTIMAL_AT = args.opt_at
+
+    SAMLOSS = args.samloss
+    EXP3_GAMMA = args.exp_gamma
+    SUM_RAND_RATIO = args.sum_rand_ratio
     
+    TRACK_GRADIENTS = args.track_grads
+    IS_TOY = args.is_toy
+
     #if args.eval:
     #    BATCH_SIZE = 128    # something that can run on one gpu
     #    eval_on_ILSVRC12(args.load, args.data_dir)
