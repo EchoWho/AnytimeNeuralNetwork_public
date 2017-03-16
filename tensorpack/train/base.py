@@ -175,7 +175,7 @@ class Trainer(object):
                     for self.local_step in range(self.config.steps_per_epoch):
                         if (self.local_step + 1) % 1000 == 0:
                             progress_percentage = \
-                                (self.epoch_num + 1.0 + \
+                                (self.epoch_num + \
                                   float(self.local_step) / self.config.steps_per_epoch)\
                                   / self.config.max_epoch * 100.0
                             print('PROGRESS: {0:05.2f}%'.format(progress_percentage))
