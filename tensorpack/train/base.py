@@ -178,7 +178,7 @@ class Trainer(object):
                                 (self.epoch_num + \
                                   float(self.local_step) / self.config.steps_per_epoch)\
                                   / self.config.max_epoch * 100.0
-                            print('PROGRESS: {0:05.2f}%'.format(progress_percentage))
+                            logger.info('PROGRESS: {0:05.2f}%'.format(progress_percentage))
                         if self.coord.should_stop():
                             return
                         fetch_data = self.run_step()  # implemented by subclass
@@ -190,7 +190,7 @@ class Trainer(object):
                     logger.info("Epoch {} (global_step {}) finished, time:{:.2f} sec.".format(
                         self.epoch_num, self.global_step, time.time() - start_time))
                     progress_percentage = ((self.epoch_num +1.0) / self.config.max_epoch)*100.0
-                    print('PROGRESS: {0:05.2f}%'.format(progress_percentage))
+                    logger.info('PROGRESS: {0:05.2f}%'.format(progress_percentage))
 
                     # trigger epoch outside the timing region.
                     self.trigger_epoch()
