@@ -313,6 +313,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_dir', help='log_dir for stdout')
     parser.add_argument('--model_dir', help='dir for saving models')
     parser.add_argument('--load', help='load model')
+    parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=-1)
     parser.add_argument('--batch_size', help='batch_size', type=int, default=TOTAL_BATCH_SIZE)
     parser.add_argument('-f', '--func_type', help='type of loss weight', 
                         type=int, default=FUNC_TYPE)
@@ -363,6 +364,8 @@ if __name__ == '__main__':
     if os.environ.get('CUDA_VISIBLE_DEVICES') is not None:
         gpus = os.environ['CUDA_VISIBLE_DEVICES']
         NR_GPU = len(gpus.split(','))
+    if args.nr_gpu > 0:
+        NR_GPU = args.nr_gpu
     BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
 
     config = get_config()
