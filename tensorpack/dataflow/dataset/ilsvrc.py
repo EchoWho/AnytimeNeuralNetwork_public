@@ -23,7 +23,6 @@ CAFFE_ILSVRC12_URL = "http://dl.caffe.berkeleyvision.org/caffe_ilsvrc12.tar.gz"
 
 FLAGS = tf.app.flags.FLAGS
 
-FLAGS = tf.app.flags.FLAGS
 #tf.app.flags.DEFINE_integer('batch_size', 32,
 #        """Number of images to process in a batch.""")
 #tf.app.flags.DEFINE_integer('image_size', 299,
@@ -33,6 +32,8 @@ tf.app.flags.DEFINE_integer('num_preprocess_threads', 4,
                             """Please make this a multiple of 4.""")
 tf.app.flags.DEFINE_integer('num_readers', 4,
                             """Number of parallel readers during train.""")
+tf.app.flags.DEFINE_integer('train_queue_capacity', 16,
+                            """training queue capacity""")
 # Images are preprocessed asynchronously using multiple threads specified by
 # --num_preprocss_threads and the resulting processed images are stored in a
 # random shuffling queue. The shuffling queue dequeues --batch_size images
@@ -541,9 +542,10 @@ class ILSVRC12TFRecord(RNGDataFlow):
                 data_files = self.data_files()
                 train = self.subset == 'train'
                 if train:
+                    train_queue_capacity = FLAGS.train_queue_capacity
                     filename_queue = tf.train.string_input_producer(data_files,
                                                                     shuffle=True,
-                                                                    capacity=16)
+                                                                    capacity=train_queue_capacity)
                 else:
                     filename_queue = tf.train.string_input_producer(data_files,
                                                                     shuffle=False,
