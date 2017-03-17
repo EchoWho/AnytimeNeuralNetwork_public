@@ -61,7 +61,7 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+#export CUDA_VISIBLE_DEVICES=0,1,2,3
 python $CONFIG_DIR/examples/ResNet/imagenet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
@@ -69,4 +69,5 @@ python $CONFIG_DIR/examples/ResNet/imagenet-ann.py \
 -f=2 \
 -d=34 \
 --opt_at=15 \
---batch_size=128
+--batch_size=128 \
+--nr_gpu=4
