@@ -9,6 +9,7 @@ __all__ = ['Exp3CPU']
 class Exp3CPU(Callback):
 
     def __init__(self, K, gamma, select_name, reward_names):
+        assert K == len(reward_names)
         self.K = K
         self.gamma = gamma
         self.w = np.ones(K, dtype=np.float64) / K
@@ -23,6 +24,7 @@ class Exp3CPU(Callback):
         self._r_readable_names = list(self._r_readable_names)
         self.r_names = list(self.r_names)
 
+        self._select=self.K-1
         self.active = False
         self.is_first = True
 
@@ -41,23 +43,21 @@ class Exp3CPU(Callback):
         self.assign_selection = self.select.assign(self.select_holder)
     
     def _before_train(self):
-        self._select=self.K-1
-        self.average_reward = 0.0
-        self.max_reward = 0.0
-        self.reward_cnt = 0
+        self.average_reward = np.zeros(self.K)
+        self.max_reward = np.zeros(self.K)
+        self.reward_cnt = np.ones(self.K)
 
-    def _trigger_step(self, reward):
-        self.average_reward += reward
-        self.max_reward = max(reward, self.max_reward)
-        self.reward_cnt += 1
-        if not self.active:
-            return 
-        if not self.is_first:
+    def _trigger_step(self, select, reward):
+        assert select == self._select, select
+        #print "select: {} , reward: {}".format(select, reward)
+        self.average_reward[self._select] += reward
+        self.max_reward[self._select] = max(reward, self.max_reward[self._select])
+        self.reward_cnt[self._select] += 1
+        if not self.is_first and self.active:
             old_weight = self.sample_w[self._select]
-            self.w[self._select] *= np.exp(self.gamma * reward / self.old_average / \
+            self.w[self._select] *= np.exp(self.gamma * reward / \
                 (old_weight * self.K))
             self.w /= np.sum(self.w)
-            #self.w = self.w * (1.0 - self.gamma / 1000.0) + self.gamma / 1000.0 / self.K
             assert not any(np.isnan(self.w)), self.w
         self.sample_w = self.w * (1.0 - self.gamma) + self.gamma / self.K
         self._select = np.int32(np.argmax(np.random.multinomial(1, self.sample_w)))
@@ -70,10 +70,12 @@ class Exp3CPU(Callback):
         logger.info("Exp3: Average Reward: {}".format(self.average_reward / self.reward_cnt))
         logger.info("Exp3: Max Reward: {}".format(self.max_reward))
         logger.info("Exp3: Sample weights: {}".format(self.sample_w))
+        logger.info("Exp3: weights: {}".format(self.w))
         self.old_average = self.average_reward
-        self.average_reward = 0.0
-        self.max_reward = 0.0
-        self.reward_cnt = 0
-
+        self.average_reward = np.zeros(self.K)
+        self.max_reward = np.zeros(self.K)
+        self.reward_cnt = np.ones(self.K)
+ 
     def _extra_fetches(self):
-        return [self.rewards[self._select]]
+        #print "fetch name: {}".format(self.rewards[self._select].name)
+        return [self.select, self.rewards[self._select]]
