@@ -55,9 +55,9 @@ class Exp3CPU(Callback):
         self.reward_cnt[self._select] += 1
         if not self.is_first and self.active:
             old_weight = self.sample_w[self._select]
-            self.w[self._select] *= np.exp(self.gamma * reward / \
-                (old_weight * self.K))
+            self.w[self._select] *= np.exp(self.gamma * reward / (old_weight * self.K))
             self.w /= np.sum(self.w)
+            self.w = self.w * (1.0 - self.gamma * 0.001) + self.gamma * 0.001 / self.K
             assert not any(np.isnan(self.w)), self.w
         self.sample_w = self.w * (1.0 - self.gamma) + self.gamma / self.K
         self._select = np.int32(np.argmax(np.random.multinomial(1, self.sample_w)))
