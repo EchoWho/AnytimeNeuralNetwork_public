@@ -50,11 +50,12 @@ class Callbacks(Callback):
     (e.g. :class:`StatPrinter` will be executed at last).
     """
 
-    def __init__(self, cbs):
+    def __init__(self, cbs, fetch_cache=False):
         """
         Args:
             cbs(list): a list of :class:`Callback` instances.
         """
+        self.fetch_cache = fetch_cache
         # check type
         for cb in cbs:
             assert isinstance(cb, Callback), cb.__class__
@@ -103,7 +104,8 @@ class Callbacks(Callback):
             for f in fetch:
                 ret.append(f)
                 self._cbid_to_fetchid[idx].append(len(ret)-1)
-        self._extra_fetches_cache = ret
+        if self.fetch_cache:
+            self._extra_fetches_cache = ret
         return ret
 
     def _trigger_step(self, *args):
