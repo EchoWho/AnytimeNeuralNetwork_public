@@ -82,7 +82,7 @@ class Callback(object):
         fetches = self._extra_fetches()
         ret = []
         for f in fetches:
-            if isinstance(f, (tf.Tensor, tf.Operation)):
+            if isinstance(f, (tf.Variable, tf.Tensor, tf.Operation)):
                 ret.append(f)
             else:
                 ret.append(get_op_or_tensor_by_name(f))

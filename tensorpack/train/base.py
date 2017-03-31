@@ -75,7 +75,7 @@ class Trainer(object):
 
         This function should only get called after :meth:`setup()` has finished.
         """
-        return self._extra_fetches
+        return self.config.callbacks.extra_fetches()
 
     def trigger_epoch(self):
         """
