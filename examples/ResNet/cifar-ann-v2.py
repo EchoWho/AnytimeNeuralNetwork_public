@@ -35,6 +35,7 @@ NUM_UNITS_PER_STACK=1
 SAMLOSS=0  
 EXP3_GAMMA=0.5
 SUM_RAND_RATIO=2.0
+LAST_REWARD_RATE=0.85
 
 # Stop gradients params
 STOP_GRADIENTS=False
@@ -241,7 +242,7 @@ class Model(ModelDesc):
                             online_learn_rewards.append(tf.multiply(reward, 1.0, 
                                 name='reward_{:02d}'.format(anytime_idx-1)))
                         if ci == len(l_costs)-1 and is_last_row:
-                            reward = max_reward * 0.9
+                            reward = max_reward * LAST_REWARD_RATE
                             online_learn_rewards.append(tf.multiply(reward, 1.0, 
                                 name='reward_{:02d}'.format(anytime_idx)))
                             #cost = tf.Print(cost, online_learn_rewards)
@@ -383,6 +384,8 @@ if __name__ == '__main__':
                         type=np.float32, default=EXP3_GAMMA)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
                         type=np.float32, default=SUM_RAND_RATIO)
+    parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
+                        type=np.float32, default=LAST_REWARD_RATE)
     parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
                         type=bool, default=TRACK_GRADIENTS)
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
@@ -410,6 +413,7 @@ if __name__ == '__main__':
     SAMLOSS = args.samloss
     EXP3_GAMMA = args.exp_gamma
     SUM_RAND_RATIO = args.sum_rand_ratio
+    LAST_REWARD_RATE = args.last_reward_rate
     TRACK_GRADIENTS = args.track_grads
     DO_VALID = args.do_validation
     EXP_BASE = args.base
