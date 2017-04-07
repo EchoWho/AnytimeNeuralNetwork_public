@@ -203,6 +203,8 @@ class Model(ModelDesc):
         unit_idx = -1
         anytime_idx = -1
         online_learn_rewards = []
+        last_cost = None
+        max_reward = 0.0
         for res_block_i in range(NUM_RES_BLOCKS):
             for k in range(self.n):
                 scope_name = 'res{}.{:02d}'.format(res_block_i, k)
@@ -231,10 +233,20 @@ class Model(ModelDesc):
                         # regularize_cost to get the weights using variable names
                         wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
                         
-                        gs = tf.gradients(c, tf.trainable_variables()) 
-                        reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
-                        online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                            name='reward_{:02d}'.format(anytime_idx)))
+                        #gs = tf.gradients(c, tf.trainable_variables()) 
+                        #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                        if not last_cost is None:
+                            reward = 1.0 - c / last_cost
+                            max_reward = tf.maximum(reward, max_reward)
+                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                                name='reward_{:02d}'.format(anytime_idx-1)))
+                        if ci == len(l_costs)-1 and is_last_row:
+                            reward = max_reward * 0.9
+                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                                name='reward_{:02d}'.format(anytime_idx)))
+                            #cost = tf.Print(cost, online_learn_rewards)
+                        last_cost = c
+
 
                         if STOP_GRADIENTS_PARTIAL and not is_last_row: 
                             l = l_feats[ci]
