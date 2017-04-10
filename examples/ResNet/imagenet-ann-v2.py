@@ -43,8 +43,9 @@ NUM_UNITS_PER_STACK=2
 # Random loss sample params
 ##0: nothing; 1: rand; 2:exp3; 3:HEHE3
 SAMLOSS=0  
-EXP3_GAMMA=0.5
+EXP3_GAMMA=0.3
 SUM_RAND_RATIO=2.0
+LAST_REWARD_RATE = 0.85
 
 TRACK_GRADIENTS=False
 
@@ -174,6 +175,8 @@ class Model(ModelDesc):
         loss = 0.0
         anytime_idx = -1
         online_learn_rewards = []
+        last_reward = None
+        max_reward = 0.0
         for i in range(N):
             cost_weight = weights[i]
             if cost_weight > 0:
@@ -199,11 +202,18 @@ class Model(ModelDesc):
                 else:
                     loss += add_weight * lossi
                 
-                gs = tf.gradients(lossi, tf.trainable_variables()) 
-                reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
-                online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                    name='reward_{:02d}'.format(anytime_idx)))
-                print online_learn_rewards[-1].name
+                #gs = tf.gradients(lossi, tf.trainable_variables()) 
+                #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                if not last_reward is None:
+                    reward = 1.0 - lossi / last_reward
+                    max_reward = tf.maximum(reward, max_reward)
+                    online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                        name='reward_{:02d}'.format(anytime_idx-1)))
+                if i == N-1:
+                    reward = max_reward * LAST_REWARD_RATE
+                    online_learn_rewards.append(tf.multiply(reward, 1.0,
+                        name='reward_{:02d}'.format(anytime_idx)))
+                last_reward = lossi 
 
         wd_cost = regularize_cost('.*/W', l2_regularizer(1e-4), name='l2_regularize_loss')
         loss = tf.identity(loss, name='sum_loss')
@@ -326,6 +336,8 @@ if __name__ == '__main__':
                         type=bool, default=TRACK_GRADIENTS)
     parser.add_argument('--is_toy', help='Whether to have data size of 1024',
                         type=bool, default=IS_TOY)
+    parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
+                        type=np.float32, default=LAST_REWARD_RATE)
 
     args = parser.parse_args()
     # directory setup
@@ -341,6 +353,7 @@ if __name__ == '__main__':
     SAMLOSS = args.samloss
     EXP3_GAMMA = args.exp_gamma
     SUM_RAND_RATIO = args.sum_rand_ratio
+    LAST_REWARD_RATE = args.last_reward_rate
     
     TRACK_GRADIENTS = args.track_grads
     IS_TOY = args.is_toy
