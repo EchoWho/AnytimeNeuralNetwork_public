@@ -70,4 +70,4 @@ python $CONFIG_DIR/examples/ResNet/svhn-logdense.py \
 --growth_rate=16 \
 --num_units=12 \
 --batch_size=64 \
---stack=3
+--stack=2

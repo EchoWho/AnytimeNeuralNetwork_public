@@ -65,9 +65,9 @@ python $CONFIG_DIR/examples/ResNet/svhn-logdense.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
--f=2 \
+-f=5 \
 --opt_at=-1 \
---growth_rate=32 \
+--growth_rate=24 \
 --num_units=12 \
 --batch_size=32 \
 --stack=2

@@ -68,6 +68,6 @@ python $CONFIG_DIR/examples/ResNet/svhn-logdense.py \
 -f=2 \
 --opt_at=-1 \
 --growth_rate=16 \
---num_units=52 \
---batch_size=32 \
---stack=15
+--num_units=32 \
+--batch_size=64 \
+--stack=6
