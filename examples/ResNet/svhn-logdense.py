@@ -60,7 +60,7 @@ class Model(ModelDesc):
         super(Model, self).__init__()
         self.n = n
         self.growth_rate = growth_rate
-        self.init_channel = init_channel
+        self.init_channel = growth_rate * 2
         #self.bottleneck_width = 4
         self.reduction_rate = 1
 
@@ -188,7 +188,7 @@ def get_data(train_or_test):
             imgaug.MapImage(lambda x: x - pp_mean)
         ]
     ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, 128, remainder=not isTrain)
+    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchData(ds, 5, 5)
     return ds
