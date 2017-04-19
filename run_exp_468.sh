@@ -61,13 +61,13 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/svhn-logdense.py \
+python $CONFIG_DIR/examples/ResNet/imagenet-logdense.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 -f=2 \
+--depth=169 \
+--nr_gpu=4 \
 --opt_at=-1 \
---growth_rate=32 \
---num_units=12 \
---batch_size=32 \
---stack=2
+--growth_rate=64 \
+--batch_size=128
