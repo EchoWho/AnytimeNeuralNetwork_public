@@ -7,7 +7,7 @@ import pdb
 
 def collect_info():
 	user = 'dedey'
-	password = 'Yoga2god?'
+	password = 'GoodCarl2god?'
 	cluster = 'gcr'
 	vc = 'pnrsy'
 	status = 'Passed'
