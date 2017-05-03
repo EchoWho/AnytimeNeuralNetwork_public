@@ -12,6 +12,10 @@ from tensorpack.tfutils.summary import *
 from tensorpack.utils import anytime_loss, logger, utils
 
 """
+Modified for generating anytime prediction after
+a network is trained. 
+added FUNC_TYPE 9 for this.
+ModelSaver keep_freq=1 for this
 """
 NUM_CLASSES=10
 DO_VALID=False
@@ -51,6 +55,10 @@ def loss_weights(N):
         return anytime_loss.half_constant_half_optimal(N, -1)
     elif FUNC_TYPE == 8: # quater constant, half optimal
         return anytime_loss.quater_constant_half_optimal(N)
+    elif FUNC_TYPE == 9: # train anytime predictor after the final is fixed through no-backs
+        return anytime_loss.stack_loss_weights(N, 
+            NUM_UNITS_PER_STACK, 
+            anytime_loss.constant_weights)
     else:
         raise NameError('func type must be either 0: exponential or 1: square\
             or 2: optimal at --opt_at, or 3: exponential weight with base --base')
@@ -90,6 +98,7 @@ class Model(ModelDesc):
             exponential *= 2
         
         past_feats = []
+        prev_logits = None
         for bi in range(NUM_RES_BLOCKS):
             if bi == 0:
                 with tf.variable_scope('init_conv') as scope:
@@ -112,12 +121,17 @@ class Model(ModelDesc):
                 unit_idx += 1
                 cost_weight = cost_weights[unit_idx]
                 scope_name = 'dense{}.{}'.format(bi, k)
+                is_last_node = not (k < self.n - 1 or bi < NUM_RES_BLOCKS -1)
                 with tf.variable_scope(scope_name) as scope:
-                    selected_feats = [ past_feats[unit_idx - e + 1] \
-                        for e in exponentials if unit_idx - e + 1 >= 0]
-                    
-                    selected_feats_idx = [ unit_idx - e + 1 \
-                        for e in exponentials if unit_idx - e + 1 >= 0]
+                    if not is_last_node:
+                        selected_feats = [ past_feats[unit_idx - e + 1] \
+                            for e in exponentials if unit_idx - e + 1 >= 0]
+                        
+                        selected_feats_idx = [ unit_idx - e + 1 \
+                            for e in exponentials if unit_idx - e + 1 >= 0]
+                    else:
+                        selected_feats = past_feats
+                        selected_feats_idx = list(range(len(past_feats)))
                     print "unit_idx = {}, len past_feats = {}, selected_feats: {}".format(unit_idx,
                         len(past_feats), selected_feats_idx)
                     l = tf.concat(3, selected_feats, name='concat')
@@ -129,13 +143,20 @@ class Model(ModelDesc):
                     l = conv('conv1', l, self.growth_rate, 1)
                     past_feats.append(l)
                     
-                    if cost_weight >0:
+                    if cost_weight > 0:
                         #print "Stop gradient at {}".format(scope_name)
                         #merged_feats = tf.stop_gradient(merged_feats)
+                        if not is_last_node and FUNC_TYPE == 9:
+                            l = tf.stop_gradient(l)
                         l = BatchNorm('bn_pred', l)
                         l = tf.nn.relu(l)
                         l = GlobalAvgPooling('gap', l)
                         logits, vl = FullyConnected('linear', l, out_dim=NUM_CLASSES, nl=tf.identity, return_vars=True)
+
+                        if not is_last_node and FUNC_TYPE == 9:
+                            if prev_logits is not None:
+                                logits += prev_logits
+                            prev_logits = tf.stop_gradient(logits)
                         cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
                         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
@@ -192,11 +213,6 @@ def get_config():
     steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
-
-    get_global_step_var()
-    lr = tf.Variable(0.1, trainable=False, name='learning_rate')
-    tf.summary.scalar('learning_rate', lr)
-
     vcs = []
     total_units = NUM_RES_BLOCKS * NUM_UNITS
     cost_weights = loss_weights(total_units)
@@ -210,12 +226,15 @@ def get_config():
                     summary_name=scope_name+'val_err'))
             unit_idx += 1
 
+    get_global_step_var()
+    lr = tf.Variable(0.01, trainable=False, name='learning_rate')
+    tf.summary.scalar('learning_rate', lr)
     return TrainConfig(
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
             StatPrinter(),
-            ModelSaver(checkpoint_dir=MODEL_DIR),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=1),
             InferenceRunner(dataset_test,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
