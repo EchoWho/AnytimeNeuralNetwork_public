@@ -278,7 +278,7 @@ def get_config():
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
-            ModelSaver(checkpoint_dir=MODEL_DIR),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=10000),
             InferenceRunner(dataset_val, vcs),
             ScheduledHyperParamSetter('learning_rate',
                                       [(30, 1e-2), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
