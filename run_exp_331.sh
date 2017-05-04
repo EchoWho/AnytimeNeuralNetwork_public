@@ -68,4 +68,5 @@ python $CONFIG_DIR/examples/ResNet/imagenet-ann.py \
 -f=5 \
 -d=50 \
 --opt_at=-1 \
---batch_size=32
+--nr_gpu=4 \
+--batch_size=128
