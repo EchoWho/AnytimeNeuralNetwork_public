@@ -68,7 +68,8 @@ python $CONFIG_DIR/examples/ResNet/imagenet-ann-v2.py \
 -f=5 \
 -d=101 \
 --opt_at=-1 \
---batch_size=64 \
+--batch_size=128 \
+--nr_gpu=4 \
 --samloss=0 \
 --last_reward_rate=0.85 \
 --exp_gamma=0.3 \
