@@ -267,7 +267,7 @@ def get_config():
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
             StatPrinter(),
-            ModelSaver(checkpoint_dir=MODEL_DIR),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=10000),
             InferenceRunner(dataset_val,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
