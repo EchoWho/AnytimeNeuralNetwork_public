@@ -11,7 +11,7 @@ def collect_info():
 	cluster = 'gcr'
 	vc = 'pnrsy'
 	status = 'Passed'
-	num_finished_jobs = '1000'
+	num_finished_jobs = '200'
 
 	CMD="https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(cluster, vc, num_finished_jobs, user, status)
 

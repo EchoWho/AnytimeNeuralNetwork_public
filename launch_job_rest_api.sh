@@ -3,7 +3,7 @@
 USERNAME="dedey"
 PASSWORD="GoodCarl2god?"
 CLUSTER="gcr"
-JOBSCRIPT="run_exp_474.sh"
+JOBSCRIPT="run_exp_637.sh"
 SPECIAL_NAME="_ann"
 
 VC="pnrsy"
@@ -25,7 +25,7 @@ CMD+="userName=$USERNAME"
 curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
 
 # FOR WHEN YOU NEED IMAGENET	
-# CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fimagenet_tfrecords%2F&"
+# CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2Fimagenet_tfrecords%2F&"
 
 # FOR WHEN YOU NEED OTHER DATASETS
 # CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
