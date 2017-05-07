@@ -267,11 +267,15 @@ def get_config():
     if SAMLOSS > 0:
         ls_K = np.sum(np.asarray(weights) > 0)
         reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(ls_K)]
-        exp3_callback = Exp3CPU(ls_K, EXP3_GAMMA, 
-                                'select_idx:0', reward_names)
-        exp3_callbacks = [ exp3_callback ]
+        if SAMLOSS == 2:
+            online_learn_func = Exp3CPU
+        elif SAMLOSS == 4:
+            online_learn_func = RWMCPU
+        online_learn_cb = online_learn_func(ls_K, EXP3_GAMMA, 
+            'select_idx:0', reward_names)
+        online_learn_cb = [ online_learn_cb ]
     else:
-        exp3_callbacks = []
+        online_learn_cb = []
 
     lr = get_scalar_var('learning_rate', 0.1, summary=True)
     return TrainConfig(
@@ -283,7 +287,7 @@ def get_config():
             ScheduledHyperParamSetter('learning_rate',
                                       [(30, 1e-2), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
             HumanHyperParamSetter('learning_rate'),
-        ] + exp3_callbacks,
+        ] + online_learn_cb,
         model=Model(),
         steps_per_epoch=steps_per_epoch,
         max_epoch=110,
