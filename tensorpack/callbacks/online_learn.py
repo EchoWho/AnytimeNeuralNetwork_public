@@ -4,7 +4,7 @@ from .base import Callback
 from ..tfutils import get_op_tensor_name, get_op_or_tensor_by_name
 from tensorpack.utils import logger
 
-__all__ = ['Exp3CPU', 'RWMCPU'] 
+__all__ = ['Exp3CPU', 'RWMCPU', 'FixedDistributionCPU'] 
 
 class Exp3CPU(Callback):
 
@@ -157,3 +157,55 @@ class RWMCPU(Callback):
     def _extra_fetches(self):
         #print "fetch name: {}".format(self.rewards[self._select].name)
         return self.rewards
+
+
+class FixedDistributionCPU(Callback):
+
+    def __init__(self, K, select_name, distribution=None):
+        self.K = K
+        if distribution is not None:
+            self.w = distribution / np.sum(distribution)
+        else:
+            self.w = np.ones(K, dtype=np.float64)
+            if K >= 8:
+                self.w = self.w / 2.0 / (K-4)
+                self.w[K / 2] = 0.125
+                self.w[K / 4] = 0.125
+                self.w[K * 3 / 4 ] = 0.125
+                self.w[K-1] = 0.125
+            else:
+                self.w = self.w / K
+
+        # local record of selected value
+        self._select = self.K - 1 
+        self.select_name = select_name
+        self._select_readable_name, self.select_var_name = get_op_tensor_name(select_name)
+
+        self._select=self.K-1
+        self.is_active=False
+
+    def _setup_graph(self):
+        all_vars = tf.global_variables()
+        for v in all_vars:
+            if v.name == self.select_var_name:
+                self.select = v
+                break
+        else:
+            raise ValueError("{} doesn't exist as VAR".format(self.select_var_name))
+        self.select_holder = tf.placeholder(tf.int32, shape=(), name='selected_idx')
+        self.assign_selection = self.select.assign(self.select_holder)
+    
+    def _before_train(self):
+        pass
+
+    def _trigger_step(self, select):
+        if self.is_active:
+            self._select = np.int32(np.argmax(np.random.multinomial(1, self.w)))
+            self.assign_selection.eval(feed_dict={self.select_holder : self._select})
+
+    def _trigger_epoch(self):
+        self.is_active = True
+ 
+    def _extra_fetches(self):
+        #print "fetch name: {}".format(self.rewards[self._select].name)
+        return [self.select]

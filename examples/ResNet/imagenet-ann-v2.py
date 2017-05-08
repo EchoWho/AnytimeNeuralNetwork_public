@@ -17,7 +17,8 @@ from tensorpack.utils.stats import RatioCounter
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.utils import anytime_loss
-from tensorpack.callbacks import Exp3CPU
+from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU
+
 
 """
 Training code of Pre-Activation version of ResNet on ImageNet.
@@ -267,12 +268,18 @@ def get_config():
     if SAMLOSS > 0:
         ls_K = np.sum(np.asarray(weights) > 0)
         reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(ls_K)]
-        if SAMLOSS == 2:
-            online_learn_func = Exp3CPU
-        elif SAMLOSS == 4:
-            online_learn_func = RWMCPU
-        online_learn_cb = online_learn_func(ls_K, EXP3_GAMMA, 
-            'select_idx:0', reward_names)
+        if SAMLOSS == 3:
+            online_learn_cb = FixedDistributionCPU(ls_K, 'select_idx:0', None)
+        else:    
+            if SAMLOSS == 1:
+                online_learn_func = Exp3CPU
+                EXP3_GAMMA = 1.0
+            elif SAMLOSS == 2:
+                online_learn_func = Exp3CPU
+            elif SAMLOSS == 4:
+                online_learn_func = RWMCPU
+            online_learn_cb = online_learn_func(ls_K, EXP3_GAMMA, 
+                'select_idx:0', reward_names)
         online_learn_cb = [ online_learn_cb ]
     else:
         online_learn_cb = []
