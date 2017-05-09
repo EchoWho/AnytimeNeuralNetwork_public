@@ -9,7 +9,7 @@ from tensorpack.tfutils.summary import *
 from tensorpack.utils import anytime_loss
 from tensorpack.utils import logger
 from tensorpack.utils import utils
-from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU
+from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
 from tensorflow.contrib.layers import variance_scaling_initializer
 
@@ -325,14 +325,17 @@ def get_config():
         if SAMLOSS == 3:
             online_learn_cb = FixedDistributionCPU(ls_K, 'select_idx:0', None)
         else:    
+            gamma = EXP3_GAMMA
             if SAMLOSS == 1:
                 online_learn_func = Exp3CPU
-                EXP3_GAMMA = 1.0
+                gamma = 1.0
             elif SAMLOSS == 2:
                 online_learn_func = Exp3CPU
             elif SAMLOSS == 4:
                 online_learn_func = RWMCPU
-            online_learn_cb = online_learn_func(ls_K, EXP3_GAMMA, 
+            elif SAMLOSS == 5:
+                online_learn_func = ThompsonSamplingCPU
+            online_learn_cb = online_learn_func(ls_K, gamma, 
                 'select_idx:0', reward_names)
         online_learn_cb = [ online_learn_cb ]
     else:
