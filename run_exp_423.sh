@@ -73,4 +73,5 @@ python $CONFIG_DIR/examples/ResNet/imagenet-ann-v2.py \
 --samloss=2 \
 --last_reward_rate=0.85 \
 --exp_gamma=0.3 \
---sum_rand_ratio=2.0
+--sum_rand_ratio=2.0 \
+--load=${MODEL_DIR}/checkpoint
