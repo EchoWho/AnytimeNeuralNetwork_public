@@ -287,15 +287,15 @@ def get_config():
     else:
         online_learn_cb = []
 
-    lr = get_scalar_var('learning_rate', 0.1, summary=True)
+    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
-            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=10000),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=6),
             InferenceRunner(dataset_val, vcs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(30, 1e-2), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
+                                      [(1, 0.1), (30, 0.01), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
             HumanHyperParamSetter('learning_rate'),
         ] + online_learn_cb,
         model=Model(),
@@ -386,7 +386,7 @@ if __name__ == '__main__':
     BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
 
     config = get_config()
-    if args.load:
+    if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = NR_GPU
     SyncMultiGPUTrainer(config).train()
