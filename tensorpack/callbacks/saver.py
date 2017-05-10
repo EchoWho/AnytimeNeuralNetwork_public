@@ -61,7 +61,7 @@ class ModelSaver(Triggerable):
                 var_dict[name] = v
             else:
                 logger.info("[ModelSaver] Variable {} won't be saved \
-due to an alternative in a different tower".format(v.name, var_dict[name].name))
+due to an alternative in a different tower: {}".format(v.name, var_dict[name].name))
         return var_dict
 
     def _trigger(self):
