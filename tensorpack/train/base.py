@@ -166,6 +166,7 @@ class Trainer(object):
         callbacks = self.config.callbacks
         with self.sess.as_default():
             self._starting_step = get_global_step_value()
+            self.config.starting_epoch = self._starting_step // self.config.steps_per_epoch + 1
             try:
                 callbacks.before_train()
                 for self.epoch_num in range(
