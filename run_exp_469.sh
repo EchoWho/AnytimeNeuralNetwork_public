@@ -70,4 +70,5 @@ python $CONFIG_DIR/examples/ResNet/imagenet-logdense.py \
 --nr_gpu=4 \
 --opt_at=-1 \
 --growth_rate=64 \
---batch_size=128
+--batch_size=128 \
+--load=${MODEL_DIR}/checkpoint

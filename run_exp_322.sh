@@ -61,7 +61,7 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/imagenet-ann.py \
+python $CONFIG_DIR/examples/ResNet/imagenet-ann-v2.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
@@ -69,4 +69,5 @@ python $CONFIG_DIR/examples/ResNet/imagenet-ann.py \
 -d=34 \
 --opt_at=11 \
 --nr_gpu=4 \
---batch_size=128
+--batch_size=128 \
+--load=${MODEL_DIR}/checkpoint
