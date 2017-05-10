@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {775..845}
+for i in {901..951}
 do
 
 	USERNAME="dedey"
@@ -9,7 +9,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 
-	VC="pnrsy"
+	VC="msrlabs"
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
 	CMD+="customDockerName=custom-tf-0-12-python-2-7-ver2&"
