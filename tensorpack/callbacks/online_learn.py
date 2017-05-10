@@ -48,7 +48,7 @@ class Exp3CPU(Callback):
         self.reward_cnt = np.ones(self.K)
 
     def _trigger_step(self, select, reward):
-        assert select == self._select, select
+        self._select = select
         #print "select: {} , reward: {}".format(select, reward)
         self.average_reward[self._select] += reward
         self.max_reward[self._select] = max(reward, self.max_reward[self._select])

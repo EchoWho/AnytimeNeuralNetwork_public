@@ -164,7 +164,7 @@ class HyperParamSetter(Triggerable):
         self._set_param()
 
     def _before_train(self):
-        self._set_param()
+        pass
 
     def _set_param(self):
         v = self.get_value_to_set()
