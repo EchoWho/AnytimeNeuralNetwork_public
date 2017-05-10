@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {901..951}
+for i in {459..470}
 do
 
 	USERNAME="dedey"
@@ -8,8 +8,9 @@ do
 	CLUSTER="gcr"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
-
 	VC="msrlabs"
+	NUM_GPUS="4"
+
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
 	CMD+="customDockerName=custom-tf-0-12-python-2-7-ver2&"
@@ -17,11 +18,11 @@ do
 	CMD+="clusterId=$CLUSTER&"
 	CMD+="vcId=$VC&"
 	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork%2F$JOBSCRIPT&"
-	CMD+="minGPUs=1&"
+	CMD+="minGPUs=$NUM_GPUS&"
 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
 	CMD+="isdebug=false&"
 	CMD+="iscrossrack=false&"
-	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
+	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2Fimagenet_tfrecords%2F&"
 	CMD+="oneProcessPerContainer=true&"
 	CMD+="userName=$USERNAME"
 
