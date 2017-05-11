@@ -270,6 +270,9 @@ def get_config():
         reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(ls_K)]
         if SAMLOSS == 3:
             online_learn_cb = FixedDistributionCPU(ls_K, 'select_idx:0', None)
+        elif SAMLOSS == 6:
+            online_learn_cb = FixedDistributionCPU(ls_K, 'select_idx:0', 
+                weights[weights>0])
         else:    
             gamma = EXP3_GAMMA
             if SAMLOSS == 1:
@@ -292,7 +295,7 @@ def get_config():
         dataflow=dataset_train,
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
-            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=6),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=0.01),
             InferenceRunner(dataset_val, vcs),
             ScheduledHyperParamSetter('learning_rate',
                                       [(1, 0.1), (30, 0.01), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
