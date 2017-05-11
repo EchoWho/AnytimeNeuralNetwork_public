@@ -9,11 +9,11 @@ import pdb
 
 def collect_info():
 	user = 'dedey'
-	password = 'Yoga2god?'
+	password = 'GoodCarl2god?'
 	cluster = 'gcr'
 	vc = 'pnrsy'
 	status = 'all'
-	num_finished_jobs = '25'
+	num_finished_jobs = '2000'
 
 	CMD="https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(cluster, vc, num_finished_jobs, user, status)
 
@@ -47,9 +47,9 @@ def print_minimal_info(json_data=None):
 		job_progress = job['progress']
 		job_model_dir = job['dir']
 		job_log_dir = job['scratch']
-		stereo_in_name = job_name.find('stereo')
+		ann_in_name = job_name.find('ann')
 
-		if stereo_in_name > 0:
+		if ann_in_name > 0:
 			print 'Name: ' + job_name + ' ' + 'Progress: ' + str(job_progress)
 			print 'Model dir: ' + job_model_dir
 			print 'Log dir: ' + job_log_dir 
@@ -64,9 +64,9 @@ def print_minimal_info(json_data=None):
 		job_progress = job['progress']
 		job_model_dir = job['dir']
 		job_log_dir = job['scratch']
-		stereo_in_name = job_name.find('stereo')
+		ann_in_name = job_name.find('ann')
 
-		if stereo_in_name > 0:
+		if ann_in_name > 0:
 			print 'Name: ' + job_name + ' ' + 'Progress: ' + str(job_progress)
 			print 'Model dir: ' + job_model_dir
 			print 'Log dir: ' + job_log_dir 
@@ -82,10 +82,11 @@ def print_minimal_info(json_data=None):
 		job_progress = job['progress']
 		job_model_dir = job['dir']
 		job_log_dir = job['scratch']
-		stereo_in_name = job_name.find('stereo')
+		ann_in_name = job_name.find('ann')
 
-		if stereo_in_name > 0:
+		if ann_in_name > 0:
 			print 'Name: ' + job_name + ' ' + 'Progress: ' + str(job_progress)
+			print 'Status: ' + job_status
 			print 'Model dir: ' + job_model_dir
 			print 'Log dir: ' + job_log_dir 
 
