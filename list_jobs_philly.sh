@@ -3,7 +3,7 @@
 USERNAME="dedey"
 PASSWORD="Yoga2god?"
 CLUSTER="gcr"
-VC="pnrsy"
+VC="msrlabs"
 
 CMD="https://philly/api/list?" 
 CMD+="jobType=cust&"
