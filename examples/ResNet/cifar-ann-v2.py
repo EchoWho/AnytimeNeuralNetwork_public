@@ -322,6 +322,9 @@ def get_config():
         reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(ls_K)]
         if SAMLOSS == 3:
             online_learn_cb = FixedDistributionCPU(ls_K, 'select_idx:0', None)
+        elif SAMLOSS == 6:
+            online_learn_cb = FixedDistributionCPU(ls_K, 'select_idx:0', 
+                weights[weights>0])
         else:    
             gamma = EXP3_GAMMA
             if SAMLOSS == 1:
