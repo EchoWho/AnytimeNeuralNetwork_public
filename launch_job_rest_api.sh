@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {459..470}
+for i in {954..1004}
 do
 
 	USERNAME="dedey"
@@ -9,7 +9,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -22,7 +22,7 @@ do
 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
 	CMD+="isdebug=false&"
 	CMD+="iscrossrack=false&"
-	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2Fimagenet_tfrecords%2F&"
+	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
 	CMD+="oneProcessPerContainer=true&"
 	CMD+="userName=$USERNAME"
 
