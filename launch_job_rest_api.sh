@@ -36,4 +36,6 @@ do
 	# FOR WHEN YOU NEED OTHER DATASETS
 	# CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
 
+	# Test here
+
 done
