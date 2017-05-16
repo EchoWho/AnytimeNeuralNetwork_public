@@ -1,6 +1,7 @@
 import numpy as np
 
-__all__ = ['sieve_loss_weights',  'optimal_at',
+__all__ = ['sieve_loss_weights',  'eann_sieve', 
+    'optimal_at',
     'exponential_weights', 'at_func', 
     'constant_weights', 'stack_loss_weights',
     'half_constant_half_optimal', 'linear',
@@ -20,6 +21,11 @@ def sieve_loss_weights(N):
     weights[0] = np.sum(weights[1:])
     weights /= (np.sum(weights) / num_steps)
     return np.flipud(weights)
+
+def eann_sieve(N):
+    weights = sieve_loss_weights(N)
+    weights[:N//2] = 0.0
+    return weights
 
 def constant_weights(N):
     return np.ones(N,dtype=np.float32)
