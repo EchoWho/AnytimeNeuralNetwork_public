@@ -71,6 +71,8 @@ def loss_weights(N):
         return anytime_loss.half_constant_half_optimal(N, -1)
     elif FUNC_TYPE == 8: # quater constant, half optimal
         return anytime_loss.quater_constant_half_optimal(N)
+    elif FUNC_TYPE == 9:
+        return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK, anytime_loss.eann_sieve)
     else:
         raise NameError('func type must be either 0: exponential or 1: square\
             or 2: optimal at --opt_at, or 3: exponential weight with base --base')
