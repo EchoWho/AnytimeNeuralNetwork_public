@@ -9,7 +9,7 @@ import pdb
 
 def collect_info():
 	user = 'dedey'
-	password = 'GoodCarl2god?'
+	password = 'Chakra2god?'
 	cluster = 'gcr'
 	vc = 'pnrsy'
 	status = 'all'

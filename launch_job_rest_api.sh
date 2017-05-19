@@ -4,7 +4,7 @@ for i in {1007..1048}
 do
 
 	USERNAME="dedey"
-	PASSWORD="GoodCarl2god?"
+	PASSWORD="Chakra2god?"
 	CLUSTER="gcr"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"

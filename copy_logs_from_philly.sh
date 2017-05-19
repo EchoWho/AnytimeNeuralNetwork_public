@@ -1,10 +1,10 @@
 #!/bin/bash
 
 #---------------CHANGE BELOW---------------------------
-APPNAME="application_1486066770011_1665"
+APPNAME="application_1493880963148_3375"
 CLUSTER="gcr"
-VC="pnrsy_scratch"
-COPYLOC="/media/dedey/DATADRIVE2/ann_models_logs/delete"
+VC="msrlabs_scratch"
+COPYLOC="/home/dedey/DATADRIVE2/ann_models_logs/delete"
 #----------DO NOT CHANGE BELOW-------------------------
 
 
