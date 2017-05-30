@@ -47,7 +47,7 @@ class Exp3CPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
 
-    def _trigger_step(self, select, reward):
+    def _after_run(self, select, reward):
         self._select = select
         #print "select: {} , reward: {}".format(select, reward)
         self.average_reward[self._select] += reward
@@ -76,7 +76,7 @@ class Exp3CPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
  
-    def _extra_fetches(self):
+    def _before_run(self, _):
         #print "fetch name: {}".format(self.rewards[self._select].name)
         return [self.select, self.rewards[self._select]]
 
@@ -124,7 +124,7 @@ class RWMCPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
 
-    def _trigger_step(self, *rewards):
+    def _after_run(self, *rewards):
         #print "select: {} , reward: {}".format(select, reward)
         rewards = np.asarray(rewards).reshape((self.K,))
         self.average_reward += rewards
@@ -154,7 +154,7 @@ class RWMCPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
  
-    def _extra_fetches(self):
+    def _before_run(self, _):
         #print "fetch name: {}".format(self.rewards[self._select].name)
         return self.rewards
 
@@ -198,7 +198,7 @@ class FixedDistributionCPU(Callback):
     def _before_train(self):
         pass
 
-    def _trigger_step(self, select):
+    def _after_run(self, select):
         if self.is_active:
             self._select = np.int32(np.argmax(np.random.multinomial(1, self.w)))
             self.assign_selection.eval(feed_dict={self.select_holder : self._select})
@@ -206,11 +206,14 @@ class FixedDistributionCPU(Callback):
     def _trigger_epoch(self):
         self.is_active = True
  
-    def _extra_fetches(self):
+    def _before_run(self, _):
         #print "fetch name: {}".format(self.rewards[self._select].name)
         return [self.select]
 
 class ThompsonSamplingCPU(Callback):
+    """
+        Pseudo thompson sampling. Sample proportional to the reward of each option
+    """
 
     def __init__(self, K, gamma, select_name, reward_names):
         assert K == len(reward_names)
@@ -251,7 +254,7 @@ class ThompsonSamplingCPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
 
-    def _trigger_step(self, *rewards):
+    def _after_run(self, *rewards):
         #print "select: {} , reward: {}".format(select, reward)
         rewards = np.asarray(rewards).reshape((self.K,))
         self.average_reward += rewards
@@ -280,6 +283,6 @@ class ThompsonSamplingCPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
  
-    def _extra_fetches(self):
+    def _before_run(self, _):
         #print "fetch name: {}".format(self.rewards[self._select].name)
         return self.rewards
