@@ -6,10 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.utils import anytime_loss
-from tensorpack.utils import logger
-from tensorpack.utils import utils
-from tensorpack.utils import fs
+from tensorpack.utils import anytime_loss, logger, utils, fs
 from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
 from tensorflow.contrib.layers import variance_scaling_initializer
