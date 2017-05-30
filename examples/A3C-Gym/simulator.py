@@ -6,6 +6,7 @@
 import tensorflow as tf
 import multiprocessing as mp
 import time
+import os
 import threading
 from abc import abstractmethod, ABCMeta
 from collections import defaultdict
@@ -23,8 +24,8 @@ from tensorpack.utils.serialize import loads, dumps
 from tensorpack.utils.concurrency import LoopThread, ensure_proc_terminate
 
 __all__ = ['SimulatorProcess', 'SimulatorMaster',
-           'SimulatorProcessStateExchange', 'SimulatorProcessSharedWeight',
-           'TransitionExperience', 'WeightSync']
+           'SimulatorProcessStateExchange',
+           'TransitionExperience']
 
 
 class TransitionExperience(object):
@@ -100,12 +101,12 @@ class SimulatorMaster(threading.Thread):
         defining callbacks when a transition or an episode is finished.
     """
     class ClientState(object):
-
         def __init__(self):
             self.memory = []    # list of Experience
 
     def __init__(self, pipe_c2s, pipe_s2c):
         super(SimulatorMaster, self).__init__()
+        assert os.name != 'nt', "Doesn't support windows!"
         self.daemon = True
         self.name = 'SimulatorMaster'
 
@@ -176,6 +177,7 @@ class SimulatorMaster(threading.Thread):
         self.context.destroy(linger=0)
 
 
+# ------------------- the following code are not used at all. Just experimental
 class SimulatorProcessDF(SimulatorProcessBase):
     """ A simulator which contains a forward model itself, allowing
     it to produce data points directly """

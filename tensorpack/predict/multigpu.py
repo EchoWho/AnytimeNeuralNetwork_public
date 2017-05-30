@@ -3,12 +3,9 @@
 # File: multigpu.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import tensorflow as tf
-
 from ..utils import logger
-from ..utils.naming import PREDICT_TOWER
 from ..tfutils import get_tensors_by_names, TowerContext
-from .base import OnlinePredictor, build_prediction_graph
+from .base import OnlinePredictor, build_prediction_graph, PredictorTowerBuilder
 
 __all__ = ['MultiTowerOfflinePredictor',
            'DataParallelOfflinePredictor']
@@ -23,41 +20,55 @@ class MultiTowerOfflinePredictor(OnlinePredictor):
             config (PredictConfig): the config to use.
             towers: a list of relative GPU id.
         """
-        self.graph = tf.Graph()
+        assert len(towers) > 0
+        self.graph = config._maybe_create_graph()
         self.predictors = []
         with self.graph.as_default():
-            # TODO backup summary keys?
+            placeholder_names = set([k.name for k in config.model.get_inputs_desc()])
+
             def fn(_):
-                config.model.build_graph(config.model.get_input_vars())
+                config.model.build_graph(config.model.get_reused_placehdrs())
             build_prediction_graph(fn, towers)
 
-            self.sess = tf.Session(config=config.session_config)
+            self.sess = config.session_creator.create_session()
             config.session_init.init(self.sess)
 
-            input_vars = get_tensors_by_names(config.input_names)
-
+            get_tensor_fn = PredictorTowerBuilder.get_tensors_maybe_in_tower
             for k in towers:
-                output_vars = get_tensors_by_names(
-                    ['{}{}/'.format(PREDICT_TOWER, k) + n
-                     for n in config.output_names])
+                input_tensors = get_tensor_fn(placeholder_names, config.input_names, k)
+                output_tensors = get_tensor_fn(placeholder_names, config.output_names, k)
                 self.predictors.append(OnlinePredictor(
-                    self.sess, input_vars, output_vars, config.return_input))
+                    input_tensors, output_tensors, config.return_input, self.sess))
 
     def _do_call(self, dp):
         # use the first tower for compatible PredictorBase interface
         return self.predictors[0]._do_call(dp)
 
-    def get_predictors(self, n):
+    def get_predictor(self, n):
         """
         Returns:
-            PredictorBase: the nth predictor on the nth GPU.
+            PredictorBase: the nth predictor on the nth tower.
         """
-        return [self.predictors[k % len(self.predictors)] for k in range(n)]
+        l = len(self.predictors)
+        if n >= l:
+            logger.warn("n > #towers, will assign predictor to GPU by round-robin")
+        return [self.predictors[k % l] for k in range(n)]
+
+    def get_predictors(self):
+        """
+        Returns:
+            list[PredictorBase]: a list of predictor
+        """
+        return self.predictors
 
 
 class DataParallelOfflinePredictor(OnlinePredictor):
-    """ A data-parallel predictor.
-    It runs different towers in parallel.
+    """
+    A data-parallel predictor.
+    Note that it doesn't split/concat inputs/outputs automatically.
+    Instead, its inputs are:
+    ``[input[0] in tower[0], input[1] in tower[0], ..., input[0] in tower[1], input[1] in tower[1], ...]``
+    Similar for the outputs.
     """
 
     def __init__(self, config, towers):
@@ -66,28 +77,27 @@ class DataParallelOfflinePredictor(OnlinePredictor):
             config (PredictConfig): the config to use.
             towers: a list of relative GPU id.
         """
-        self.graph = tf.Graph()
+        self.graph = config._maybe_create_graph()
         with self.graph.as_default():
-            sess = tf.Session(config=config.session_config)
-            input_var_names = []
-            output_vars = []
-            for idx, k in enumerate(towers):
-                towername = PREDICT_TOWER + str(k)
-                input_vars = config.model.build_placeholders(
-                    prefix=towername + '-')
-                logger.info(
-                    "Building graph for predictor tower {}...".format(k))
-                with tf.device('/gpu:{}'.format(k) if k >= 0 else '/cpu:0'), \
-                        TowerContext(towername, is_training=False), \
-                        tf.variable_scope(tf.get_variable_scope(),
-                                          reuse=True if idx > 0 else None):
-                    config.model.build_graph(input_vars)
-                input_var_names.extend([k.name for k in input_vars])
-                output_vars.extend(get_tensors_by_names(
+            input_names = []
+            output_tensors = []
+
+            def build_tower(k):
+                towername = TowerContext.get_predict_tower_name(k)
+                # inputs (placeholders) for this tower only
+                input_tensors = config.model.build_placeholders(prefix=towername + '/')
+                config.model.build_graph(input_tensors)
+
+                input_names.extend([t.name for t in input_tensors])
+                output_tensors.extend(get_tensors_by_names(
                     [towername + '/' + n
                      for n in config.output_names]))
 
-            input_vars = get_tensors_by_names(input_var_names)
+            build_prediction_graph(build_tower, towers)
+
+            input_tensors = get_tensors_by_names(input_names)
+
+            sess = config.session_creator.create_session()
             config.session_init.init(sess)
             super(DataParallelOfflinePredictor, self).__init__(
-                sess, input_vars, output_vars, config.return_input)
+                input_tensors, output_tensors, config.return_input, sess)

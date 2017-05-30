@@ -6,7 +6,8 @@
 import os
 import numpy as np
 
-from ...utils import logger, get_dataset_path
+from ...utils import logger
+from ...utils.fs import get_dataset_path, download
 from ..base import RNGDataFlow
 
 __all__ = ['SVHNDigit']
@@ -37,8 +38,10 @@ class SVHNDigit(RNGDataFlow):
             data_dir = get_dataset_path('svhn_data')
         assert name in ['train', 'test', 'extra'], name
         filename = os.path.join(data_dir, name + '_32x32.mat')
-        assert os.path.isfile(filename), \
-            "File {} not found! Please download it from {}.".format(filename, SVHN_URL)
+        if not os.path.isfile(filename):
+            url = SVHN_URL + os.path.basename(filename)
+            logger.info("File {} not found! Downloading from {}.".format(filename, url))
+            download(url, os.path.dirname(filename))
         logger.info("Loading {} ...".format(filename))
         data = scipy.io.loadmat(filename)
         self.X = data['X'].transpose(3, 0, 1, 2)
@@ -55,6 +58,7 @@ class SVHNDigit(RNGDataFlow):
         if self.shuffle:
             self.rng.shuffle(idxs)
         for k in idxs:
+            # since svhn is quite small, just do it for safety
             yield [self.X[k], self.Y[k]]
 
     @staticmethod
@@ -71,7 +75,7 @@ class SVHNDigit(RNGDataFlow):
 try:
     import scipy.io
 except ImportError:
-    from ...utils.dependency import create_dummy_class
+    from ...utils.develop import create_dummy_class
     SVHNDigit = create_dummy_class('SVHNDigit', 'scipy.io')  # noqa
 
 if __name__ == '__main__':

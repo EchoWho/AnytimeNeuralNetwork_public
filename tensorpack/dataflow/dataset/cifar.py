@@ -9,11 +9,9 @@ import pickle
 import numpy as np
 import six
 from six.moves import range
-import copy
 
-from ...utils import logger, get_dataset_path
-from ...utils.utils import DATASET_AUTO_DOWNLOAD
-from ...utils.fs import download
+from ...utils import logger
+from ...utils.fs import download, get_dataset_path, DATASET_AUTO_DOWNLOAD
 from ..base import RNGDataFlow
 
 __all__ = ['Cifar10', 'Cifar100']
@@ -119,7 +117,8 @@ class CifarBase(RNGDataFlow):
         if self.shuffle:
             self.rng.shuffle(idxs)
         for k in idxs:
-            yield copy.copy(self.data[k])
+            # since cifar is quite small, just do it for safety
+            yield self.data[k]
 
     def get_per_pixel_mean(self):
         """
@@ -162,10 +161,10 @@ class Cifar100(CifarBase):
 
 if __name__ == '__main__':
     ds = Cifar10('train')
-    from tensorpack.dataflow.dftools import dump_dataset_images
+    from tensorpack.dataflow.dftools import dump_dataflow_images
     mean = ds.get_per_channel_mean()
     print(mean)
-    dump_dataset_images(ds, '/tmp/cifar', 100)
+    dump_dataflow_images(ds, '/tmp/cifar', 100)
 
     # for (img, label) in ds.get_data():
     #     from IPython import embed; embed()

@@ -62,20 +62,6 @@ class Augmentor(object):
 
 
 class ImageAugmentor(Augmentor):
-
-    def augment(self, img):
-        """
-        Perform augmentation on the image (possibly) in-place.
-
-        Args:
-            img (np.ndarray): an [h,w] or [h,w,c] image.
-
-        Returns:
-            np.ndarray: the augmented image, always of type float32.
-        """
-        img, params = self._augment_return_params(img)
-        return img
-
     def _fprop_coord(self, coord, param):
         return coord
 
@@ -99,7 +85,6 @@ class AugmentorList(ImageAugmentor):
 
     def _augment_return_params(self, img):
         assert img.ndim in [2, 3], img.ndim
-        img = img.astype('float32')
 
         prms = []
         for a in self.augs:
@@ -109,7 +94,6 @@ class AugmentorList(ImageAugmentor):
 
     def _augment(self, img, param):
         assert img.ndim in [2, 3], img.ndim
-        img = img.astype('float32')
         for aug, prm in zip(self.augs, param):
             img = aug._augment(img, prm)
         return img

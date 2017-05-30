@@ -3,19 +3,20 @@
 # File: PTB-LSTM.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import tensorflow as tf
 import numpy as np
 import os
 import argparse
 
 from tensorpack import *
 from tensorpack.tfutils.gradproc import *
-from tensorpack.utils import logger, get_dataset_path
-from tensorpack.utils.fs import download
+from tensorpack.utils import logger
+from tensorpack.utils.fs import download, get_dataset_path
 from tensorpack.utils.argtools import memoized_ignoreargs
 
 import reader as tfreader
 from reader import ptb_producer
+
+import tensorflow as tf
 rnn = tf.contrib.rnn
 
 SEQ_LEN = 35
@@ -45,8 +46,8 @@ def get_PennTreeBank(data_dir=None):
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.int32, (None, SEQ_LEN), 'input'),
-                InputVar(tf.int32, (None, SEQ_LEN), 'nextinput')]
+        return [InputDesc(tf.int32, (None, SEQ_LEN), 'input'),
+                InputDesc(tf.int32, (None, SEQ_LEN), 'nextinput')]
 
     def _build_graph(self, inputs):
         is_training = get_current_tower_context().is_training
@@ -74,23 +75,25 @@ class Model(ModelDesc):
             input_list = tf.unstack(input_feature, num=SEQ_LEN, axis=1)  # seqlen x (Bxhidden)
             outputs, last_state = rnn.static_rnn(cell, input_list, state_var, scope='rnn')
 
+        # update the hidden state after a rnn loop completes
+        update_state_ops = [
+            tf.assign(state_var[0].c, last_state[0].c),
+            tf.assign(state_var[0].h, last_state[0].h),
+            tf.assign(state_var[1].c, last_state[1].c),
+            tf.assign(state_var[1].h, last_state[1].h)]
+
         # seqlen x (Bxrnnsize)
         output = tf.reshape(tf.concat(outputs, 1), [-1, HIDDEN_SIZE])  # (Bxseqlen) x hidden
         logits = FullyConnected('fc', output, VOCAB_SIZE, nl=tf.identity, W_init=initializer, b_init=initializer)
         xent_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=logits, labels=symbolic_functions.flatten(nextinput))
+            logits=logits, labels=tf.reshape(nextinput, [-1]))
 
-        update_state_op = tf.group(
-            tf.assign(state_var[0].c, last_state[0].c),
-            tf.assign(state_var[0].h, last_state[0].h),
-            tf.assign(state_var[1].c, last_state[1].c),
-            tf.assign(state_var[1].h, last_state[1].h), name='update_state')
-        with tf.control_dependencies([update_state_op]):
+        with tf.control_dependencies(update_state_ops):
             self.cost = tf.truediv(tf.reduce_sum(xent_loss),
                                    tf.cast(BATCH, tf.float32), name='cost')  # log-perplexity
 
         perpl = tf.exp(self.cost / SEQ_LEN, name='perplexity')
-        summary.add_moving_summary(perpl)
+        summary.add_moving_summary(perpl, self.cost)
 
     def reset_lstm_state(self):
         s = self.state
@@ -98,10 +101,13 @@ class Model(ModelDesc):
         return tf.group(s[0].c.assign(z),
                         s[0].h.assign(z),
                         s[1].c.assign(z),
-                        s[1].h.assign(z))
+                        s[1].h.assign(z), name='reset_lstm_state')
 
-    def get_gradient_processor(self):
-        return [GlobalNormClip(5)]
+    def _get_optimizer(self):
+        lr = symbolic_functions.get_scalar_var('learning_rate', 1, summary=True)
+        opt = tf.train.GradientDescentOptimizer(lr)
+        return optimizer.apply_grad_processors(
+            opt, [gradproc.GlobalNormClip(5)])
 
 
 def get_config():
@@ -119,13 +125,14 @@ def get_config():
         lambda: ptb_producer(data3[1], BATCH, SEQ_LEN),
         (data3[1].shape[0] // BATCH - 1) // SEQ_LEN)
 
-    M = Model()
+    test_data = TensorInput(
+        lambda: ptb_producer(data3[2], BATCH, SEQ_LEN),
+        (data3[2].shape[0] // BATCH - 1) // SEQ_LEN)
 
-    lr = symbolic_functions.get_scalar_var('learning_rate', 1, summary=True)
+    M = Model()
     return TrainConfig(
         data=train_data,
         model=M,
-        optimizer=tf.train.GradientDescentOptimizer(lr),
         callbacks=[
             ModelSaver(),
             HyperParamSetterWithFunc(
@@ -133,12 +140,20 @@ def get_config():
                 lambda e, x: x * 0.80 if e > 6 else x),
             RunOp(lambda: M.reset_lstm_state()),
             FeedfreeInferenceRunner(val_data, [ScalarStats(['cost'])]),
+            RunOp(lambda: M.reset_lstm_state()),
+            FeedfreeInferenceRunner(
+                test_data,
+                [ScalarStats(['cost'], prefix='test')], prefix='test'),
+            RunOp(lambda: M.reset_lstm_state()),
             CallbackFactory(
                 trigger_epoch=lambda self:
-                self.trainer.add_scalar_summary(
+                [self.trainer.monitors.put(
                     'validation_perplexity',
-                    np.exp(self.trainer.stat_holder.get_stat_now('validation_cost') / SEQ_LEN))),
-            RunOp(lambda: M.reset_lstm_state()),
+                    np.exp(self.trainer.monitors.get_latest('validation_cost') / SEQ_LEN)),
+                 self.trainer.monitors.put(
+                     'test_perplexity',
+                     np.exp(self.trainer.monitors.get_latest('test_cost') / SEQ_LEN))]
+            ),
         ],
         max_epoch=70,
     )

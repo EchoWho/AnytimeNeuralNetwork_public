@@ -10,10 +10,9 @@ import numpy as np
 import xml.etree.ElementTree as ET
 
 import tensorflow as tf
-
-from ...utils import logger, get_dataset_path
+from ...utils import logger
 from ...utils.loadcaffe import get_caffe_pb
-from ...utils.fs import mkdir_p, download
+from ...utils.fs import mkdir_p, download, get_dataset_path
 from ...utils.timer import timed_operation
 from ..base import RNGDataFlow
 
@@ -129,7 +128,7 @@ class ILSVRCMeta(object):
 
 class ILSVRC12(RNGDataFlow):
     """
-    Produces ILSVRC12 images of shape [h, w, 3(BGR)], and a label between [0, 999],
+    Produces uint8 ILSVRC12 images of shape [h, w, 3(BGR)], and a label between [0, 999],
     and optionally a bounding box of [xmin, ymin, xmax, ymax].
     """
     def __init__(self, dir, name, meta_dir=None, shuffle=None,
@@ -177,7 +176,8 @@ class ILSVRC12(RNGDataFlow):
             mkdir train && tar xvf ILSVRC12_img_train.tar -C train && cd train
             find -type f -name '*.tar' | parallel -P 10 'echo {} && mkdir -p {/.} && tar xf {} -C {/.}'
         """
-        assert name in ['train', 'test', 'val']
+        assert name in ['train', 'test', 'val'], name
+        assert os.path.isdir(dir), dir
         self.full_dir = os.path.join(dir, name)
         self.name = name
         assert os.path.isdir(self.full_dir), self.full_dir

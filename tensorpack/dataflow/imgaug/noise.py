@@ -26,12 +26,12 @@ class JpegNoise(ImageAugmentor):
 
     def _augment(self, img, q):
         enc = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, q])[1]
-        return cv2.imdecode(enc, 1)
+        return cv2.imdecode(enc, 1).astype(img.dtype)
 
 
 class GaussianNoise(ImageAugmentor):
     """
-    Add random gaussian noise N(0, sigma^2) of the same shape to img.
+    Add random Gaussian noise N(0, sigma^2) of the same shape to img.
     """
     def __init__(self, sigma=1, clip=True):
         """
@@ -46,10 +46,11 @@ class GaussianNoise(ImageAugmentor):
         return self.rng.randn(*img.shape)
 
     def _augment(self, img, noise):
+        old_dtype = img.dtype
         ret = img + noise * self.sigma
-        if self.clip:
+        if self.clip or old_dtype == np.uint8:
             ret = np.clip(ret, 0, 255)
-        return ret
+        return ret.astype(old_dtype)
 
 
 class SaltPepperNoise(ImageAugmentor):

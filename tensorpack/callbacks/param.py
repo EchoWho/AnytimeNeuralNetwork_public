@@ -9,7 +9,7 @@ import operator
 import six
 import os
 
-from .base import Triggerable
+from .base import Callback
 from ..utils import logger
 from ..tfutils import get_op_tensor_name
 
@@ -52,7 +52,7 @@ class HyperParam(object):
 
 
 class GraphVarParam(HyperParam):
-    """ A variable in the graph (e.g. learning_rate) can be a hyperparam"""
+    """ A variable in the graph (e.g. learning_rate) can be a hyperparam."""
 
     def __init__(self, name, shape=[]):
         """
@@ -74,13 +74,9 @@ class GraphVarParam(HyperParam):
         else:
             raise ValueError("{} is not a VARIABLE in the graph!".format(self.var_name))
 
-        self.val_holder = tf.placeholder(tf.float32, shape=self.shape,
-                                         name=self._readable_name + '_feed')
-        self.assign_op = self.var.assign(self.val_holder)
-
     def set_value(self, v):
         """ Assign the variable a new value. """
-        self.assign_op.eval(feed_dict={self.val_holder: v})
+        self.var.load(v)
 
     def get_value(self):
         """ Evaluate the variable. """
@@ -95,7 +91,7 @@ class ObjAttrParam(HyperParam):
         Args:
             obj: the object
             attrname (str): the attribute
-            readable_name(str): The name to display. Defaults to be ``attrname``.
+            readable_name(str): The name to display and set with. Defaults to be ``attrname``.
         """
         self.obj = obj
         self.attrname = attrname
@@ -111,9 +107,9 @@ class ObjAttrParam(HyperParam):
         return getattr(self.obj, self.attrname)
 
 
-class HyperParamSetter(Triggerable):
+class HyperParamSetter(Callback):
     """
-    An abstract base callback to set hyperparameters in every epoch.
+    An abstract base callback to set hyperparameters.
     """
 
     def __init__(self, param):
@@ -138,7 +134,7 @@ class HyperParamSetter(Triggerable):
             The value to assign to the variable.
 
         Note:
-            Subclasses will implemenet the abstract method
+            Subclasses will implement the abstract method
             :meth:`_get_value_to_set`, which should return a new value to
             set, or return None to do nothing.
         """
@@ -183,10 +179,9 @@ class HumanHyperParamSetter(HyperParamSetter):
         """
         Args:
             param: same as in :class:`HyperParamSetter`.
-            file_name(str): a file containing the value of the variable.
-                Each line in the file is a k:v pair, where k is
-                param.readable_name, and v is the value. If the pair is not found,
-                the param will not be changed.
+            file_name(str): a file containing the new value of the parameter.
+                Each line in the file is a ``k:v`` pair, for example, ``learning_rate:1e-4``.
+                If the pair is not found, the param will not be changed.
         """
         super(HumanHyperParamSetter, self).__init__(param)
         self.file_name = os.path.join(logger.LOG_DIR, file_name)
@@ -222,8 +217,8 @@ class ScheduledHyperParamSetter(HyperParamSetter):
             param: same as in :class:`HyperParamSetter`.
             schedule (list): with the format ``[(epoch1, val1), (epoch2, val2), (epoch3, val3)]``.
                 Each ``(ep, val)`` pair means to set the param
-                to "val" after the `ep` th epoch.
-                If ep == 0, the value will be set before training.
+                to "val" __after__ the completion of `ep` th epoch.
+                If ep == 0, the value will be set before the first epoch.
             interp: None: no interpolation. 'linear': linear interpolation
 
         Example:
@@ -267,6 +262,7 @@ class HyperParamSetterWithFunc(HyperParamSetter):
         Args:
             param: same as in :class:`HyperParamSetter`.
             func: ``param`` will be set by ``new_value = func(epoch_num, old_value)``.
+                ``epoch_num`` is the number of epochs that have finished.
 
         Example:
             Decrease by a factor of 0.9 every two epochs:
@@ -321,8 +317,7 @@ class StatMonitorParamSetter(HyperParamSetter):
         self.last_changed_epoch = 0
 
     def _get_value_to_set(self):
-        holder = self.trainer.stat_holder
-        hist = holder.get_stat_history(self.stat_name)
+        hist = self.trainer.monitors.get_history(self.stat_name)
         if len(hist) < self.last_k + 1 or \
                 self.epoch_num - self.last_changed_epoch < self.last_k:
             return None

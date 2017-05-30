@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import numpy as np
 
 
+# this function exists for backwards-compatibilty
 def prediction_incorrect(logits, label, topk=1, name='incorrect_vector'):
     """
     Args:
@@ -19,6 +20,18 @@ def prediction_incorrect(logits, label, topk=1, name='incorrect_vector'):
     """
     return tf.cast(tf.logical_not(tf.nn.in_top_k(logits, label, topk)),
                    tf.float32, name=name)
+
+
+def accuracy(logits, label, topk=1, name='accuracy'):
+    """
+    Args:
+        logits: shape [B,C].
+        label: shape [B].
+        topk(int): topk
+    Returns:
+        a single scalar
+    """
+    return tf.reduce_mean(tf.cast(tf.nn.in_top_k(logits, label, topk), tf.float32), name=name)
 
 
 def flatten(x):
@@ -148,31 +161,38 @@ def get_scalar_var(name, init_value, summary=False, trainable=False):
     return ret
 
 
-def psnr(prediction, ground_truth, name='psnr'):
+def psnr(prediction, ground_truth, maxp=None, name='psnr'):
     """`Peek Signal to Noise Ratio <https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio>`_.
 
     .. math::
 
         PSNR = 20 \cdot \log_{10}(MAX_p) - 10 \cdot \log_{10}(MSE)
 
-    This function assumes the maximum possible value of the signal is 1,
-    therefore the PSNR is simply :math:`- 10 \cdot \log_{10}(MSE)`.
-
     Args:
         prediction: a :class:`tf.Tensor` representing the prediction signal.
         ground_truth: another :class:`tf.Tensor` with the same shape.
+        maxp: maximum possible pixel value of the image (255 in in 8bit images)
 
     Returns:
         A scalar tensor representing the PSNR.
     """
 
-    def log10(x):
-        numerator = tf.log(x)
-        denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
-        return numerator / denominator
+    maxp = float(maxp)
 
-    return tf.multiply(log10(tf.reduce_mean(tf.square(prediction - ground_truth))),
-                       -10., name=name)
+    def log10(x):
+        with tf.name_scope("log10"):
+            numerator = tf.log(x)
+            denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
+            return numerator / denominator
+
+    mse = tf.reduce_mean(tf.square(prediction - ground_truth))
+    if maxp is None:
+        psnr = tf.multiply(log10(mse), -10., name=name)
+    else:
+        psnr = tf.multiply(log10(mse), -10.)
+        psnr = tf.add(tf.multiply(20., log10(maxp)), psnr, name=name)
+
+    return psnr
 
 
 @contextmanager
@@ -256,9 +276,9 @@ def contrastive_loss(left, right, y, margin, extra=False, scope="constrastive_lo
             return loss
 
 
-def cosine_loss(left, right, y, scope="cosine_loss"):
+def siamese_cosine_loss(left, right, y, scope="cosine_loss"):
     r"""Loss for Siamese networks (cosine version).
-    Same as :func:`contrastive_loss` but with different similarity measurment.
+    Same as :func:`contrastive_loss` but with different similarity measurement.
 
     .. math::
         [\frac{l \cdot r}{\lVert l\rVert \lVert r\rVert} - (2y-1)]^2
@@ -305,7 +325,7 @@ def triplet_loss(anchor, positive, negative, margin, extra=False, scope="triplet
         anchor (tf.Tensor): anchor feature vectors of shape [Batch, N].
         positive (tf.Tensor): features of positive match of the same shape.
         negative (tf.Tensor): features of negative match of the same shape.
-        margin (float): horizont for negative examples
+        margin (float): horizon for negative examples
         extra (bool): also return distances for pos and neg.
 
     Returns:
@@ -368,8 +388,8 @@ def shapeless_placeholder(x, axis, name):
 
     If you want to feed to a tensor, the shape of the feed value must match
     the tensor's static shape. This function creates a placeholder which
-    defaults to x if not fed, but has a less specific static shape.
-    See `tensorflow#5680
+    defaults to x if not fed, but has a less specific static shape than x.
+    See also `tensorflow#5680
     <https://github.com/tensorflow/tensorflow/issues/5680>`_.
 
     Args:

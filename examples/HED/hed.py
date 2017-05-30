@@ -18,8 +18,8 @@ from tensorpack.tfutils.summary import *
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, None, None, 3], 'image'),
-                InputVar(tf.int32, [None, None, None], 'edgemap')]
+        return [InputDesc(tf.float32, [None, None, None, 3], 'image'),
+                InputDesc(tf.int32, [None, None, None], 'edgemap')]
 
     def _build_graph(self, inputs):
         image, edgemap = inputs
@@ -92,8 +92,12 @@ class Model(ModelDesc):
             self.cost = tf.add_n(costs, name='cost')
             add_moving_summary(costs + [wrong, self.cost])
 
-    def get_gradient_processor(self):
-        return [ScaleGradient([('convfcweight.*', 0.1), ('conv5_.*', 5)])]
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 3e-5, summary=True)
+        opt = tf.train.AdamOptimizer(lr, epsilon=1e-3)
+        return optimizer.apply_grad_processors(
+            opt, [gradproc.ScaleGradient(
+                [('convfcweight.*', 0.1), ('conv5_.*', 5)])])
 
 
 def get_data(name):
@@ -101,7 +105,6 @@ def get_data(name):
     ds = dataset.BSDS500(name, shuffle=True)
 
     class CropMultiple16(imgaug.ImageAugmentor):
-
         def _get_augment_params(self, img):
             newh = img.shape[0] // 16 * 16
             neww = img.shape[1] // 16 * 16
@@ -129,9 +132,9 @@ def get_data(name):
         # the original image shape (321x481) in BSDS is not a multiple of 16
         IMAGE_SHAPE = (320, 480)
         shape_aug = [imgaug.CenterCrop(IMAGE_SHAPE)]
-    ds = AugmentImageComponents(ds, shape_aug, (0, 1))
+    ds = AugmentImageComponents(ds, shape_aug, (0, 1), copy=False)
 
-    def f(m):
+    def f(m):   # thresholding
         m[m >= 0.50] = 1
         m[m < 0.50] = 0
         return m
@@ -142,7 +145,7 @@ def get_data(name):
             imgaug.Brightness(63, clip=False),
             imgaug.Contrast((0.4, 1.5)),
         ]
-        ds = AugmentImageComponent(ds, augmentors)
+        ds = AugmentImageComponent(ds, augmentors, copy=False)
         ds = BatchDataByShape(ds, 8, idx=0)
         ds = PrefetchDataZMQ(ds, 1)
     else:
@@ -168,10 +171,8 @@ def get_config():
     steps_per_epoch = dataset_train.size() * 40
     dataset_val = get_data('val')
 
-    lr = get_scalar_var('learning_rate', 3e-5, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-3),
         callbacks=[
             ModelSaver(),
             ScheduledHyperParamSetter('learning_rate', [(30, 6e-6), (45, 1e-6), (60, 8e-7)]),
@@ -191,11 +192,11 @@ def run(model_path, image_path, output):
         session_init=get_model_loader(model_path),
         input_names=['image'],
         output_names=['output' + str(k) for k in range(1, 7)])
-    predict_func = get_predict_func(pred_config)
+    predictor = OfflinePredictor(pred_config)
     im = cv2.imread(image_path)
     assert im is not None
     im = cv2.resize(im, (im.shape[1] // 16 * 16, im.shape[0] // 16 * 16))
-    outputs = predict_func([[im.astype('float32')]])
+    outputs = predictor([[im.astype('float32')]])
     if output is None:
         for k in range(6):
             pred = outputs[k][0]

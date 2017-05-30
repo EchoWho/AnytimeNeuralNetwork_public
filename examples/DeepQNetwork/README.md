@@ -19,28 +19,33 @@ Claimed performance in the paper can be reproduced, on several games I've tested
 
 ![DQN](curve-breakout.png)
 
-DQN typically took 2 days of training to reach a score of 400 on breakout game.
+DQN typically took 1 day of training to reach a score of 400 on breakout game (same as the paper).
 My Batch-A3C implementation only took <2 hours.
 Both were trained on one GPU with an extra GPU for simulation.
 
-The x-axis is the number of iterations, not wall time.
-Iteration speed on Tesla M40 is about 9.7it/s for B-A3C.
-D-DQN is faster at the beginning but will converge to 12it/s due of exploration annealing.
+Double-DQN runs at 18 batches/s (1152 frames/s) on TitanX.
+Note that I wasn't using the network architecture in the paper.
+If switched to the network in the paper it could run 2x faster.
 
 ## How to use
 
 Download an [atari rom](https://github.com/openai/atari-py/tree/master/atari_py/atari_roms) to
-`$TENSORPACK_DATASET/atari_rom/` (defaults to tensorpack/dataflow/dataset/atari_rom/).
+`$TENSORPACK_DATASET/atari_rom/` (defaults to ~/tensorpack_data/atari_rom/), e.g.:
+```
+mkdir -p ~/tensorpack_data/atari_rom
+wget https://github.com/openai/atari-py/raw/master/atari_py/atari_roms/breakout.bin -O ~/tensorpack_data/atari_rom/breakout.bin
+```
 
-To train:
+Start Training:
 ```
 ./DQN.py --rom breakout.bin
 # use `--algo` to select other DQN algorithms. See `-h` for more options.
 ```
 
-To visualize the agent:
+Watch the agent play:
 ```
 ./DQN.py --rom breakout.bin --task play --load trained.model
 ```
+A pretrained model on breakout can be downloaded [here](https://drive.google.com/open?id=0B9IPQTvr2BBkN1Jrei1xWW0yR28).
 
 A3C code and models for Atari games in OpenAI Gym are released in [examples/A3C-Gym](../A3C-Gym)

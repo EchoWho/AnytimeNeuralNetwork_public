@@ -12,27 +12,9 @@ from ..utils import logger
 from .symbolic_functions import rms
 from .summary import add_moving_summary
 
-__all__ = ['GradientProcessor', 'GlobalNormClip', 'MapGradient', 'SummaryGradient', 'CheckGradient',
-           'ScaleGradient', 'apply_grad_processors']
-
-
-def apply_grad_processors(grads, gradprocs):
-    """
-    Args:
-        grads (list): list of (grad, var).
-        gradprocs (list): list of :class:`GradientProcessor` instances.
-    Returns:
-        list: list of (grad, var) went through the processors.
-    """
-    g = []
-    for grad, var in grads:
-        if grad is None:
-            logger.warn("No Gradient w.r.t {}".format(var.op.name))
-        else:
-            g.append((grad, var))
-    for proc in gradprocs:
-        g = proc.process(g)
-    return g
+__all__ = ['GradientProcessor',
+           'FilterNoneGrad', 'GlobalNormClip', 'MapGradient', 'SummaryGradient',
+           'CheckGradient', 'ScaleGradient']
 
 
 @six.add_metaclass(ABCMeta)
@@ -58,6 +40,21 @@ class GradientProcessor(object):
         pass
 
 
+class FilterNoneGrad(GradientProcessor):
+    """
+    Skip the update and print a warning (instead of crashing),
+    when the gradient of certain variable is None.
+    """
+    def _process(self, grads):
+        g = []
+        for grad, var in grads:
+            if grad is None:
+                logger.warn("No Gradient w.r.t {}".format(var.op.name))
+            else:
+                g.append((grad, var))
+        return g
+
+
 class GlobalNormClip(GradientProcessor):
     """ Clip by global norm.
         The global norm is the sum of norm for **all** gradients.
@@ -70,7 +67,7 @@ class GlobalNormClip(GradientProcessor):
         Args:
             global_norm(float): the threshold to clip with.
         """
-        self._norm = global_norm
+        self._norm = float(global_norm)
 
     def _process(self, grads):
         g = [k[0] for k in grads]
@@ -107,22 +104,27 @@ class MapGradient(GradientProcessor):
 
     def _process(self, grads):
         ret = []
+        matched = False
         for grad, var in grads:
             if re.match(self.regex, var.op.name):
+                matched = True
                 grad = self.func(grad, var)
                 if grad is not None:
                     ret.append((grad, var))
             else:
                 ret.append((grad, var))
+        if not matched:
+            logger.warn("[MapGradient] No match was found for regex {}.".format(self.regex))
         return ret
 
 
 _summaried_gradient = set()
 
 
+# TODO let the maintain op depend on grad directly ?
 class SummaryGradient(MapGradient):
     """
-    Summary histogram and RMS for each graident variable.
+    Summary histogram and RMS for each gradient variable.
     """
 
     def __init__(self):
@@ -174,6 +176,7 @@ class ScaleGradient(MapGradient):
         if not isinstance(multipliers, list):
             multipliers = [multipliers]
         self.multipliers = multipliers
+        assert log in [True, False], log
         self._log = log
         super(ScaleGradient, self).__init__(self._mapper)
 

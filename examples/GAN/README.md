@@ -10,21 +10,30 @@ Reproduce the following GAN-related methods:
 
 + Conditional GAN
 
-Please see the __docstring__ in each script for detailed usage.
++ [Wasserstein GAN](https://arxiv.org/abs/1701.07875)
 
-## DCGAN-CelebA.py
++ Improved Wasserstein GAN ([Improved Training of Wasserstein GANs](https://arxiv.org/abs/1704.00028))
+
++ DiscoGAN ([Learning to Discover Cross-Domain Relations with Generative Adversarial Networks](https://arxiv.org/abs/1703.05192))
+
++ BEGAN ([BEGAN: Boundary Equilibrium Generative Adversarial Networks](https://arxiv.org/abs/1703.10717))
+
++ CycleGAN ([Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks](https://arxiv.org/abs/1703.10593))
+
+
+Please see the __docstring__ in each script for detailed usage and pretrained models. MultiGPU training is supported.
+
+## DCGAN.py
 
 Reproduce DCGAN following the setup in [dcgan.torch](https://github.com/soumith/dcgan.torch).
 
-Play with the [pretrained model](https://drive.google.com/drive/folders/0B9IPQTvr2BBkLUF2M0RXU1NYSkE?usp=sharing) on CelebA face dataset:
-
 + Generated samples
 
-![sample](demo/CelebA-samples.jpg)
+![sample](demo/DCGAN-CelebA-samples.jpg)
 
 + Vector arithmetic: smiling woman - neutral woman + neutral man = smiling man
 
-![vec](demo/CelebA-vec.jpg)
+![vec](demo/DCGAN-CelebA-vec.jpg)
 
 ## Image2Image.py
 
@@ -51,3 +60,16 @@ It then maximizes mutual information between these latent variables and the imag
 ## ConditionalGAN-mnist.py
 
 Train a simple GAN on mnist, conditioned on the class labels.
+
+## WGAN.py, Improved-WGAN.py, BEGAN.py
+
+These variants are implemented by some small modifications on top of DCGAN.py.
+Some BEGAN samples:
+
+![began-sample](demo/BEGAN-CelebA-samples.jpg)
+
+## CycleGAN.py, DiscoGAN-CelebA.py
+
+Reproduce CycleGAN with the original datasets, and DiscoGAN on CelebA. They are pretty much the same idea with different architecture.
+
+![cyclegan-sample](demo/CycleGAN-horse2zebra.jpg)

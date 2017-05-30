@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: imagenet-resnet.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import cv2
 import sys
@@ -17,23 +16,35 @@ from tensorpack.utils.stats import RatioCounter
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 
-"""
-Training code of Pre-Activation version of ResNet on ImageNet.
-It mainly follows the setup in fb.resnet.torch, and get similar performance.
-"""
-
 TOTAL_BATCH_SIZE = 256
 INPUT_SHAPE = 224
 DEPTH = None
 
 
 class Model(ModelDesc):
+    def __init__(self, data_format='NCHW'):
+        if data_format == 'NCHW':
+            assert tf.test.is_gpu_available()
+        self.data_format = data_format
+
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        # uint8 instead of float32 is used as input type to reduce copy overhead.
+        # It might hurt the performance a liiiitle bit.
+        # The pretrained models were trained with float32.
+        return [InputDesc(tf.uint8, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
+        image = tf.cast(image, tf.float32) * (1.0 / 255)
+
+        # Wrong mean/std are used for compatibility with pre-trained models.
+        # Should actually add a RGB-BGR conversion here.
+        image_mean = tf.constant([0.485, 0.456, 0.406], dtype=tf.float32)
+        image_std = tf.constant([0.229, 0.224, 0.225], dtype=tf.float32)
+        image = (image - image_mean) / image_std
+        if self.data_format == 'NCHW':
+            image = tf.transpose(image, [0, 3, 1, 2])
 
         def shortcut(l, n_in, n_out, stride):
             if n_in != n_out:
@@ -42,7 +53,7 @@ class Model(ModelDesc):
                 return l
 
         def basicblock(l, ch_out, stride, preact):
-            ch_in = l.get_shape().as_list()[-1]
+            ch_in = l.get_shape().as_list()[1]
             if preact == 'both_preact':
                 l = BNReLU('preact', l)
                 input = l
@@ -56,7 +67,7 @@ class Model(ModelDesc):
             return l + shortcut(input, ch_in, ch_out, stride)
 
         def bottleneck(l, ch_out, stride, preact):
-            ch_in = l.get_shape().as_list()[-1]
+            ch_in = l.get_shape().as_list()[1]
             if preact == 'both_preact':
                 l = BNReLU('preact', l)
                 input = l
@@ -89,7 +100,8 @@ class Model(ModelDesc):
         defs, block_func = cfg[DEPTH]
 
         with argscope(Conv2D, nl=tf.identity, use_bias=False,
-                      W_init=variance_scaling_initializer(mode='FAN_OUT')):
+                      W_init=variance_scaling_initializer(mode='FAN_OUT')), \
+                argscope([Conv2D, MaxPooling, GlobalAvgPooling, BatchNorm], data_format=self.data_format):
             logits = (LinearWrap(image)
                       .Conv2D('conv0', 64, 7, stride=2, nl=BNReLU)
                       .MaxPooling('pool0', shape=3, stride=2, padding='SAME')
@@ -114,23 +126,25 @@ class Model(ModelDesc):
         add_moving_summary(loss, wd_cost)
         self.cost = tf.add_n([loss, wd_cost], name='cost')
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.1, summary=True)
+        return tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True)
 
-def get_data(train_or_test):
+
+def get_data(train_or_test, fake=False):
+    if fake:
+        return FakeData([[64, 224, 224, 3], [64]], 1000, random=False, dtype='uint8')
     isTrain = train_or_test == 'train'
 
     datadir = args.data
     ds = dataset.ILSVRC12(datadir, train_or_test,
                           shuffle=True if isTrain else False, dir_structure='original')
-    image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
-    image_std = np.array([0.229, 0.224, 0.225], dtype='float32')
-
     if isTrain:
         class Resize(imgaug.ImageAugmentor):
             """
             crop 8%~100% of the original image
             See `Going Deeper with Convolutions` by Google.
             """
-
             def _augment(self, img, _):
                 h, w = img.shape[:2]
                 area = h * w
@@ -156,38 +170,39 @@ def get_data(train_or_test):
                 [imgaug.Brightness(30, clip=False),
                  imgaug.Contrast((0.8, 1.2), clip=False),
                  imgaug.Saturation(0.4),
+                 # rgb-bgr conversion
                  imgaug.Lighting(0.1,
-                                 eigval=[0.2175, 0.0188, 0.0045],
-                                 eigvec=[[-0.5675, 0.7192, 0.4009],
-                                         [-0.5808, -0.0045, -0.8140],
-                                         [-0.5836, -0.6948, 0.4203]]
+                                 eigval=[0.2175, 0.0188, 0.0045][::-1],
+                                 eigvec=np.array(
+                                     [[-0.5675, 0.7192, 0.4009],
+                                      [-0.5808, -0.0045, -0.8140],
+                                      [-0.5836, -0.6948, 0.4203]],
+                                     dtype='float32')[::-1, ::-1]
                                  )]),
             imgaug.Clip(),
             imgaug.Flip(horiz=True),
-            imgaug.MapImage(lambda x: (x * (1.0 / 255) - image_mean) / image_std),
+            imgaug.ToUint8()
         ]
     else:
         augmentors = [
             imgaug.ResizeShortestEdge(256),
             imgaug.CenterCrop((224, 224)),
-            imgaug.MapImage(lambda x: (x * (1.0 / 255) - image_mean) / image_std),
+            imgaug.ToUint8()
         ]
-    ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
+    ds = AugmentImageComponent(ds, augmentors, copy=False)
     if isTrain:
-        ds = PrefetchDataZMQ(ds, min(30, multiprocessing.cpu_count()))
+        ds = PrefetchDataZMQ(ds, min(20, multiprocessing.cpu_count()))
+    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     return ds
 
 
-def get_config():
-    # prepare dataset
-    dataset_train = get_data('train')
-    dataset_val = get_data('val')
+def get_config(fake=False, data_format='NCHW'):
+    dataset_train = get_data('train', fake=fake)
+    dataset_val = get_data('val', fake=fake)
 
-    lr = get_scalar_var('learning_rate', 0.1, summary=True)
     return TrainConfig(
+        model=Model(data_format=data_format),
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_val, [
@@ -197,7 +212,6 @@ def get_config():
                                       [(30, 1e-2), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
             HumanHyperParamSetter('learning_rate'),
         ],
-        model=Model(),
         steps_per_epoch=5000,
         max_epoch=110,
     )
@@ -223,28 +237,30 @@ def eval_on_ILSVRC12(model_file, data_dir):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.', required=True)
     parser.add_argument('--data', help='ILSVRC dataset dir')
     parser.add_argument('--load', help='load model')
+    parser.add_argument('--fake', help='use fakedata to test or benchmark this model', action='store_true')
+    parser.add_argument('--data_format', help='specify NCHW or NHWC',
+                        type=str, default='NCHW')
     parser.add_argument('-d', '--depth', help='resnet depth',
                         type=int, default=18, choices=[18, 34, 50, 101])
     parser.add_argument('--eval', action='store_true')
     args = parser.parse_args()
 
     DEPTH = args.depth
-    if args.gpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+
     if args.eval:
         BATCH_SIZE = 128    # something that can run on one gpu
         eval_on_ILSVRC12(args.load, args.data)
         sys.exit()
 
-    assert args.gpu is not None, "Need to specify a list of gpu for training!"
     NR_GPU = len(args.gpu.split(','))
     BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
 
     logger.auto_set_dir()
-    config = get_config()
+    config = get_config(fake=args.fake, data_format=args.data_format)
     if args.load:
         config.session_init = SaverRestore(args.load)
     config.nr_tower = NR_GPU

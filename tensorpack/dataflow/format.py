@@ -3,6 +3,7 @@
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import numpy as np
+import six
 from six.moves import range
 import os
 
@@ -11,10 +12,11 @@ from ..utils.timer import timed_operation
 from ..utils.loadcaffe import get_caffe_pb
 from ..utils.serialize import loads
 from ..utils.argtools import log_once
-from .base import RNGDataFlow
+from .base import RNGDataFlow, DataFlow
+from .common import MapData
 
 __all__ = ['HDF5Data', 'LMDBData', 'LMDBDataDecoder', 'LMDBDataPoint',
-           'CaffeLMDB', 'SVMLightData']
+           'CaffeLMDB', 'SVMLightData', 'TFRecordData']
 
 """
 Adapters for different data format.
@@ -59,36 +61,67 @@ class HDF5Data(RNGDataFlow):
 
 class LMDBData(RNGDataFlow):
     """ Read a LMDB database and produce (k,v) pairs """
-    def __init__(self, lmdb_path, shuffle=True):
+    def __init__(self, lmdb_path, shuffle=True, keys=None):
         """
         Args:
             lmdb_path (str): a directory or a file.
             shuffle (bool): shuffle the keys or not.
+            keys (list[str] or str): list of str as the keys, used only when shuffle is True.
+                It can also be a format string e.g. ``{:0>8d}`` which will be
+                formatted with the indices from 0 to *total_size - 1*.
+
+                If not provided, it will then look in the database for ``__keys__`` which
+                :func:`dump_dataflow_to_lmdb` used to store the list of keys.
+                If still not found, it will iterate over the database to find
+                all the keys.
         """
         self._lmdb_path = lmdb_path
         self._shuffle = shuffle
+
         self.open_lmdb()
+        self._size = self._txn.stat()['entries']
+        self._set_keys(keys)
+        logger.info("Found {} entries in {}".format(self._size, self._lmdb_path))
+
+    def _set_keys(self, keys=None):
+        def find_keys(txn, size):
+            logger.warn("Traversing the database to find keys is slow. Your should specify the keys.")
+            keys = []
+            with timed_operation("Loading LMDB keys ...", log_start=True), \
+                    get_tqdm(total=size) as pbar:
+                for k in self._txn.cursor():
+                    assert k[0] != '__keys__'
+                    keys.append(k[0])
+                    pbar.update()
+            return keys
+
+        try:
+            self.keys = loads(self._txn.get('__keys__'))
+        except:
+            self.keys = None
+        else:
+            self._size -= 1     # delete this item
+
+        if self._shuffle:
+            if keys is None:
+                if self.keys is None:
+                    self.keys = find_keys(self._txn, self._size)
+            else:
+                # check if key-format like '{:0>8d}' was given
+                if isinstance(keys, six.string_types):
+                    self.keys = map(lambda x: keys.format(x), list(np.arange(self._size)))
+                else:
+                    self.keys = keys
 
     def open_lmdb(self):
         self._lmdb = lmdb.open(self._lmdb_path,
                                subdir=os.path.isdir(self._lmdb_path),
-                               readonly=True, lock=False, readahead=False,
+                               readonly=True, lock=False, readahead=True,
                                map_size=1099511627776 * 2, max_readers=100)
         self._txn = self._lmdb.begin()
-        self._size = self._txn.stat()['entries']
-        if self._shuffle:
-            # get the list of keys either from __keys__ or by iterating
-            self.keys = loads(self._txn.get('__keys__'))
-            if not self.keys:
-                self.keys = []
-                with timed_operation("Loading LMDB keys ...", log_start=True), \
-                        get_tqdm(total=self._size) as pbar:
-                    for k in self._txn.cursor():
-                        if k[0] != '__keys__':
-                            self.keys.append(k[0])
-                            pbar.update()
 
     def reset_state(self):
+        self._lmdb.close()
         super(LMDBData, self).reset_state()
         self.open_lmdb()
 
@@ -109,67 +142,75 @@ class LMDBData(RNGDataFlow):
                 yield [k, v]
 
 
-class LMDBDataDecoder(LMDBData):
+class LMDBDataDecoder(MapData):
     """ Read a LMDB database and produce a decoded output."""
-    def __init__(self, lmdb_path, decoder, shuffle=True):
+    def __init__(self, lmdb_data, decoder):
         """
         Args:
-            lmdb_path (str): a directory or a file.
+            lmdb_data: a :class:`LMDBData` instance.
             decoder (k,v -> dp | None): a function taking k, v and returning a datapoint,
                 or return None to discard.
-            shuffle (bool): shuffle the keys or not.
         """
-        super(LMDBDataDecoder, self).__init__(lmdb_path, shuffle)
-        self.decoder = decoder
-
-    def get_data(self):
-        for dp in super(LMDBDataDecoder, self).get_data():
-            v = self.decoder(dp[0], dp[1])
-            if v:
-                yield v
+        def f(dp):
+            return decoder(dp[0], dp[1])
+        super(LMDBDataDecoder, self).__init__(lmdb_data, f)
 
 
-class LMDBDataPoint(LMDBDataDecoder):
+class LMDBDataPoint(MapData):
     """ Read a LMDB file and produce deserialized values.
         This can work with :func:`tensorpack.dataflow.dftools.dump_dataflow_to_lmdb`. """
 
-    def __init__(self, lmdb_path, shuffle=True):
+    def __init__(self, *args, **kwargs):
         """
         Args:
-            lmdb_path (str): a directory or a file.
-            shuffle (bool): shuffle the keys or not.
+            args, kwargs: Same as in :class:`LMDBData`.
         """
-        super(LMDBDataPoint, self).__init__(
-            lmdb_path, decoder=lambda k, v: loads(v), shuffle=shuffle)
+        if isinstance(args[0], LMDBData):
+            ds = args[0]
+        else:
+            ds = LMDBData(*args, **kwargs)
+
+        def f(dp):
+            return loads(dp[1])
+        super(LMDBDataPoint, self).__init__(ds, f)
 
 
-class CaffeLMDB(LMDBDataDecoder):
+def CaffeLMDB(lmdb_path, shuffle=True, keys=None):
     """
     Read a Caffe LMDB file where each value contains a ``caffe.Datum`` protobuf.
     Produces datapoints of the format: [HWC image, label].
+
+    Note that Caffe LMDB format is not efficient: it stores serialized raw
+    arrays rather than JPEG images.
+
+    Args:
+        lmdb_path, shuffle, keys: same as :class:`LMDBData`.
+
+    Returns:
+        a :class:`LMDBDataDecoder` instance.
+
+    Example:
+        .. code-block:: python
+
+            ds = CaffeLMDB("/tmp/validation", keys='{:0>8d}')
     """
 
-    def __init__(self, lmdb_path, shuffle=True):
-        """
-        Args:
-            lmdb_path (str): a directory or a file.
-            shuffle (bool): shuffle the keys or not.
-        """
-        cpb = get_caffe_pb()
+    cpb = get_caffe_pb()
+    lmdb_data = LMDBData(lmdb_path, shuffle, keys)
 
-        def decoder(k, v):
-            try:
-                datum = cpb.Datum()
-                datum.ParseFromString(v)
-                img = np.fromstring(datum.data, dtype=np.uint8)
-                img = img.reshape(datum.channels, datum.height, datum.width)
-            except Exception:
-                log_once("Cannot read key {}".format(k), 'warn')
-                return None
-            return [img.transpose(1, 2, 0), datum.label]
-
-        super(CaffeLMDB, self).__init__(
-            lmdb_path, decoder=decoder, shuffle=shuffle)
+    def decoder(k, v):
+        try:
+            datum = cpb.Datum()
+            datum.ParseFromString(v)
+            img = np.fromstring(datum.data, dtype=np.uint8)
+            img = img.reshape(datum.channels, datum.height, datum.width)
+        except Exception:
+            log_once("Cannot read key {}".format(k), 'warn')
+            return None
+        return [img.transpose(1, 2, 0), datum.label]
+    logger.warn("Caffe LMDB format doesn't store jpeg-compressed images, \
+        it's not recommended due to its inferior performance.")
+    return LMDBDataDecoder(lmdb_data, decoder)
 
 
 class SVMLightData(RNGDataFlow):
@@ -196,7 +237,32 @@ class SVMLightData(RNGDataFlow):
             yield [self.X[id, :], self.y[id]]
 
 
-from ..utils.dependency import create_dummy_class   # noqa
+class TFRecordData(DataFlow):
+    """
+    Produce datapoints from a TFRecord file, assuming each record is
+    serialized by :func:`serialize.dumps`.
+    This class works with :func:`dftools.dump_dataflow_to_tfrecord`.
+    """
+    def __init__(self, path, size=None):
+        """
+        Args:
+            path (str): path to the tfrecord file
+            size (int): total number of records, because this metadata is not
+                stored in the tfrecord file.
+        """
+        self._gen = tf.python_io.tf_record_iterator(path)
+        self._size = int(size)
+
+    def size(self):
+        if self._size:
+            return self._size
+        return super(TFRecordData, self).size()
+
+    def get_data(self):
+        for dp in self._gen:
+            yield loads(dp)
+
+from ..utils.develop import create_dummy_class   # noqa
 try:
     import h5py
 except ImportError:
@@ -212,3 +278,8 @@ try:
     import sklearn.datasets
 except ImportError:
     SVMLightData = create_dummy_class('SVMLightData', 'sklearn')   # noqa
+
+try:
+    import tensorflow as tf
+except ImportError:
+    TFRecordData = create_dummy_class('TFRecordData', 'tensorflow')   # noqa

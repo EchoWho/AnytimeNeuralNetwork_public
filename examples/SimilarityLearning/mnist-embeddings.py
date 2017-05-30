@@ -3,20 +3,27 @@
 # File: mnist-embeddings.py
 # Author: PatWie <mail@patwie.com>
 
-import tensorflow as tf
-from tensorflow.python.platform import flags
-import tensorflow.contrib.slim as slim
-
 import numpy as np
-
-import matplotlib
-from matplotlib import offsetbox
-import matplotlib.pyplot as plt
+import os
 
 from tensorpack import *
 import tensorpack.tfutils.symbolic_functions as symbf
 from tensorpack.tfutils.summary import add_moving_summary
+
+import tensorflow as tf
+from tensorflow.python.platform import flags
+import tensorflow.contrib.slim as slim
+
 from embedding_data import get_test_data, MnistPairs, MnistTriplets
+
+MATPLOTLIB_AVAIBLABLE = False
+try:
+    import matplotlib
+    from matplotlib import offsetbox
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAIBLABLE = True
+except ImportError:
+    MATPLOTLIB_AVAIBLABLE = False
 
 
 FLAGS = flags.FLAGS
@@ -53,6 +60,10 @@ class EmbeddingModel(ModelDesc):
 
         return embeddings
 
+    def _get_optimizer(self):
+        lr = symbf.get_scalar_var('learning_rate', 1e-4, summary=True)
+        return tf.train.GradientDescentOptimizer(lr)
+
 
 class SiameseModel(EmbeddingModel):
     @staticmethod
@@ -62,9 +73,9 @@ class SiameseModel(EmbeddingModel):
         return ds
 
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, 28, 28), 'input'),
-                InputVar(tf.float32, (None, 28, 28), 'input_y'),
-                InputVar(tf.int32, (None,), 'label')]
+        return [InputDesc(tf.float32, (None, 28, 28), 'input'),
+                InputDesc(tf.float32, (None, 28, 28), 'input_y'),
+                InputDesc(tf.int32, (None,), 'label')]
 
     def _build_graph(self, inputs):
         # get inputs
@@ -92,7 +103,7 @@ class CosineModel(SiameseModel):
         with tf.variable_scope(tf.get_variable_scope(), reuse=True):
             tf.identity(self.embed(inputs[0]), name="emb")
 
-        cost = symbf.cosine_loss(x, y, label, scope="loss")
+        cost = symbf.siamese_cosine_loss(x, y, label, scope="loss")
         self.cost = tf.identity(cost, name="cost")
         add_moving_summary(self.cost)
 
@@ -105,9 +116,9 @@ class TripletModel(EmbeddingModel):
         return ds
 
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, 28, 28), 'input'),
-                InputVar(tf.float32, (None, 28, 28), 'input_p'),
-                InputVar(tf.float32, (None, 28, 28), 'input_n')]
+        return [InputDesc(tf.float32, (None, 28, 28), 'input'),
+                InputDesc(tf.float32, (None, 28, 28), 'input_p'),
+                InputDesc(tf.float32, (None, 28, 28), 'input_n')]
 
     def loss(self, a, p, n):
         return symbf.triplet_loss(a, p, n, 5., extra=True, scope="loss")
@@ -131,21 +142,17 @@ class SoftTripletModel(TripletModel):
 
 
 def get_config(model, algorithm_name):
-    logger.auto_set_dir()
-
-    dataset = model.get_data()
-    steps_per_epoch = dataset.size()
-
-    lr = symbf.get_scalar_var('learning_rate', 1e-4, summary=True)
+    logger.set_logger_dir(
+        os.path.join('train_log',
+                     'mnist-embeddings-{}'.format(algorithm_name)))
 
     extra_display = ["cost"]
     if not algorithm_name == "cosine":
         extra_display = extra_display + ["loss/pos-dist", "loss/neg-dist"]
 
     return TrainConfig(
-        dataflow=dataset,
+        dataflow=model.get_data(),
         model=model(),
-        optimizer=tf.train.GradientDescentOptimizer(lr),
         callbacks=[
             ModelSaver(),
             ScheduledHyperParamSetter('learning_rate', [(10, 1e-5), (20, 1e-6)])
@@ -153,13 +160,17 @@ def get_config(model, algorithm_name):
         extra_callbacks=[
             MovingAverageSummary(),
             ProgressBar(extra_display),
-            StatPrinter()],
-        steps_per_epoch=steps_per_epoch,
+            MergeAllSummaries(),
+            RunUpdateOps()
+        ],
         max_epoch=20,
     )
 
 
 def visualize(model_path, model):
+    if not MATPLOTLIB_AVAIBLABLE:
+        logger.error("visualize requires matplotlib package ...")
+        return
     pred = OfflinePredictor(PredictConfig(
         session_init=get_model_loader(model_path),
         model=model(),
