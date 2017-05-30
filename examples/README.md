@@ -3,11 +3,16 @@
 
 Training examples with __reproducible__ and meaningful performance.
 
-## Vision:
+## Getting Started:
 + [An illustrative mnist example with explanation of the framework](mnist-convnet.py)
++ The same mnist example using [tf-slim](mnist-tfslim.py), [Keras](mnist-keras.py), and [with weights visualizations](mnist-visualizations.py)
++ [A boilerplate file to start with, for your own tasks](boilerplate.py)
+
+## Vision:
 + [A tiny SVHN ConvNet with 97.8% accuracy](svhn-digit-convnet.py)
 + [DoReFa-Net: training binary / low-bitwidth CNN on ImageNet](DoReFa-Net)
-+ [ResNet for ImageNet/Cifar10/SVHN](ResNet)
++ [Train ResNet for ImageNet/Cifar10/SVHN](ResNet)
++ [Generative Adversarial Network(GAN) variants](GAN), including DCGAN, InfoGAN, Conditional GAN, WGAN, BEGAN, DiscoGAN, Image to Image, CycleGAN.
 + [Inception-BN with 71% accuracy](Inception/inception-bn.py)
 + [InceptionV3 with 74% accuracy (similar to the official code)](Inception/inceptionv3.py)
 + [Fully-convolutional Network for Holistically-Nested Edge Detection(HED)](HED)
@@ -18,11 +23,8 @@ Training examples with __reproducible__ and meaningful performance.
 + Load a pre-trained [Convolutional Pose Machines](ConvolutionalPoseMachines/).
 
 ## Reinforcement Learning:
-+ [Deep Q-Network(DQN) variants on Atari games](DeepQNetwork)
++ [Deep Q-Network(DQN) variants on Atari games](DeepQNetwork), including DQN, DoubleDQN, DuelingDQN.
 + [Asynchronous Advantage Actor-Critic(A3C) with demos on OpenAI Gym](A3C-Gym)
-
-## Unsupervised:
-+ [Generative Adversarial Network(GAN) variants, including DCGAN, Image2Image, InfoGAN](GAN)
 
 ## Speech / NLP:
 + [LSTM-CTC for speech recognition](CTC-TIMIT)

@@ -2,10 +2,10 @@
 # -*- coding: UTF-8 -*-
 # File: resnet-dorefa.py
 
+import cv2
 import tensorflow as tf
 import argparse
 import numpy as np
-import cv2
 import os
 import sys
 
@@ -13,7 +13,7 @@ from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.utils.stats import RatioCounter
-from tensorpack.tfutils.varreplace import replace_get_variable
+from tensorpack.tfutils.varreplace import remap_variables
 from dorefa import get_dorefa
 
 """
@@ -34,8 +34,8 @@ BITG = 32
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 224, 224, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, 224, 224, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
@@ -44,10 +44,10 @@ class Model(ModelDesc):
         fw, fa, fg = get_dorefa(BITW, BITA, BITG)
         old_get_variable = tf.get_variable
 
-        def new_get_variable(name, shape=None, **kwargs):
-            v = old_get_variable(name, shape, **kwargs)
+        def new_get_variable(v):
+            name = v.op.name
             # don't binarize first and last layer
-            if name != 'W' or 'conv1' in v.op.name or 'fct' in v.op.name:
+            if not name.endswith('W') or 'conv1' in name or 'fct' in name:
                 return v
             else:
                 logger.info("Binarizing weight {}".format(v.op.name))
@@ -90,7 +90,7 @@ class Model(ModelDesc):
                     x = resblock(x, channel, 1)
             return x
 
-        with replace_get_variable(new_get_variable), \
+        with remap_variables(new_get_variable), \
                 argscope(BatchNorm, decay=0.9, epsilon=1e-4), \
                 argscope(Conv2D, use_bias=False, nl=tf.identity):
             logits = (LinearWrap(image)
@@ -125,11 +125,10 @@ def run_image(model, sess_init, inputs):
     pred_config = PredictConfig(
         model=model,
         session_init=sess_init,
-        session_config=get_default_sess_config(0.9),
         input_names=['input'],
         output_names=['output']
     )
-    predict_func = get_predict_func(pred_config)
+    predict_func = OfflinePredictor(pred_config)
     meta = dataset.ILSVRCMeta()
     words = meta.get_synset_words_1000()
 
@@ -191,5 +190,5 @@ if __name__ == '__main__':
         eval_on_ILSVRC12(args.load, args.data)
     elif args.run:
         assert args.load.endswith('.npy')
-        run_image(Model(), ParamRestore(
+        run_image(Model(), DictRestore(
             np.load(args.load, encoding='latin1').item()), args.run)

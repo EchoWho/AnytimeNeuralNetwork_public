@@ -3,7 +3,6 @@
 # File: char-rnn.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import tensorflow as tf
 import numpy as np
 import os
 import sys
@@ -14,9 +13,11 @@ import six
 from six.moves import map, range
 
 from tensorpack import *
-from tensorpack.tfutils.gradproc import *
+from tensorpack.tfutils.gradproc import GlobalNormClip
 from tensorpack.utils.lut import LookUpTable
 from tensorpack.utils.globvars import globalns as param
+
+import tensorflow as tf
 rnn = tf.contrib.rnn
 
 # some model hyperparams to set
@@ -42,7 +43,7 @@ class CharRNNData(RNGDataFlow):
             data = f.read()
         if six.PY2:
             data = bytearray(data)
-        data = [chr(c) for c in data if c < 128]    # TODO this is Py2 only
+        data = [chr(c) for c in data if c < 128]
         counter = Counter(data)
         char_cnt = sorted(counter.items(), key=operator.itemgetter(1), reverse=True)
         self.chars = [x[0] for x in char_cnt]
@@ -66,14 +67,14 @@ class CharRNNData(RNGDataFlow):
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.int32, (None, param.seq_len), 'input'),
-                InputVar(tf.int32, (None, param.seq_len), 'nextinput')]
+        return [InputDesc(tf.int32, (None, param.seq_len), 'input'),
+                InputDesc(tf.int32, (None, param.seq_len), 'nextinput')]
 
     def _build_graph(self, inputs):
         input, nextinput = inputs
 
-        cell = rnn.BasicLSTMCell(num_units=param.rnn_size)
-        cell = rnn.MultiRNNCell([cell] * param.num_rnn_layer)
+        cell = rnn.MultiRNNCell([rnn.LSTMBlockCell(num_units=param.rnn_size)
+                                for _ in range(param.num_rnn_layer)])
 
         def get_v(n):
             ret = tf.get_variable(n + '_unused', [param.batch_size, param.rnn_size],
@@ -90,7 +91,6 @@ class Model(ModelDesc):
 
         input_list = tf.unstack(input_feature, axis=1)  # seqlen x (Bxrnnsize)
 
-        # seqlen is 1 in inference. don't need loop_function
         outputs, last_state = rnn.static_rnn(cell, input_list, initial, scope='rnnlm')
         self.last_state = tf.identity(last_state, 'last_state')
 
@@ -100,13 +100,15 @@ class Model(ModelDesc):
         self.prob = tf.nn.softmax(logits / param.softmax_temprature, name='prob')
 
         xent_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=logits, labels=symbolic_functions.flatten(nextinput))
+            logits=logits, labels=tf.reshape(nextinput, [-1]))
         self.cost = tf.reduce_mean(xent_loss, name='cost')
         summary.add_param_summary(('.*/W', ['histogram']))   # monitor histogram of all W
         summary.add_moving_summary(self.cost)
 
-    def get_gradient_processor(self):
-        return [GlobalNormClip(5)]
+    def _get_optimizer(self):
+        lr = symbolic_functions.get_scalar_var('learning_rate', 2e-3, summary=True)
+        opt = tf.train.AdamOptimizer(lr)
+        return optimizer.apply_grad_processors(opt, [GlobalNormClip(5)])
 
 
 def get_config():
@@ -114,23 +116,16 @@ def get_config():
 
     ds = CharRNNData(param.corpus, 100000)
     ds = BatchData(ds, param.batch_size)
-    steps_per_epoch = ds.size()
-
-    lr = symbolic_functions.get_scalar_var('learning_rate', 2e-3, summary=True)
 
     return TrainConfig(
         dataflow=ds,
-        optimizer=tf.train.AdamOptimizer(lr),
         callbacks=[
             ModelSaver(),
             ScheduledHyperParamSetter('learning_rate', [(25, 2e-4)])
         ],
         model=Model(),
-        steps_per_epoch=steps_per_epoch,
         max_epoch=50,
     )
-
-# TODO rewrite using Predictor interface
 
 
 def sample(path, start, length):

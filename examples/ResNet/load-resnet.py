@@ -25,10 +25,9 @@ MODEL_DEPTH = None
 
 
 class Model(ModelDesc):
-
-    def _get_input_vars(self):
-        return [InputVar(tf.float32, [None, 224, 224, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+    def _get_inputs(self):
+        return [InputDesc(tf.float32, [None, 224, 224, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, input_vars):
         image, label = input_vars
@@ -115,11 +114,11 @@ def get_inference_augmentor():
 def run_test(params, input):
     pred_config = PredictConfig(
         model=Model(),
-        session_init=ParamRestore(params),
+        session_init=DictRestore(params),
         input_names=['input'],
         output_names=['prob']
     )
-    predict_func = get_predict_func(pred_config)
+    predict_func = OfflinePredictor(pred_config)
 
     prepro = get_inference_augmentor()
     im = cv2.imread(input).astype('float32')
@@ -140,7 +139,7 @@ def eval_on_ILSVRC12(params, data_dir):
     ds = BatchData(ds, 128, remainder=True)
     pred_config = PredictConfig(
         model=Model(),
-        session_init=ParamRestore(params),
+        session_init=DictRestore(params),
         input_names=['input', 'label'],
         output_names=['wrong-top1', 'wrong-top5']
     )

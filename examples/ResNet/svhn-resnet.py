@@ -3,7 +3,6 @@
 # File: svhn-resnet.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import tensorflow as tf
 import argparse
 import numpy as np
 import os
@@ -11,6 +10,7 @@ import os
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
+import tensorflow as tf
 
 """
 ResNet-110 for SVHN Digit Classification.
@@ -66,10 +66,8 @@ def get_config():
     steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
-    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_test,

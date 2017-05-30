@@ -4,7 +4,6 @@
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import numpy as np
-import tensorflow as tf
 import argparse
 import os
 
@@ -12,6 +11,7 @@ from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 
+import tensorflow as tf
 from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
@@ -21,10 +21,13 @@ This implementation uses the variants proposed in:
 Identity Mappings in Deep Residual Networks, arxiv:1603.05027
 
 I can reproduce the results on 2 TitanX for
-n=5, about 7.1% val error after 67k steps (8.6 step/s)
-n=18, about 5.95% val error after 80k steps (2.6 step/s)
-n=30: a 182-layer network, about 5.6% val error after 51k steps (1.55 step/s)
+n=5, about 7.1% val error after 67k steps (20.4 step/s)
+n=18, about 5.95% val error after 80k steps (5.6 step/s, not converged)
+n=30: a 182-layer network, about 5.6% val error after 51k steps (3.4 step/s)
 This model uses the whole training set instead of a train-val split.
+
+To train:
+    ./cifar10-resnet.py --gpu 0,1
 """
 
 BATCH_SIZE = 128
@@ -38,16 +41,18 @@ class Model(ModelDesc):
         self.n = n
 
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, 32, 32, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
-        image = image / 128.0 - 1
+        image = image / 128.0
+        assert tf.test.is_gpu_available()
+        image = tf.transpose(image, [0, 3, 1, 2])
 
         def residual(name, l, increase_dim=False, first=False):
             shape = l.get_shape().as_list()
-            in_channel = shape[3]
+            in_channel = shape[1]
 
             if increase_dim:
                 out_channel = in_channel * 2
@@ -62,13 +67,14 @@ class Model(ModelDesc):
                 c2 = Conv2D('conv2', c1, out_channel)
                 if increase_dim:
                     l = AvgPooling('pool', l, 2)
-                    l = tf.pad(l, [[0, 0], [0, 0], [0, 0], [in_channel // 2, in_channel // 2]])
+                    l = tf.pad(l, [[0, 0], [in_channel // 2, in_channel // 2], [0, 0], [0, 0]])
 
                 l = c2 + l
                 return l
 
-        with argscope(Conv2D, nl=tf.identity, use_bias=False, kernel_shape=3,
-                      W_init=variance_scaling_initializer(mode='FAN_OUT')):
+        with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling], data_format='NCHW'), \
+                argscope(Conv2D, nl=tf.identity, use_bias=False, kernel_shape=3,
+                         W_init=variance_scaling_initializer(mode='FAN_OUT')):
             l = Conv2D('conv0', image, 16, nl=BNReLU)
             l = residual('res1.0', l, first=True)
             for k in range(1, self.n):
@@ -106,6 +112,11 @@ class Model(ModelDesc):
         add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([cost, wd_cost], name='cost')
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.01, summary=True)
+        opt = tf.train.MomentumOptimizer(lr, 0.9)
+        return opt
+
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -123,7 +134,7 @@ def get_data(train_or_test):
             imgaug.MapImage(lambda x: x - pp_mean)
         ]
     ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, 128, remainder=not isTrain)
+    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchData(ds, 3, 2)
     return ds
@@ -131,16 +142,11 @@ def get_data(train_or_test):
 
 def get_config():
     logger.auto_set_dir()
-
-    # prepare dataset
     dataset_train = get_data('train')
-    steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test')
 
-    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_test,
@@ -149,7 +155,6 @@ def get_config():
                                       [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
         ],
         model=Model(n=NUM_UNITS),
-        steps_per_epoch=steps_per_epoch,
         max_epoch=400,
     )
 
