@@ -6,9 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.utils import anytime_loss
-from tensorpack.utils import logger
-from tensorpack.utils import utils
+from tensorpack.utils import anytime_loss, logger, utils, fs
 from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
 from tensorflow.contrib.layers import variance_scaling_initializer
@@ -86,12 +84,13 @@ class Model(ModelDesc):
         self.weights = weights
 
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, 32, 32, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
-        image = image / 128.0 - 1
+        image = image / 128.0
+        image = tf.transpose(image, [0, 3, 1, 2])
 
         def conv(name, l, channel, stride):
             kernel = 3
@@ -156,9 +155,9 @@ class Model(ModelDesc):
                         merged_feats = l
                     else:
                         merged_feats = tf.concat(1, [merged_feats, l], name='concat')
-                    logits, vl = FullyConnected('linear', merged_feats, out_dim, \
+                    logits = FullyConnected('linear', merged_feats, out_dim, \
                                                 nl=tf.identity, return_vars=True)
-                    var_list.extend(vl)
+                    var_list.extend([logits.variables.W, logits.variables.b])
                     #if w != 0:
                     #    logits += l_logits[-1]
                     l_logits.append(logits)
@@ -170,7 +169,7 @@ class Model(ModelDesc):
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.eval') as scope:
                     logits = l_logits[w]
-                    cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
+                    cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
                     cost = tf.reduce_mean(cost, name='cross_entropy_loss')
                     add_moving_summary(cost)
 
@@ -268,6 +267,11 @@ class Model(ModelDesc):
         add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([cost, wd_cost], name='cost')
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.01, summary=True)
+        opt = tf.train.MomentumOptimizer(lr, 0.9)
+        return opt
+
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -347,14 +351,12 @@ def get_config():
         online_learn_cb = []
 
     logger.info('weights: {}'.format(weights))
-    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     #if SAMLOSS > 0:
     #    lr_schedule = [(1, 0.1), (82, 0.02), (123, 0.004), (250, 0.0008)] 
     #else:
     lr_schedule = [(1, 0.1), (7, 0.01), (11, 0.001), (20, 0.0002)]
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9),
         callbacks=[
             ModelSaver(checkpoint_dir=MODEL_DIR),
             InferenceRunner(dataset_test,
@@ -446,8 +448,9 @@ if __name__ == '__main__':
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-    logger.auto_set_dir(log_root=args.log_dir)
-    utils.set_dataset_path(path=args.data_dir, auto_download=False)
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
+    fs.set_dataset_path(path=args.data_dir, auto_download=False)
     MODEL_DIR = args.model_dir
 
     logger.info("On Dataset CIFAR{}, Parameters: f= {}, n= {}, w= {}, c= {}, s= {}, batch_size= {}, stopgrad= {}, stopgradpartial= {}, sg_gamma= {}, rand_loss_selector= {}, exp_gamma= {}, sum_rand_ratio= {} do_validation= {} exp_base= {} opt_at= {}".format(\
