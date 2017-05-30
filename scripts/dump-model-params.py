@@ -22,19 +22,21 @@ assert args.config or args.meta, "Either config or metagraph must be present!"
 
 with tf.Graph().as_default() as G:
     if args.config:
+        logger.warn("Using a config script is not reliable. Please use metagraph.")
         MODEL = imp.load_source('config_script', args.config).Model
         M = MODEL()
         with TowerContext('', is_training=False):
-            M.build_graph(M.get_input_vars())
+            M.build_graph(M.get_reused_placehdrs())
     else:
         M = ModelFromMetaGraph(args.meta)
 
     # loading...
     if args.model.endswith('.npy'):
-        init = sessinit.ParamRestore(np.load(args.model).item())
+        init = sessinit.DictRestore(np.load(args.model).item())
     else:
         init = sessinit.SaverRestore(args.model)
     sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
+    sess.run(tf.global_variables_initializer())
     init.init(sess)
 
     # dump ...

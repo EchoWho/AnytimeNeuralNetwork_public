@@ -4,12 +4,16 @@
 
 import six
 import tensorflow as tf
+import cv2
 import re
+from six.moves import range
 
 from ..utils import logger
-from ..utils.naming import MOVING_SUMMARY_VARS_KEY
+from ..utils.develop import log_deprecated
+from ..utils.naming import MOVING_SUMMARY_OPS_KEY
 from .tower import get_current_tower_context
 from .symbolic_functions import rms
+from .common import get_global_step_var
 
 __all__ = ['create_scalar_summary', 'add_param_summary', 'add_activation_summary',
            'add_moving_summary']
@@ -27,6 +31,34 @@ def create_scalar_summary(name, v):
     return s
 
 
+def create_image_summary(name, val):
+    """
+    Args:
+        name(str):
+        val(np.ndarray): 4D tensor of NHWC. assume RGB if C==3.
+
+    Returns:
+        tf.Summary:
+    """
+    assert isinstance(name, six.string_types), type(name)
+    n, h, w, c = val.shape
+    s = tf.Summary()
+    for k in range(n):
+        tag = name if n == 1 else '{}/{}'.format(name, k)
+        # imencode assumes BGR
+        ret, buf = cv2.imencode('.png', val[k, :, :, ::-1])
+        assert ret, "imencode failed!"
+
+        img = tf.Summary.Image()
+        img.height = h
+        img.width = w
+        # 1 - grayscale 3 - RGB 4 - RGBA
+        img.colorspace = c
+        img.encoded_image_string = buf.tostring()
+        s.value.add(tag=tag, image=img)
+    return s
+
+
 def add_activation_summary(x, name=None):
     """
     Add summary for an activation tensor x.  If name is None, use x.name.
@@ -38,9 +70,9 @@ def add_activation_summary(x, name=None):
     if ctx is not None and not ctx.is_main_training_tower:
         return
     ndim = x.get_shape().ndims
-    # TODO use scalar if found ndim == 1
-    assert ndim >= 2, \
-        "Summary a scalar with histogram? Maybe use scalar instead. FIXME!"
+    if ndim < 2:
+        logger.warn("Cannot summarize scalar activation {}".format(x.name))
+        return
     if name is None:
         name = x.name
     with tf.name_scope('activation-summary'):
@@ -60,7 +92,7 @@ def add_param_summary(*summary_lists):
     if ctx is not None and not ctx.is_main_training_tower:
         return
     if len(summary_lists) == 1 and isinstance(summary_lists[0], list):
-        logger.warn("[Deprecated] Use positional args to call add_param_summary() instead of a list.")
+        log_deprecated(text="Use positional args to call add_param_summary() instead of a list.")
         summary_lists = summary_lists[0]
 
     def perform(var, action):
@@ -97,13 +129,21 @@ def add_param_summary(*summary_lists):
                         perform(p, act)
 
 
-def add_moving_summary(v, *args):
+def add_moving_summary(v, *args, **kwargs):
     """
     Args:
         v (tf.Tensor or list): tensor or list of tensors to summary. Must have
             scalar type.
         args: tensors to summary (support positional arguments)
+        decay (float): the decay rate. Defaults to 0.95.
+        collection (str): the name of the collection to add EMA-maintaining ops.
+            The default will work together with the default
+            :class:`MovingAverageSummary` callback.
     """
+    decay = kwargs.pop('decay', 0.95)
+    coll = kwargs.pop('collection', MOVING_SUMMARY_OPS_KEY)
+    assert len(kwargs) == 0, "Unknown arguments: " + str(kwargs)
+
     ctx = get_current_tower_context()
     if ctx is not None and not ctx.is_main_training_tower:
         return
@@ -111,5 +151,18 @@ def add_moving_summary(v, *args):
         v = [v]
     v.extend(args)
     for x in v:
+        assert isinstance(x, tf.Tensor), x
         assert x.get_shape().ndims == 0, x.get_shape()
-        tf.add_to_collection(MOVING_SUMMARY_VARS_KEY, x)
+    # TODO will produce tower0/xxx?
+    # TODO use zero_debias
+    with tf.name_scope(None):
+        averager = tf.train.ExponentialMovingAverage(
+            decay, num_updates=get_global_step_var(), name='EMA')
+        avg_maintain_op = averager.apply(v)
+
+        for c in v:
+            # TODO do this in the EMA callback?
+            name = re.sub('tower[p0-9]+/', '', c.op.name)
+            tf.summary.scalar(name + '-summary', averager.average(c))
+
+    tf.add_to_collection(coll, avg_maintain_op)

@@ -4,17 +4,17 @@
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import numpy as np
-import tensorflow as tf
 import os
 import sys
-import re
 import time
 import random
 import uuid
 import argparse
 import multiprocessing
 import threading
-from collections import deque
+
+import cv2
+import tensorflow as tf
 import six
 from six.moves import queue
 
@@ -23,11 +23,19 @@ from tensorpack.utils.concurrency import *
 from tensorpack.utils.serialize import *
 from tensorpack.utils.stats import *
 from tensorpack.tfutils import symbolic_functions as symbf
+from tensorpack.tfutils.gradproc import MapGradient, SummaryGradient
 
 from tensorpack.RL import *
 from simulator import *
 import common
-from common import (play_model, Evaluator, eval_model_multithread)
+from common import (play_model, Evaluator, eval_model_multithread,
+                    play_one_episode, play_n_episodes)
+
+if six.PY3:
+    from concurrent import futures
+    CancelledError = futures.CancelledError
+else:
+    CancelledError = Exception
 
 IMAGE_SIZE = (84, 84)
 FRAME_HISTORY = 4
@@ -36,11 +44,12 @@ CHANNEL = FRAME_HISTORY * 3
 IMAGE_SHAPE3 = IMAGE_SIZE + (CHANNEL,)
 
 LOCAL_TIME_MAX = 5
-STEP_PER_EPOCH = 6000
+STEPS_PER_EPOCH = 6000
 EVAL_EPISODE = 50
 BATCH_SIZE = 128
+PREDICT_BATCH_SIZE = 15     # batch for efficient forward
 SIMULATOR_PROC = 50
-PREDICTOR_THREAD_PER_GPU = 2
+PREDICTOR_THREAD_PER_GPU = 3
 PREDICTOR_THREAD = None
 EVALUATE_PROC = min(multiprocessing.cpu_count() // 2, 20)
 
@@ -49,11 +58,8 @@ ENV_NAME = None
 
 
 def get_player(viz=False, train=False, dumpdir=None):
-    pl = GymEnv(ENV_NAME, dumpdir=dumpdir)
-
-    def func(img):
-        return cv2.resize(img, IMAGE_SIZE[::-1])
-    pl = MapPlayerState(pl, func)
+    pl = GymEnv(ENV_NAME, viz=viz, dumpdir=dumpdir)
+    pl = MapPlayerState(pl, lambda img: cv2.resize(img, IMAGE_SIZE[::-1]))
 
     global NUM_ACTIONS
     NUM_ACTIONS = pl.get_action_space().num_actions()
@@ -61,15 +67,12 @@ def get_player(viz=False, train=False, dumpdir=None):
     pl = HistoryFramePlayer(pl, FRAME_HISTORY)
     if not train:
         pl = PreventStuckPlayer(pl, 30, 1)
-    pl = LimitLengthPlayer(pl, 40000)
+    else:
+        pl = LimitLengthPlayer(pl, 40000)
     return pl
 
 
-common.get_player = get_player
-
-
 class MySimulatorWorker(SimulatorProcess):
-
     def _build_player(self):
         return get_player(train=True)
 
@@ -77,12 +80,12 @@ class MySimulatorWorker(SimulatorProcess):
 class Model(ModelDesc):
     def _get_inputs(self):
         assert NUM_ACTIONS is not None
-        return [InputVar(tf.float32, (None,) + IMAGE_SHAPE3, 'state'),
-                InputVar(tf.int64, (None,), 'action'),
-                InputVar(tf.float32, (None,), 'futurereward')]
+        return [InputDesc(tf.uint8, (None,) + IMAGE_SHAPE3, 'state'),
+                InputDesc(tf.int64, (None,), 'action'),
+                InputDesc(tf.float32, (None,), 'futurereward')]
 
     def _get_NN_prediction(self, image):
-        image = image / 255.0
+        image = tf.cast(image, tf.float32) / 255.0
         with argscope(Conv2D, nl=tf.nn.relu):
             l = Conv2D('conv0', image, out_channel=32, kernel_shape=5)
             l = MaxPooling('pool0', l, 2)
@@ -94,30 +97,30 @@ class Model(ModelDesc):
 
         l = FullyConnected('fc0', l, 512, nl=tf.identity)
         l = PReLU('prelu', l)
-        policy = FullyConnected('fc-pi', l, out_dim=NUM_ACTIONS, nl=tf.identity)
+        logits = FullyConnected('fc-pi', l, out_dim=NUM_ACTIONS, nl=tf.identity)    # unnormalized policy
         value = FullyConnected('fc-v', l, 1, nl=tf.identity)
-        return policy, value
+        return logits, value
 
     def _build_graph(self, inputs):
         state, action, futurereward = inputs
-        policy, self.value = self._get_NN_prediction(state)
+        logits, self.value = self._get_NN_prediction(state)
         self.value = tf.squeeze(self.value, [1], name='pred_value')  # (B,)
-        self.logits = tf.nn.softmax(policy, name='logits')
+        self.policy = tf.nn.softmax(logits, name='policy')
 
         expf = tf.get_variable('explore_factor', shape=[],
                                initializer=tf.constant_initializer(1), trainable=False)
-        logitsT = tf.nn.softmax(policy * expf, name='logitsT')
+        policy_explore = tf.nn.softmax(logits * expf, name='policy_explore')
         is_training = get_current_tower_context().is_training
         if not is_training:
             return
-        log_probs = tf.log(self.logits + 1e-6)
+        log_probs = tf.log(self.policy + 1e-6)
 
         log_pi_a_given_s = tf.reduce_sum(
             log_probs * tf.one_hot(action, NUM_ACTIONS), 1)
         advantage = tf.subtract(tf.stop_gradient(self.value), futurereward, name='advantage')
         policy_loss = tf.reduce_sum(log_pi_a_given_s * advantage, name='policy_loss')
         xentropy_loss = tf.reduce_sum(
-            self.logits * log_probs, name='xentropy_loss')
+            self.policy * log_probs, name='xentropy_loss')
         value_loss = tf.nn.l2_loss(self.value - futurereward, name='value_loss')
 
         pred_reward = tf.reduce_mean(self.value, name='predict_reward')
@@ -131,9 +134,14 @@ class Model(ModelDesc):
         summary.add_moving_summary(policy_loss, xentropy_loss,
                                    value_loss, pred_reward, advantage, self.cost)
 
-    def get_gradient_processor(self):
-        return [MapGradient(lambda grad: tf.clip_by_average_norm(grad, 0.1)),
-                SummaryGradient()]
+    def _get_optimizer(self):
+        lr = symbf.get_scalar_var('learning_rate', 0.001, summary=True)
+        opt = tf.train.AdamOptimizer(lr, epsilon=1e-3)
+
+        gradprocs = [MapGradient(lambda grad: tf.clip_by_average_norm(grad, 0.1)),
+                     SummaryGradient()]
+        opt = optimizer.apply_grad_processors(opt, gradprocs)
+        return opt
 
 
 class MySimulatorMaster(SimulatorMaster, Callback):
@@ -143,15 +151,20 @@ class MySimulatorMaster(SimulatorMaster, Callback):
         self.queue = queue.Queue(maxsize=BATCH_SIZE * 8 * 2)
 
     def _setup_graph(self):
-        self.sess = self.trainer.sess
         self.async_predictor = MultiThreadAsyncPredictor(
-            self.trainer.get_predict_funcs(['state'], ['logitsT', 'pred_value'],
-                                           PREDICTOR_THREAD), batch_size=15)
-        self.async_predictor.run()
+            self.trainer.get_predictors(['state'], ['policy_explore', 'pred_value'],
+                                        PREDICTOR_THREAD), batch_size=PREDICT_BATCH_SIZE)
+
+    def _before_train(self):
+        self.async_predictor.start()
 
     def _on_state(self, state, ident):
         def cb(outputs):
-            distrib, value = outputs.result()
+            try:
+                distrib, value = outputs.result()
+            except CancelledError:
+                logger.info("Client {} cancelled.".format(ident))
+                return
             assert np.all(np.isfinite(distrib)), distrib
             action = np.random.choice(len(distrib), p=distrib)
             client = self.clients[ident]
@@ -188,7 +201,8 @@ class MySimulatorMaster(SimulatorMaster, Callback):
 
 
 def get_config():
-    logger.auto_set_dir()
+    dirname = os.path.join('train_log', 'train-atari-{}'.format(ENV_NAME))
+    logger.set_logger_dir(dirname)
     M = Model()
 
     name_base = str(uuid.uuid1())[:6]
@@ -201,24 +215,26 @@ def get_config():
 
     master = MySimulatorMaster(namec2s, names2c, M)
     dataflow = BatchData(DataFromQueue(master.queue), BATCH_SIZE)
-
-    lr = symbf.get_scalar_var('learning_rate', 0.001, summary=True)
     return TrainConfig(
+        model=M,
         dataflow=dataflow,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-3),
         callbacks=[
             ModelSaver(),
-            ScheduledHyperParamSetter('learning_rate', [(80, 0.0003), (120, 0.0001)]),
+            ScheduledHyperParamSetter('learning_rate', [(20, 0.0003), (120, 0.0001)]),
             ScheduledHyperParamSetter('entropy_beta', [(80, 0.005)]),
             ScheduledHyperParamSetter('explore_factor',
                                       [(80, 2), (100, 3), (120, 4), (140, 5)]),
+            HumanHyperParamSetter('learning_rate'),
+            HumanHyperParamSetter('entropy_beta'),
             master,
             StartProcOrThread(master),
-            PeriodicCallback(Evaluator(EVAL_EPISODE, ['state'], ['logits']), 2),
+            PeriodicTrigger(Evaluator(
+                EVAL_EPISODE, ['state'], ['policy'], get_player),
+                every_k_epochs=3),
         ],
-        session_config=get_default_sess_config(0.5),
-        model=M,
-        steps_per_epoch=STEP_PER_EPOCH,
+        session_creator=sesscreate.NewSessionCreator(
+            config=get_default_sess_config(0.5)),
+        steps_per_epoch=STEPS_PER_EPOCH,
         max_epoch=1000,
     )
 
@@ -229,11 +245,14 @@ if __name__ == '__main__':
     parser.add_argument('--load', help='load model')
     parser.add_argument('--env', help='env', required=True)
     parser.add_argument('--task', help='task to perform',
-                        choices=['play', 'eval', 'train'], default='train')
+                        choices=['play', 'eval', 'train', 'gen_submit'], default='train')
+    parser.add_argument('--output', help='output directory for submission', default='output_dir')
+    parser.add_argument('--episode', help='number of episode to eval', default=100, type=int)
     args = parser.parse_args()
 
     ENV_NAME = args.env
     assert ENV_NAME
+    logger.info("Environment Name: {}".format(ENV_NAME))
     p = get_player()
     del p    # set NUM_ACTIONS
 
@@ -245,22 +264,27 @@ if __name__ == '__main__':
     if args.task != 'train':
         cfg = PredictConfig(
             model=Model(),
-            session_init=SaverRestore(args.load),
+            session_init=get_model_loader(args.load),
             input_names=['state'],
-            output_names=['logits'])
+            output_names=['policy'])
         if args.task == 'play':
-            play_model(cfg)
+            play_model(cfg, get_player(viz=0.01))
         elif args.task == 'eval':
-            eval_model_multithread(cfg, EVAL_EPISODE)
+            eval_model_multithread(cfg, args.episode, get_player)
+        elif args.task == 'gen_submit':
+            play_n_episodes(
+                get_player(train=False, dumpdir=args.output),
+                OfflinePredictor(cfg), args.episode)
+            # gym.upload(output, api_key='xxx')
     else:
-        if args.gpu:
-            nr_gpu = get_nr_gpu()
+        nr_gpu = get_nr_gpu()
+        if nr_gpu > 0:
             if nr_gpu > 1:
-                predict_tower = range(nr_gpu)[-nr_gpu // 2:]
+                predict_tower = list(range(nr_gpu))[-nr_gpu // 2:]
             else:
                 predict_tower = [0]
             PREDICTOR_THREAD = len(predict_tower) * PREDICTOR_THREAD_PER_GPU
-            train_tower = range(nr_gpu)[:-nr_gpu // 2] or [0]
+            train_tower = list(range(nr_gpu))[:-nr_gpu // 2] or [0]
             logger.info("[BA3C] Train on gpu {} and infer on gpu {}".format(
                 ','.join(map(str, train_tower)), ','.join(map(str, predict_tower))))
             trainer = AsyncMultiGPUTrainer
@@ -268,12 +292,11 @@ if __name__ == '__main__':
             logger.warn("Without GPU this model will never learn! CPU is only useful for debug.")
             nr_gpu = 0
             PREDICTOR_THREAD = 1
-            predict_tower = [0]
-            train_tower = [0]
+            predict_tower, train_tower = [0], [0]
             trainer = QueueInputTrainer
         config = get_config()
         if args.load:
-            config.session_init = SaverRestore(args.load)
+            config.session_init = get_model_loader(args.load)
         config.tower = train_tower
         config.predict_tower = predict_tower
         trainer(config).train()

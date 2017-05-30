@@ -3,7 +3,6 @@
 # File: svhn-digit-dorefa.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import tensorflow as tf
 import argparse
 import numpy as np
 import os
@@ -11,7 +10,9 @@ import os
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.tfutils.varreplace import replace_get_variable
+from tensorpack.tfutils.varreplace import remap_variables
+import tensorflow as tf
+
 from dorefa import get_dorefa
 
 """
@@ -44,8 +45,8 @@ BITG = 4
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 40, 40, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, 40, 40, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
@@ -56,10 +57,10 @@ class Model(ModelDesc):
         old_get_variable = tf.get_variable
 
         # monkey-patch tf.get_variable to apply fw
-        def new_get_variable(name, shape=None, **kwargs):
-            v = old_get_variable(name, shape, **kwargs)
+        def binarize_weight(v):
+            name = v.op.name
             # don't binarize first and last layer
-            if name != 'W' or 'conv0' in v.op.name or 'fc' in v.op.name:
+            if not name.endswith('W') or 'conv0' in name or 'fc' in name:
                 return v
             else:
                 logger.info("Binarizing weight {}".format(v.op.name))
@@ -73,7 +74,7 @@ class Model(ModelDesc):
 
         image = image / 256.0
 
-        with replace_get_variable(new_get_variable), \
+        with remap_variables(binarize_weight), \
                 argscope(BatchNorm, decay=0.9, epsilon=1e-4), \
                 argscope(Conv2D, use_bias=False, nl=tf.identity):
             logits = (LinearWrap(image)
@@ -125,6 +126,15 @@ class Model(ModelDesc):
         self.cost = tf.add_n([cost, wd_cost], name='cost')
         add_moving_summary(cost, wd_cost, self.cost)
 
+    def _get_optimizer(self):
+        lr = tf.train.exponential_decay(
+            learning_rate=1e-3,
+            global_step=get_global_step_var(),
+            decay_steps=4721 * 100,
+            decay_rate=0.5, staircase=True, name='learning_rate')
+        tf.summary.scalar('lr', lr)
+        return tf.train.AdamOptimizer(lr, epsilon=1e-5)
+
 
 def get_config():
     logger.auto_set_dir()
@@ -146,29 +156,19 @@ def get_config():
     data_train = AugmentImageComponent(data_train, augmentors)
     data_train = BatchData(data_train, 128)
     data_train = PrefetchDataZMQ(data_train, 5)
-    steps_per_epoch = data_train.size()
 
     augmentors = [imgaug.Resize((40, 40))]
     data_test = AugmentImageComponent(data_test, augmentors)
     data_test = BatchData(data_test, 128, remainder=True)
 
-    lr = tf.train.exponential_decay(
-        learning_rate=1e-3,
-        global_step=get_global_step_var(),
-        decay_steps=data_train.size() * 100,
-        decay_rate=0.5, staircase=True, name='learning_rate')
-    tf.summary.scalar('lr', lr)
-
     return TrainConfig(
         dataflow=data_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-5),
         callbacks=[
             ModelSaver(),
             InferenceRunner(data_test,
                             [ScalarStats('cost'), ClassificationError()])
         ],
         model=Model(),
-        steps_per_epoch=steps_per_epoch,
         max_epoch=200,
     )
 

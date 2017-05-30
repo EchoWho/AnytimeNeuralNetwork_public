@@ -12,6 +12,13 @@ Models can be [downloaded here](https://goo.gl/6XjK9V).
 | ResNet 50          |      7.13%  |      24.12% |
 | ResNet 101         |      6.54%  |      22.89% |
 
+To train, just run:
+```bash
+./imagenet-resnet.py --data /path/to/original/ILSVRC --gpu 0,1,2,3 -d 18
+```
+The speed is 1310 image/s on 4 Tesla M40, if your data is fast enough.
+See the [tutorial](http://tensorpack.readthedocs.io/en/latest/tutorial/efficient-dataflow.html) on how to speed up your data.
+
 ![imagenet](imagenet-resnet.png)
 
 ## load-resnet.py

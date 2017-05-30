@@ -30,8 +30,8 @@ Learning rate may need a different schedule for different number of GPUs (becaus
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
@@ -120,6 +120,10 @@ class Model(ModelDesc):
         self.cost = tf.add_n([cost, wd_cost], name='cost')
         add_moving_summary(wd_cost, self.cost)
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.045, summary=True)
+        return tf.train.MomentumOptimizer(lr, 0.9)
+
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -143,7 +147,7 @@ def get_data(train_or_test):
             imgaug.MapImage(lambda x: x - pp_mean),
             imgaug.CenterCrop((224, 224)),
         ]
-    ds = AugmentImageComponent(ds, augmentors)
+    ds = AugmentImageComponent(ds, augmentors, copy=False)
     ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchDataZMQ(ds, 6)
@@ -152,15 +156,11 @@ def get_data(train_or_test):
 
 def get_config():
     logger.auto_set_dir()
-    # prepare dataset
     dataset_train = get_data('train')
-    steps_per_epoch = 5000
     dataset_val = get_data('val')
 
-    lr = get_scalar_var('learning_rate', 0.045, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_val, [
@@ -171,9 +171,8 @@ def get_config():
                                        (19, 3e-3), (24, 1e-3), (26, 2e-4),
                                        (30, 5e-5)])
         ],
-        session_config=get_default_sess_config(0.99),
         model=Model(),
-        steps_per_epoch=steps_per_epoch,
+        steps_per_epoch=5000,
         max_epoch=80,
     )
 
@@ -193,4 +192,5 @@ if __name__ == '__main__':
         config.session_init = SaverRestore(args.load)
     if args.gpu:
         config.nr_tower = len(args.gpu.split(','))
+        assert config.nr_tower == NR_GPU
     SyncMultiGPUTrainer(config).train()

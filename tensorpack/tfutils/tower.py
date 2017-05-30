@@ -15,16 +15,29 @@ _CurrentTowerContext = None
 class TowerContext(object):
     """ A context where the current model is being built in. """
 
-    def __init__(self, tower_name, is_training=None):
+    def __init__(self, tower_name,
+                 device=None, is_training=None,
+                 var_strategy='shared'):
         """
         Args:
             tower_name (str): 'tower0', 'towerp0', or ''
+            device (str or device function): the device to use. Defaults to either cpu0 or gpu0.
             is_training (bool): if None, automatically determine from tower_name.
+            var_strategy (str): either 'shared' or 'replicated'.
         """
         self._name = tower_name
+        if device is None:
+            device = '/gpu:0' if tf.test.is_gpu_available() else '/cpu:0'
+        self._device = device
+
         if is_training is None:
             is_training = not self._name.startswith(PREDICT_TOWER)
         self._is_training = is_training
+
+        assert var_strategy in ['replicated', 'shared'], var_strategy
+        self._var_strategy = var_strategy
+        if self._var_strategy == 'replicated':
+            assert self._name
 
     @property
     def is_main_training_tower(self):
@@ -39,26 +52,32 @@ class TowerContext(object):
         return self._is_training
 
     @property
+    def has_own_variables(self):
+        return self._var_strategy == 'replicated'
+
+    @property
     def name(self):
         return self._name
 
-    def get_variable_on_tower(self, *args, **kwargs):
-        """
-        Get a variable for this tower specifically, without reusing, even if
-        it is called under a ``reuse=True`` variable scope.
+    # variable_scope name
+    @property
+    def vs_name(self):
+        if self.has_own_variables:
+            # do not open new variable scope for the main tower,
+            # just use '', so that Saver & PredictTower know what to do
+            if self.index > 0:
+                return self._name
+        return ""
 
-        Tensorflow doesn't allow us to disable reuse under a
-        ``reuse=True`` scope. This method provides a work around.
-        See https://www.tensorflow.org/versions/master/how_tos/variable_scope/index.html#basics-of-tfvariable-scope
+    @property
+    def index(self):
+        if self._name == '':
+            return 0
+        return int(self._name[-1])
 
-        Args:
-            args: same as ``tf.get_variable()``.
-        """
-        with tf.variable_scope(self._name) as scope:
-            with tf.variable_scope(scope, reuse=False):
-                scope = tf.get_variable_scope()
-                assert not scope.reuse
-                return tf.get_variable(*args, **kwargs)
+    @property
+    def device(self):
+        return self._device
 
     def find_tensor_in_main_tower(self, graph, name):
         if self.is_main_tower:
@@ -73,12 +92,12 @@ class TowerContext(object):
                 return graph.get_tensor_by_name(newname)
 
     @staticmethod
-    def get_predict_tower_name(prefix, towerid=0):
+    def get_predict_tower_name(towerid=0, prefix=''):
         """
         Args:
-            prefix(str): an alphanumeric prefix.
             towerid(int): an integer, the id of this predict tower, usually
                 used to choose the GPU id.
+            prefix(str): an alphanumeric prefix.
         Returns:
             str: the final tower name used to create a predict tower.
                 Currently it is ``PREDICT_TOWER + prefix + towerid``.
@@ -91,16 +110,31 @@ class TowerContext(object):
         assert _CurrentTowerContext is None, \
             "Nesting TowerContext!"
         _CurrentTowerContext = self
+        self._ctxs = []
         if len(self._name):
-            self._scope = tf.name_scope(self._name)
-            return self._scope.__enter__()
+            if self.has_own_variables:
+                if self.vs_name:
+                    self._ctxs.append(tf.variable_scope(self.vs_name))
+            else:
+                # use existing variable scope
+                reuse = self.index > 0 or (not self.is_training)
+                self._ctxs.append(tf.variable_scope(
+                    tf.get_variable_scope(), reuse=reuse))
+                self._ctxs.append(tf.name_scope(self._name))
+        self._ctxs.append(tf.device(self._device))
+        for c in self._ctxs:
+            c.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global _CurrentTowerContext
         _CurrentTowerContext = None
-        if len(self._name):
-            self._scope.__exit__(exc_type, exc_val, exc_tb)
+        for c in self._ctxs[::-1]:
+            c.__exit__(exc_type, exc_val, exc_tb)
         return False
+
+    def __str__(self):
+        return "TowerContext(name={}, is_training={})".format(
+            self._name, self._is_training)
 
 
 def get_current_tower_context():

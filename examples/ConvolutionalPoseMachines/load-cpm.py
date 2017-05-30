@@ -45,8 +45,8 @@ def get_gaussian_map():
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, 368, 368, 3), 'input'),
-                InputVar(tf.float32, (None, 368, 368, 15), 'label'),
+        return [InputDesc(tf.float32, (None, 368, 368, 3), 'input'),
+                InputDesc(tf.float32, (None, 368, 368, 15), 'label'),
                 ]
 
     def _build_graph(self, inputs):
@@ -108,7 +108,7 @@ def run_test(model_path, img_file):
     param_dict = np.load(model_path, encoding='latin1').item()
     predict_func = OfflinePredictor(PredictConfig(
         model=Model(),
-        session_init=ParamRestore(param_dict),
+        session_init=DictRestore(param_dict),
         input_names=['input'],
         output_names=['resized_map']
     ))

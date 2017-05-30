@@ -3,6 +3,7 @@
 # File: Image2Image.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
+import cv2
 import numpy as np
 import tensorflow as tf
 import glob
@@ -10,11 +11,11 @@ import pickle
 import os
 import sys
 import argparse
-import cv2
 
 from tensorpack import *
 from tensorpack.utils.viz import *
 from tensorpack.tfutils.summary import add_moving_summary
+from tensorpack.tfutils.scope_utils import auto_reuse_variable_scope
 import tensorpack.tfutils.symbolic_functions as symbf
 from GAN import GANTrainer, GANModelDesc
 
@@ -34,7 +35,6 @@ To visualize on test set:
 
 """
 
-SHAPE = 256
 BATCH = 1
 IN_CH = 3
 OUT_CH = 3
@@ -42,10 +42,16 @@ LAMBDA = 100
 NF = 64  # number of filter
 
 
+def BNLReLU(x, name=None):
+    x = BatchNorm('bn', x)
+    return LeakyReLU(x, name=name)
+
+
 class Model(GANModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, SHAPE, SHAPE, IN_CH), 'input'),
-                InputVar(tf.float32, (None, SHAPE, SHAPE, OUT_CH), 'output')]
+        SHAPE = 256
+        return [InputDesc(tf.float32, (None, SHAPE, SHAPE, IN_CH), 'input'),
+                InputDesc(tf.float32, (None, SHAPE, SHAPE, OUT_CH), 'output')]
 
     def generator(self, imgs):
         # imgs: input: 256x256xch
@@ -53,8 +59,7 @@ class Model(GANModelDesc):
         with argscope(BatchNorm, use_local_stat=True), \
                 argscope(Dropout, is_training=True):
             # always use local stat for BN, and apply dropout even in testing
-            with argscope(Conv2D, kernel_shape=4, stride=2,
-                          nl=lambda x, name: LeakyReLU(BatchNorm('bn', x), name=name)):
+            with argscope(Conv2D, kernel_shape=4, stride=2, nl=BNLReLU):
                 e1 = Conv2D('conv1', imgs, NF, nl=LeakyReLU)
                 e2 = Conv2D('conv2', e1, NF * 2)
                 e3 = Conv2D('conv3', e2, NF * 4)
@@ -84,19 +89,17 @@ class Model(GANModelDesc):
                         .ConcatWith(e1, 3)
                         .Deconv2D('deconv8', OUT_CH, nl=tf.tanh)())
 
+    @auto_reuse_variable_scope
     def discriminator(self, inputs, outputs):
         """ return a (b, 1) logits"""
         l = tf.concat([inputs, outputs], 3)
-        with argscope(Conv2D, nl=tf.identity, kernel_shape=4, stride=2):
+        with argscope(Conv2D, kernel_shape=4, stride=2, nl=BNLReLU):
             l = (LinearWrap(l)
                  .Conv2D('conv0', NF, nl=LeakyReLU)
                  .Conv2D('conv1', NF * 2)
-                 .BatchNorm('bn1').LeakyReLU()
                  .Conv2D('conv2', NF * 4)
-                 .BatchNorm('bn2').LeakyReLU()
                  .Conv2D('conv3', NF * 8, stride=1, padding='VALID')
-                 .BatchNorm('bn3').LeakyReLU()
-                 .Conv2D('convlast', 1, stride=1, padding='VALID')())
+                 .Conv2D('convlast', 1, stride=1, padding='VALID', nl=tf.identity)())
         return l
 
     def _build_graph(self, inputs):
@@ -110,7 +113,6 @@ class Model(GANModelDesc):
                 fake_output = self.generator(input)
             with tf.variable_scope('discrim'):
                 real_pred = self.discriminator(input, output)
-            with tf.variable_scope('discrim', reuse=True):
                 fake_pred = self.discriminator(input, fake_output)
 
         self.build_losses(real_pred, fake_pred)
@@ -129,6 +131,10 @@ class Model(GANModelDesc):
         tf.summary.image('input,output,fake', viz, max_outputs=max(30, BATCH))
 
         self.collect_variables()
+
+    def _get_optimizer(self):
+        lr = symbolic_functions.get_scalar_var('learning_rate', 2e-4, summary=True)
+        return tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3)
 
 
 def split_input(img):
@@ -154,10 +160,8 @@ def get_data():
     imgs = glob.glob(os.path.join(datadir, '*.jpg'))
     ds = ImageFromFile(imgs, channel=3, shuffle=True)
 
-    # Image-to-Image translation mode
     ds = MapData(ds, lambda dp: split_input(dp[0]))
-    assert SHAPE < 286  # this is the parameter used in the paper
-    augs = [imgaug.Resize(286), imgaug.RandomCrop(SHAPE)]
+    augs = [imgaug.Resize(286), imgaug.RandomCrop(256)]
     ds = AugmentImageComponents(ds, augs, (0, 1))
     ds = BatchData(ds, BATCH)
     ds = PrefetchData(ds, 100, 1)
@@ -167,10 +171,8 @@ def get_data():
 def get_config():
     logger.auto_set_dir()
     dataset = get_data()
-    lr = symbolic_functions.get_scalar_var('learning_rate', 2e-4, summary=True)
     return TrainConfig(
         dataflow=dataset,
-        optimizer=tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3),
         callbacks=[
             PeriodicTrigger(ModelSaver(), every_k_epochs=3),
             ScheduledHyperParamSetter('learning_rate', [(200, 1e-4)])
@@ -190,12 +192,14 @@ def sample(datadir, model_path):
 
     imgs = glob.glob(os.path.join(datadir, '*.jpg'))
     ds = ImageFromFile(imgs, channel=3, shuffle=True)
-    ds = BatchData(MapData(ds, lambda dp: split_input(dp[0])), 6)
+    ds = MapData(ds, lambda dp: split_input(dp[0]))
+    ds = AugmentImageComponents(ds, [imgaug.Resize(256)], (0, 1))
+    ds = BatchData(ds, 6)
 
     pred = SimpleDatasetPredictor(pred, ds)
     for o in pred.get_result():
         o = o[0][:, :, :, ::-1]
-        next(build_patch_list(o, nr_row=3, nr_col=2, viz=True))
+        stack_patches(o, nr_row=3, nr_col=2, viz=True)
 
 
 if __name__ == '__main__':
@@ -203,14 +207,13 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
     parser.add_argument('--sample', action='store_true', help='run sampling')
-    parser.add_argument('--data', help='Image directory')
+    parser.add_argument('--data', help='Image directory', required=True)
     parser.add_argument('--mode', choices=['AtoB', 'BtoA'], default='AtoB')
     parser.add_argument('-b', '--batch', type=int, default=1)
     global args
     args = parser.parse_args()
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-    assert args.data
 
     BATCH = args.batch
 

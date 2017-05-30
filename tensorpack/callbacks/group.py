@@ -4,19 +4,18 @@
 
 import tensorflow as tf
 from contextlib import contextmanager
-from collections import defaultdict
 import time
 import traceback
 
 from .base import Callback
 from .stats import StatPrinter
+from .hooks import CallbackToHook
 from ..utils import logger
 
 __all__ = ['Callbacks']
 
 
 class CallbackTimeLogger(object):
-
     def __init__(self):
         self.times = []
         self.tot = 0
@@ -72,10 +71,9 @@ class Callbacks(Callback):
                 break
 
         self.cbs = cbs
-        self._extra_fetches_cache = None
 
     def _setup_graph(self):
-        with tf.name_scope(None):
+        with tf.name_scope(None):   # clear the name scope
             for cb in self.cbs:
                 cb.setup_graph(self.trainer)
 
@@ -91,31 +89,12 @@ class Callbacks(Callback):
             except Exception:
                 traceback.print_exc()
 
-    def _extra_fetches(self):
-        if self._extra_fetches_cache is not None:
-            return self._extra_fetches_cache
-        # TODO use dispatch mechanism to avoid duplication
-        self._cbid_to_fetchid = defaultdict(list)
-        ret = []
-        for idx, cb in enumerate(self.cbs):
-            fetch = cb.extra_fetches()
-            if len(fetch) == 0:
-                continue
-            for f in fetch:
-                ret.append(f)
-                self._cbid_to_fetchid[idx].append(len(ret)-1)
-        if self.fetch_cache:
-            self._extra_fetches_cache = ret
-        return ret
+    def get_hooks(self):
+        return [CallbackToHook(cb) for cb in self.cbs]
 
-    def _trigger_step(self, *args):
-        for idx, cb in enumerate(self.cbs):
-            fid = self._cbid_to_fetchid[idx]
-            if len(fid) == 0:
-                cb.trigger_step()
-            else:
-                data = [args[k] for k in fid]
-                cb.trigger_step(*data)
+    def trigger_step(self):
+        for cb in self.cbs:
+            cb.trigger_step()
 
     def _trigger_epoch(self):
         tm = CallbackTimeLogger()

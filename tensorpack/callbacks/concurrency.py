@@ -41,10 +41,17 @@ class StartProcOrThread(Callback):
         if not self._stop_at_last:
             return
         for k in self._procs_threads:
+            if not k.is_alive():
+                continue
             if isinstance(k, mp.Process):
                 logger.info("Stopping {} ...".format(k.name))
                 k.terminate()
-                k.join()
+                k.join(5.0)
+                if k.is_alive():
+                    logger.error("Cannot join process {}.".format(k.name))
             elif isinstance(k, StoppableThread):
                 logger.info("Stopping {} ...".format(k.name))
                 k.stop()
+                k.join(5.0)
+                if k.is_alive():
+                    logger.error("Cannot join thread {}.".format(k.name))

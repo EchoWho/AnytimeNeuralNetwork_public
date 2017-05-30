@@ -8,17 +8,15 @@ import tensorflow as tf
 import pickle
 import six
 
-from ..utils import logger, INPUT_VARS_KEY
-from ..tfutils.gradproc import CheckGradient
-from ..tfutils.summary import add_moving_summary
-from ..tfutils.tower import get_current_tower_context
+from ..utils import logger
+from ..utils.naming import INPUTS_KEY
+from ..utils.argtools import memoized
+from ..tfutils.model_utils import apply_slim_collections
 
-__all__ = ['ModelDesc', 'InputVar', 'ModelFromMetaGraph']
+__all__ = ['InputDesc', 'InputVar', 'ModelDesc', 'ModelFromMetaGraph']
 
 
-# TODO "variable" is not a right name to use across this file.
-
-class InputVar(object):
+class InputDesc(object):
     """ Store metadata about input placeholders. """
     def __init__(self, type, shape, name, sparse=False):
         """
@@ -41,60 +39,60 @@ class InputVar(object):
         return pickle.loads(buf)
 
 
+class InputVar(InputDesc):
+    def __init__(self, *args, **kwargs):
+        logger.warn("[Deprecated] InputVar was renamed to InputDesc!")
+        super(InputVar, self).__init__(*args, **kwargs)
+
+
 @six.add_metaclass(ABCMeta)
 class ModelDesc(object):
-    """ Base class for a model description """
+    """ Base class for a model description.
+    """
 
-    def get_input_vars(self):
+# inputs:
+    @memoized
+    def get_reused_placehdrs(self):
         """
-        Create or return (if already created) raw input TF placeholder vars in the graph.
+        Create or return (if already created) raw input TF placeholders in the graph.
 
         Returns:
             list[tf.Tensor]: the list of input placeholders in the graph.
         """
-        if hasattr(self, 'reuse_input_vars'):
-            return self.reuse_input_vars
-        ret = self.build_placeholders()
-        self.reuse_input_vars = ret
-        return ret
-
-    # alias
-    get_reuse_placehdrs = get_input_vars
+        return self.build_placeholders()
 
     def build_placeholders(self, prefix=''):
         """
-        For each InputVar, create new placeholders with optional prefix and
+        For each InputDesc, create new placeholders with optional prefix and
         return them. Useful when building new towers.
 
         Returns:
             list[tf.Tensor]: the list of built placeholders.
         """
-        input_vars = self._get_input_vars()
-        for v in input_vars:
-            tf.add_to_collection(INPUT_VARS_KEY, v.dumps())
+        inputs = self._get_inputs()
+        for v in inputs:
+            tf.add_to_collection(INPUTS_KEY, v.dumps())
         ret = []
-        for v in input_vars:
-            placehdr_f = tf.placeholder if not v.sparse else tf.sparse_placeholder
-            ret.append(placehdr_f(
-                v.type, shape=v.shape,
-                name=prefix + v.name))
+        with tf.name_scope(None):   # clear any name scope it might get called in
+            for v in inputs:
+                placehdr_f = tf.placeholder if not v.sparse else tf.sparse_placeholder
+                ret.append(placehdr_f(
+                    v.type, shape=v.shape,
+                    name=prefix + v.name))
         return ret
 
-    def get_input_vars_desc(self):
+    def get_inputs_desc(self):
         """
         Returns:
-            list[:class:`InputVar`]: list of the underlying :class:`InputVar`.
-        """
-        return self._get_input_vars()
-
-    def _get_input_vars(self):  # keep backward compatibility
-        """
-        :returns: a list of InputVar
+            list[:class:`InputDesc`]: list of the underlying :class:`InputDesc`.
         """
         return self._get_inputs()
 
-    def _get_inputs(self):  # this is a better name than _get_input_vars
-        raise NotImplementedError()
+    @abstractmethod
+    def _get_inputs(self):
+        """
+        :returns: a list of InputDesc
+        """
 
     def build_graph(self, model_inputs):
         """
@@ -102,7 +100,7 @@ class ModelDesc(object):
 
         Args:
             model_inputs (list[tf.Tensor]): a list of inputs, corresponding to
-                InputVars of this model.
+                InputDesc of this model.
         """
         self._build_graph(model_inputs)
 
@@ -112,46 +110,46 @@ class ModelDesc(object):
 
     def get_cost(self):
         """
-        Return the cost tensor in the graph. Called by some of the :class:`tensorpack.train.Trainer` which
-        assumes single-cost models.
+        Return the cost tensor in the graph.
+        Used by some of the tensorpack :class:`Trainer` which assumes single-cost models.
+        You can ignore this method if you use your own trainer with more than one cost.
 
-        This function also apply tfslim collections to the cost automatically, including
-        ``tf.GraphKeys.REGULARIZATION_LOSSES`` and
-        ``tf.GraphKeys.UPDATE_OPS``. This is because slim users would expect
-        the regularizer being automatically applied once used in slim layers.
+        It calls :meth:`ModelDesc._get_cost()` which by default returns
+        ``self.cost``. You can override :meth:`_get_cost()` if needed.
+
+        This function also applies the collection
+        ``tf.GraphKeys.REGULARIZATION_LOSSES`` to the cost automatically.
+        Because slim users would expect the regularizer being automatically applied once used in slim layers.
         """
-
-        # the model cost so far
         cost = self._get_cost()
-
-        regulization_losses = set(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
-        if len(regulization_losses) > 0:
-            reg_loss = tf.add_n(list(regulization_losses), name="regularize_loss")
-            cost = tf.add(reg_loss, cost, name='total_cost')
-            add_moving_summary(reg_loss, cost)
-
-        # As these batch-norm statistics quickly accumulate, there is no significant loss of accuracy
-        # if only the main tower handles all batch-normalization updates, which are then shared across
-        # the towers
-        ctx = get_current_tower_context()
-        if ctx is not None and ctx.is_main_training_tower:
-            non_grad_updates = set(tf.get_collection(tf.GraphKeys.UPDATE_OPS))
-            if non_grad_updates:
-                logger.info("Apply UPDATE_OPS collection on cost.")
-                with tf.control_dependencies(non_grad_updates):
-                    cost = tf.identity(cost)
-        return cost
+        return apply_slim_collections(cost)
 
     def _get_cost(self, *args):
         return self.cost
 
-    def get_gradient_processor(self):
-        """ Return a list of :class:`tensorpack.tfutils.GradientProcessor`.
-            They will be executed by the trainer in the given order.
+    @memoized
+    def get_optimizer(self):
         """
-        return [  # SummaryGradient(),
-            CheckGradient()
-        ]
+        Return the optimizer used in the task.
+        Used by some of the tensorpack :class:`Trainer` which assume single optimizer.
+        You can (and should) ignore this method if you use a custom trainer with more than one optimizers.
+
+        Users of :class:`ModelDesc` will need to implement `_get_optimizer()`,
+        which will only be called once per each model.
+
+        Returns:
+            a :class:`tf.train.Optimizer` instance.
+        """
+        return self._get_optimizer()
+
+    def _get_optimizer(self):
+        raise NotImplementedError()
+
+    def get_gradient_processor(self):
+        return self._get_gradient_processor()
+
+    def _get_gradient_processor(self):
+        return []
 
 
 class ModelFromMetaGraph(ModelDesc):
@@ -160,7 +158,7 @@ class ModelFromMetaGraph(ModelDesc):
     Only useful for inference.
     """
 
-    # TODO can this be really used for inference?
+    # TODO this class may not be functional anymore.
 
     def __init__(self, filename):
         """
@@ -169,14 +167,14 @@ class ModelFromMetaGraph(ModelDesc):
         """
         tf.train.import_meta_graph(filename)
         all_coll = tf.get_default_graph().get_all_collection_keys()
-        for k in [INPUT_VARS_KEY, tf.GraphKeys.TRAINABLE_VARIABLES,
+        for k in [INPUTS_KEY, tf.GraphKeys.TRAINABLE_VARIABLES,
                   tf.GraphKeys.GLOBAL_VARIABLES]:
-            assert k in all_coll, \
-                "Collection {} not found in metagraph!".format(k)
+            if k not in all_coll:
+                logger.warn("Collection {} not found in metagraph!".format(k))
 
     def _get_inputs(self):
-        col = tf.get_collection(INPUT_VARS_KEY)
-        col = [InputVar.loads(v) for v in col]
+        col = tf.get_collection(INPUTS_KEY)
+        col = [InputDesc.loads(v) for v in col]
         return col
 
     def _build_graph(self, _, __):

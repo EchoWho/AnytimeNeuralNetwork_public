@@ -19,10 +19,9 @@ def _global_import(name):
 _TO_IMPORT = set([
     'common',
     'sessinit',
-    'gradproc',
     'argscope',
-    'tower'
-    ])
+    'tower',
+])
 
 _CURR_DIR = os.path.dirname(__file__)
 for _, module_name, _ in iter_modules(

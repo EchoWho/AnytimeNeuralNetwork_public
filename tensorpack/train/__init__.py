@@ -19,6 +19,7 @@ def global_import(name):
 
 
 _CURR_DIR = os.path.dirname(__file__)
+_SKIP = []
 for _, module_name, _ in iter_modules(
         [_CURR_DIR]):
     srcpath = os.path.join(_CURR_DIR, module_name + '.py')
@@ -26,4 +27,5 @@ for _, module_name, _ in iter_modules(
         continue
     if module_name.startswith('_'):
         continue
-    global_import(module_name)
+    if module_name not in _SKIP:
+        global_import(module_name)

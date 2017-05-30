@@ -156,9 +156,10 @@ class Model(ModelDesc):
                         merged_feats = l
                     else:
                         merged_feats = tf.concat(1, [merged_feats, l], name='concat')
-                    logits, vl = FullyConnected('linear', merged_feats, out_dim, \
-                                                nl=tf.identity, return_vars=True)
-                    var_list.extend(vl)
+                    logits = FullyConnected('linear', merged_feats, out_dim, \
+                                            nl=tf.identity)
+                    var_list.append(logits.variables.W)
+                    var_list.append(logits.variables.b)
                     #if w != 0:
                     #    logits += l_logits[-1]
                     l_logits.append(logits)
@@ -444,7 +445,8 @@ if __name__ == '__main__':
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-    logger.auto_set_dir(log_root=args.log_dir)
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
     utils.set_dataset_path(path=args.data_dir, auto_download=False)
     MODEL_DIR = args.model_dir
 

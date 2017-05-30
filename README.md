@@ -1,25 +1,23 @@
 # tensorpack
-Neural Network Toolbox on TensorFlow
+Neural Network Toolbox on TensorFlow.
 
 [![Build Status](https://travis-ci.org/ppwwyyxx/tensorpack.svg?branch=master)](https://travis-ci.org/ppwwyyxx/tensorpack)
+[![badge](https://readthedocs.org/projects/pip/badge/?version=latest)](http://tensorpack.readthedocs.io/en/latest/index.html)
 
-Docs & tutorials should be ready within a month. See some [examples](examples) to learn about the framework:
+See some [examples](examples) to learn about the framework:
 
 ### Vision:
 + [DoReFa-Net: train binary / low-bitwidth CNN on ImageNet](examples/DoReFa-Net)
 + [Train ResNet on ImageNet / Cifar10 / SVHN](examples/ResNet)
-+ [InceptionV3 on ImageNet](examples/Inception/inceptionv3.py)
++ [Generative Adversarial Network(GAN) variants](examples/GAN), including DCGAN, InfoGAN, Conditional GAN, WGAN, BEGAN, DiscoGAN, Image to Image, CycleGAN.
 + [Fully-convolutional Network for Holistically-Nested Edge Detection(HED)](examples/HED)
 + [Spatial Transformer Networks on MNIST addition](examples/SpatialTransformer)
 + [Visualize Saliency Maps by Guided ReLU](examples/Saliency)
 + [Similarity Learning on MNIST](examples/SimilarityLearning)
 
 ### Reinforcement Learning:
-+ [Deep Q-Network(DQN) variants on Atari games](examples/DeepQNetwork)
++ [Deep Q-Network(DQN) variants on Atari games](examples/DeepQNetwork), including DQN, DoubleDQN, DuelingDQN.
 + [Asynchronous Advantage Actor-Critic(A3C) with demos on OpenAI Gym](examples/A3C-Gym)
-
-### Unsupervised Learning:
-+ [Generative Adversarial Network(GAN) variants, including DCGAN, Image2Image, InfoGAN](examples/GAN)
 
 ### Speech / NLP:
 + [LSTM-CTC for speech recognition](examples/CTC-TIMIT)
@@ -30,45 +28,39 @@ The examples are not only for demonstration of the framework -- you can train th
 
 ## Features:
 
-Describe your training task with three components:
+It's Yet Another TF wrapper, but different in:
+1. Not focus on models.
+	+ There are already too many symbolic function wrappers.
+		Tensorpack includes only a few common models, and helpful tools such as `LinearWrap` to simplify large models.
+	  But you can use any other wrappers within tensorpack, such as sonnet/Keras/slim/tflearn/tensorlayer/....
 
-1. __Model__, or graph. `models/` has some scoped abstraction of common models, but you can simply use
-	 any symbolic functions available in tensorflow, or most functions in slim/tflearn/tensorlayer.
-	`LinearWrap` and `argscope` simplify large models ([vgg example](https://github.com/ppwwyyxx/tensorpack/blob/master/examples/load-vgg16.py)).
+2. Focus on __training speed__.
+	+	Tensorpack trainer is almost always faster than `feed_dict` based wrappers.
+	  Even on a tiny CNN example, the training runs [2x faster](https://gist.github.com/ppwwyyxx/8d95da79f8d97036a7d67c2416c851b6) than the equivalent Keras code.
 
-2. __DataFlow__. tensorpack allows and encourages complex data processing.
+	+ Data-Parallel Multi-GPU training is off-the-shelf to use. It is as fast as Google's [benchmark code](https://github.com/tensorflow/benchmarks).
 
-	+ All data producer has an unified `generator` interface, allowing them to be composed to perform complex preprocessing.
-	+ Use Python to easily handle any data format, yet still keep good performance thanks to multiprocess prefetch & TF Queue prefetch.
-	For example, InceptionV3 can run in the same speed as the official code which reads data by TF operators.
+3. Focus on large datasets.
+	+ It's painful to read/preprocess data from TF. Use __DataFlow__ to efficiently process large datasets such as ImageNet in __pure Python__.
+	+ DataFlow has a unified interface, so you can compose and reuse them to perform complex preprocessing.
 
-3. __Callbacks__, including everything you want to do apart from the training iterations, such as:
+4. Interface of extensible __Callbacks__.
+	Write a callback to implement everything you want to do apart from the training iterations, and
+	enable it with one line of code. Common examples include:
 	+ Change hyperparameters during training
-	+ Print some variables of interest
+	+ Print some tensors of interest
 	+ Run inference on a test dataset
 	+ Run some operations once a while
 	+ Send loss to your phone
 
-With the above components defined, tensorpack trainer will run the training iterations for you.
-Multi-GPU training is off-the-shelf by simply switching the trainer.
-You can also define your own trainer for non-standard training (e.g. GAN).
+## Install:
 
-The components are designed to be independent. You can use Model or DataFlow in other projects as well.
-
-## Dependencies:
+Dependencies:
 
 + Python 2 or 3
-+ TensorFlow >= 1.0.0rc0
++ TensorFlow >= 1.0.0 (>=1.1.0 for Multi-GPU)
 + Python bindings for OpenCV
-+ other requirements:
 ```
-pip install --user -r requirements.txt
-pip install --user -r opt-requirements.txt # (some optional dependencies required by certain submodule, you can install later if needed)
+pip install -U git+https://github.com/ppwwyyxx/tensorpack.git
+# or add `--user` to avoid system-wide installation.
 ```
-+ Enable `import tensorpack`:
-```
-export PYTHONPATH=$PYTHONPATH:`readlink -f path/to/tensorpack`
-```
-(or use `greadlink` from `coreutils` brew package if you're on OSX)
-
-+ Use tcmalloc if running with large data

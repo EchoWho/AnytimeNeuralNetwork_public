@@ -3,28 +3,23 @@
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
 import os
-from abc import abstractmethod, ABCMeta
-from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 import six
 
-from ..utils import logger, PREDICT_TOWER
+from ..utils import logger
+from ..utils.develop import deprecated
 from .common import get_op_tensor_name
 from .varmanip import (SessionUpdate, get_savename_from_varname,
                        is_training_name, get_checkpoint_path)
 
-__all__ = ['SessionInit', 'NewSession', 'SaverRestore',
-           'ParamRestore', 'ChainInit',
-           'JustCurrentSession', 'get_model_loader']
-
-# TODO they initialize_all at the beginning by default.
+__all__ = ['SessionInit', 'SaverRestore', 'SaverRestoreRelaxed',
+           'ParamRestore', 'DictRestore', 'ChainInit',
+           'JustCurrentSession', 'get_model_loader', 'TryResumeTraining']
 
 
-@six.add_metaclass(ABCMeta)
 class SessionInit(object):
-    """ Base class for utilities to initialize a session. """
-
+    """ Base class for utilities to initialize a (existing) session. """
     def init(self, sess):
         """
         Initialize a session
@@ -34,32 +29,59 @@ class SessionInit(object):
         """
         self._init(sess)
 
-    @abstractmethod
     def _init(self, sess):
+        self._setup_graph()
+        self._run_init(sess)
+
+    def _setup_graph(self):
+        pass
+
+    def _run_init(self, sess):
         pass
 
 
 class JustCurrentSession(SessionInit):
     """ This is a no-op placeholder"""
-
-    def _init(self, sess):
-        pass
+    pass
 
 
-class NewSession(SessionInit):
+class CheckpointReaderAdapter(object):
     """
-    Initialize global variables by their initializer.
+    An adapter to work around old checkpoint format, where the keys are op
+    names instead of tensor names (with :0).
     """
+    def __init__(self, reader):
+        self._reader = reader
+        m = self._reader.get_variable_to_shape_map()
+        self._map = {k if k.endswith(':0') else k + ':0': v
+                     for k, v in six.iteritems(m)}
 
-    def _init(self, sess):
-        sess.run(tf.global_variables_initializer())
+    def get_variable_to_shape_map(self):
+        return self._map
+
+    def get_tensor(self, name):
+        if self._reader.has_tensor(name):
+            return self._reader.get_tensor(name)
+        if name in self._map:
+            assert name.endswith(':0'), name
+            name = name[:-2]
+        return self._reader.get_tensor(name)
+
+    def has_tensor(self, name):
+        return name in self._map
+
+    # some checkpoint might not have ':0'
+    def get_real_name(self, name):
+        if self._reader.has_tensor(name):
+            return name
+        assert self.has_tensor(name)
+        return name[:-2]
 
 
 class SaverRestore(SessionInit):
     """
-    Restore an old model saved by :class:`ModelSaver`.
+    Restore a tensorflow checkpoint saved by :class:`tf.train.Saver` or :class:`ModelSaver`.
     """
-
     def __init__(self, model_path, prefix=None):
         """
         Args:
@@ -70,75 +92,72 @@ class SaverRestore(SessionInit):
         self.path = model_path
         self.prefix = prefix
 
-    def _init(self, sess):
-        logger.info(
-            "Restoring checkpoint from {} ...".format(self.path))
-        chkpt_vars = SaverRestore._read_checkpoint_vars(self.path)
-        vars_map = self._get_vars_to_restore_multimap(chkpt_vars)
-        for dic in SaverRestore._produce_restore_dict(vars_map):
-            # multiple saver under same name scope would cause error:
-            # training/saver.py: assert restore_op.name.endswith("restore_all"), restore_op.name
-            saver = tf.train.Saver(var_list=dic, name=str(id(dic)), write_version=2)
-            saver.restore(sess, self.path)
+    def _setup_graph(self):
+        dic = self._get_restore_dict()
+        self.saver = tf.train.Saver(var_list=dic, name=str(id(dic)))
 
-    @staticmethod
-    def _produce_restore_dict(vars_multimap):
-        """
-        Produce {var_name: var} dict that can be used by `tf.train.Saver`, from a {var_name: [vars]} dict.
-        """
-        while len(vars_multimap):
-            ret = {}
-            for k in list(vars_multimap.keys()):
-                v = vars_multimap[k]
-                ret[k] = v[-1]
-                del v[-1]
-                if not len(v):
-                    del vars_multimap[k]
-            yield ret
+    def _run_init(self, sess):
+        logger.info("Restoring checkpoint from {} ...".format(self.path))
+        self.saver.restore(sess, self.path)
 
     @staticmethod
     def _read_checkpoint_vars(model_path):
         """ return a set of strings """
         reader = tf.train.NewCheckpointReader(model_path)
+        reader = CheckpointReaderAdapter(reader)    # use an adapter to standardize the name
         ckpt_vars = reader.get_variable_to_shape_map().keys()
-        for v in ckpt_vars:
-            if v.startswith(PREDICT_TOWER):
-                logger.error("Found {} in checkpoint. "
-                             "But anything from prediction tower shouldn't be saved.".format(v.name))
-        return set(ckpt_vars)
+        return reader, set(ckpt_vars)
 
-    def _get_vars_to_restore_multimap(self, vars_available):
-        """
-        :param vars_available: varaible names available in the checkpoint, for existence checking
-        :returns: a dict of {var_name: [var, var]} to restore
-        """
-        vars_to_restore = tf.global_variables()
-        var_dict = defaultdict(list)
+    def _match_vars(self, func):
+        reader, chkpt_vars = SaverRestore._read_checkpoint_vars(self.path)
+        graph_vars = tf.global_variables()
         chkpt_vars_used = set()
-        for v in vars_to_restore:
+        for v in graph_vars:
             name = get_savename_from_varname(v.name, varname_prefix=self.prefix)
-            # try to load both 'varname' and 'opname' from checkpoint
-            # because some old checkpoint might not have ':0'
-            if name in vars_available:
-                var_dict[name].append(v)
+            if reader.has_tensor(name):
+                func(reader, name, v)
                 chkpt_vars_used.add(name)
-            elif name.endswith(':0'):
-                name = name[:-2]
-                if name in vars_available:
-                    var_dict[name].append(v)
-                    chkpt_vars_used.add(name)
             else:
-                if not is_training_name(v.op.name):
-                    logger.warn("Variable {} in the graph not found in checkpoint!".format(v.op.name))
-        if len(chkpt_vars_used) < len(vars_available):
-            unused = vars_available - chkpt_vars_used
+                vname = v.op.name
+                if not is_training_name(vname):
+                    logger.warn("Variable {} in the graph not found in checkpoint!".format(vname))
+        if len(chkpt_vars_used) < len(chkpt_vars):
+            unused = chkpt_vars - chkpt_vars_used
             for name in sorted(unused):
                 if not is_training_name(name):
                     logger.warn("Variable {} in checkpoint not found in the graph!".format(name))
+
+    def _get_restore_dict(self):
+        var_dict = {}
+
+        def f(reader, name, v):
+            name = reader.get_real_name(name)
+            assert name not in var_dict, "Restore conflict: {} and {}".format(v.name, var_dict[name].name)
+            var_dict[name] = v
+        self._match_vars(f)
         return var_dict
 
 
-class ParamRestore(SessionInit):
+class SaverRestoreRelaxed(SaverRestore):
+    """ Same as :class:`SaverRestore`, but has more relaxed constraints.
+
+        It allows upcasting certain variables, or reshape certain
+        variables when there is a mismatch that can be fixed.
+        Another advantage is that it doesn't add any new ops to the graph.
+        But it is also slower than :class:`SaverRestore`.
+    """
+    def _run_init(self, sess):
+        logger.info(
+            "Restoring checkpoint from {} ...".format(self.path))
+
+        def f(reader, name, v):
+            val = reader.get_tensor(name)
+            SessionUpdate.load_value_to_var(v, val)
+        with sess.as_default():
+            self._match_vars(f)
+
+
+class DictRestore(SessionInit):
     """
     Restore variables from a dictionary.
     """
@@ -151,10 +170,10 @@ class ParamRestore(SessionInit):
         # use varname (with :0) for consistency
         self.prms = {get_op_tensor_name(n)[1]: v for n, v in six.iteritems(param_dict)}
 
-    def _init(self, sess):
+    def _run_init(self, sess):
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)  # TODO
 
-        variable_names = set([get_savename_from_varname(k.name) for k in variables])
+        variable_names = set([k.name for k in variables])
         param_names = set(six.iterkeys(self.prms))
 
         intersect = variable_names & param_names
@@ -167,11 +186,14 @@ class ParamRestore(SessionInit):
         for k in sorted(param_names - variable_names):
             logger.warn("Variable {} in the dict not found in the graph!".format(k))
 
-        upd = SessionUpdate(sess,
-                            [v for v in variables if
-                             get_savename_from_varname(v.name) in intersect])
+        upd = SessionUpdate(sess, [v for v in variables if v.name in intersect])
         logger.info("Restoring from dict ...")
         upd.update({name: value for name, value in six.iteritems(self.prms) if name in intersect})
+
+
+@deprecated("Use `DictRestore` instead!", "2017-06-01")
+def ParamRestore(d):
+    return DictRestore(d)
 
 
 class ChainInit(SessionInit):
@@ -180,20 +202,24 @@ class ChainInit(SessionInit):
     to form a composition of models.
     """
 
-    def __init__(self, sess_inits, new_session=True):
+    def __init__(self, sess_inits):
         """
         Args:
-            sess_inits (list): list of :class:`SessionInit` instances.
-            new_session (bool): add a ``NewSession()`` and the beginning, if
-                not there.
+            sess_inits (list[SessionInit]): list of :class:`SessionInit` instances.
         """
-        if new_session and not isinstance(sess_inits[0], NewSession):
-            sess_inits.insert(0, NewSession())
         self.inits = sess_inits
 
     def _init(self, sess):
         for i in self.inits:
             i.init(sess)
+
+    def _setup_graph(self):
+        for i in self.inits:
+            i._setup_graph()
+
+    def _run_init(self, sess):
+        for i in self.inits:
+            i._run_init(sess)
 
 
 def get_model_loader(filename):
@@ -201,11 +227,26 @@ def get_model_loader(filename):
     Get a corresponding model loader by looking at the file name.
 
     Returns:
-        SessInit: either a :class:`ParamRestore` (if name ends with 'npy') or
+        SessInit: either a :class:`DictRestore` (if name ends with 'npy') or
         :class:`SaverRestore` (otherwise).
     """
     if filename.endswith('.npy'):
         assert os.path.isfile(filename), filename
-        return ParamRestore(np.load(filename, encoding='latin1').item())
+        return DictRestore(np.load(filename, encoding='latin1').item())
     else:
         return SaverRestore(filename)
+
+
+def TryResumeTraining():
+    """
+    Load latest checkpoint from LOG_DIR, if there is one.
+
+    Returns:
+        SessInit: either a :class:`JustCurrentSession`, or a :class:`SaverRestore`.
+    """
+    if not logger.LOG_DIR:
+        return JustCurrentSession()
+    path = os.path.join(logger.LOG_DIR, 'checkpoint')
+    if not os.path.isfile(path):
+        return JustCurrentSession()
+    return SaverRestore(path)

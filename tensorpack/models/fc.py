@@ -5,7 +5,7 @@
 
 import tensorflow as tf
 
-from .common import layer_register
+from .common import layer_register, VariableHolder
 from ..tfutils import symbolic_functions as symbf
 
 __all__ = ['FullyConnected']
@@ -14,7 +14,7 @@ __all__ = ['FullyConnected']
 @layer_register()
 def FullyConnected(x, out_dim,
                    W_init=None, b_init=None,
-                   nl=tf.identity, use_bias=True, return_vars=False):
+                   nl=tf.identity, use_bias=True):
     """
     Fully-Connected layer. Takes a N>1D tensor and returns a 2D tensor.
 
@@ -27,11 +27,11 @@ def FullyConnected(x, out_dim,
         use_bias (bool): whether to use bias.
 
     Returns:
-        tf.Tensor: a NC tensor named ``output``.
+        tf.Tensor: a NC tensor named ``output`` with attribute `variables`.
 
     Variable Names:
 
-    * ``W``: weights
+    * ``W``: weights of shape [in_dim, out_dim]
     * ``b``: bias
     """
     x = symbf.batch_flatten(x)
@@ -46,10 +46,8 @@ def FullyConnected(x, out_dim,
     if use_bias:
         b = tf.get_variable('b', [out_dim], initializer=b_init)
     prod = tf.nn.xw_plus_b(x, W, b) if use_bias else tf.matmul(x, W)
-    output = nl(prod, name='output')
-    if return_vars:
-        var_list = [W]
-        if use_bias:
-            var_list.append(b)
-        return output, var_list
-    return output
+    ret = nl(prod, name='output')
+    ret.variables = VariableHolder(W=W)
+    if use_bias:
+        ret.variables.b = b
+    return ret

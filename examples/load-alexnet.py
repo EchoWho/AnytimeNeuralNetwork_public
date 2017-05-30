@@ -4,7 +4,6 @@
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 from __future__ import print_function
-import tensorflow as tf
 import numpy as np
 import os
 import cv2
@@ -14,6 +13,7 @@ from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.dataflow.dataset import ILSVRCMeta
+import tensorflow as tf
 
 """
 Usage:
@@ -23,9 +23,8 @@ Usage:
 
 
 class Model(ModelDesc):
-
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, 227, 227, 3), 'input')]
+        return [InputDesc(tf.float32, (None, 227, 227, 3), 'input')]
 
     def _build_graph(self, inputs):
         # img: 227x227x3
@@ -55,9 +54,9 @@ class Model(ModelDesc):
 
 def run_test(path, input):
     param_dict = np.load(path, encoding='latin1').item()
-    predict_func = OfflinePredictor(PredictConfig(
+    predictor = OfflinePredictor(PredictConfig(
         model=Model(),
-        session_init=ParamRestore(param_dict),
+        session_init=DictRestore(param_dict),
         input_names=['input'],
         output_names=['prob']
     ))
@@ -66,7 +65,7 @@ def run_test(path, input):
     assert im is not None, input
     im = cv2.resize(im, (227, 227))[:, :, ::-1].reshape(
         (1, 227, 227, 3)).astype('float32') - 110
-    outputs = predict_func([im])[0]
+    outputs = predictor([im])[0]
     prob = outputs[0]
     ret = prob.argsort()[-10:][::-1]
     print("Top10 predictions:", ret)

@@ -3,7 +3,6 @@
 # File: train-timit.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import tensorflow as tf
 import numpy as np
 import os
 import sys
@@ -14,10 +13,13 @@ import six
 from six.moves import map, range
 
 from tensorpack import *
-from tensorpack.tfutils.gradproc import *
+from tensorpack.tfutils.gradproc import SummaryGradient, GlobalNormClip
 from tensorpack.utils.globvars import globalns as param
 import tensorpack.tfutils.symbolic_functions as symbf
+import tensorflow as tf
+
 from timitdata import TIMITBatch
+
 
 BATCH = 64
 NLAYER = 2
@@ -28,11 +30,11 @@ FEATUREDIM = 39     # MFCC feature dimension
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, None, FEATUREDIM], 'feat'),   # bxmaxseqx39
-                InputVar(tf.int64, None, 'labelidx'),  # label is b x maxlen, sparse
-                InputVar(tf.int32, None, 'labelvalue'),
-                InputVar(tf.int64, None, 'labelshape'),
-                InputVar(tf.int32, [None], 'seqlen'),   # b
+        return [InputDesc(tf.float32, [None, None, FEATUREDIM], 'feat'),   # bxmaxseqx39
+                InputDesc(tf.int64, None, 'labelidx'),  # label is b x maxlen, sparse
+                InputDesc(tf.int32, None, 'labelvalue'),
+                InputDesc(tf.int64, None, 'labelshape'),
+                InputDesc(tf.int32, [None], 'seqlen'),   # b
                 ]
 
     def _build_graph(self, inputs):
@@ -54,7 +56,7 @@ class Model(ModelDesc):
                                 W_init=tf.truncated_normal_initializer(stddev=0.01))
         logits = tf.reshape(logits, (BATCH, -1, NR_CLASS))
 
-        loss = tf.nn.ctc_loss(logits, label, seqlen, time_major=False)
+        loss = tf.nn.ctc_loss(label, logits, seqlen, time_major=False)
 
         self.cost = tf.reduce_mean(loss, name='cost')
 
@@ -73,8 +75,11 @@ class Model(ModelDesc):
         err = tf.reduce_mean(err, name='error')
         summary.add_moving_summary(err, self.cost)
 
-    def get_gradient_processor(self):
-        return [GlobalNormClip(5), SummaryGradient()]
+    def _get_optimizer(self):
+        lr = symbolic_functions.get_scalar_var('learning_rate', 5e-3, summary=True)
+        opt = tf.train.AdamOptimizer(lr, epsilon=1e-3)
+        return optimizer.apply_grad_processors(
+            opt, [GlobalNormClip(5), SummaryGradient()])
 
 
 def get_data(path, isTrain, stat_file):
@@ -88,13 +93,8 @@ def get_data(path, isTrain, stat_file):
 
 
 def get_config(ds_train, ds_test):
-    steps_per_epoch = ds_train.size()
-
-    lr = symbolic_functions.get_scalar_var('learning_rate', 5e-3, summary=True)
-
     return TrainConfig(
         dataflow=ds_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-3),
         callbacks=[
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'error',
@@ -105,7 +105,6 @@ def get_config(ds_train, ds_test):
                 every_k_epochs=2),
         ],
         model=Model(),
-        steps_per_epoch=steps_per_epoch,
         max_epoch=70,
     )
 
