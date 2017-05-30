@@ -101,7 +101,7 @@ class Model(ModelDesc):
 
         def residual(name, l_feats, increase_dim=False):
             shape = l_feats[0].get_shape().as_list()
-            in_channel = shape[3]
+            in_channel = shape[1]
 
             if increase_dim:
                 out_channel = in_channel * 2
@@ -119,7 +119,7 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l
                     else:
-                        merged_feats = tf.concat(3, [merged_feats, l], name='concat_mf')
+                        merged_feats = tf.concat([merged_feats, l], 1, name='concat_mf')
                     l = conv('conv1', merged_feats, out_channel, stride1)
                     l = BatchNorm('bn1', l)
                     l = tf.nn.relu(l)
@@ -132,14 +132,14 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l
                     else: 
-                        merged_feats = tf.concat(3, [merged_feats, l], name='concat_ef')
+                        merged_feats = tf.concat([merged_feats, l], 1, name='concat_ef')
                     ef = conv('conv2', merged_feats, out_channel, 1)
                     # The second conv need to be BN before addition.
                     ef = BatchNorm('bn2', ef)
                     l = l_feats[w]
                     if increase_dim:
                         l = AvgPooling('pool', l, 2)
-                        l = tf.pad(l, [[0,0], [0,0], [0,0], [in_channel//2, in_channel//2]])
+                        l = tf.pad(l, [[0,0], [in_channel//2, in_channel//2], [0,0], [0,0]])
                     ef += l
                     l_end_feats.append(ef)
             return l_end_feats
@@ -154,7 +154,7 @@ class Model(ModelDesc):
                     if w == 0:
                         merged_feats = l
                     else:
-                        merged_feats = tf.concat(1, [merged_feats, l], name='concat')
+                        merged_feats = tf.concat([merged_feats, l], 1, name='concat')
                     logits = FullyConnected('linear', merged_feats, out_dim, \
                                                 nl=tf.identity, return_vars=True)
                     var_list.extend([logits.variables.W, logits.variables.b])
@@ -190,74 +190,75 @@ class Model(ModelDesc):
                 weight_i = tf.cast(tf.equal(select_idx, i), tf.float32, name='weight_{}'.format(i))
                 add_moving_summary(weight_i)
 
-        l_feats = [] 
-        for w in range(self.width):
-            with tf.variable_scope('init_conv'+str(w)) as scope:
-                l = conv('conv0', image, self.init_channel, 1) 
-                #l = BatchNorm('bn0', l)
-                #l = tf.nn.relu(l)
-                l_feats.append(l)
+        with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling], data_format='NCHW'):
+            l_feats = [] 
+            for w in range(self.width):
+                with tf.variable_scope('init_conv'+str(w)) as scope:
+                    l = conv('conv0', image, self.init_channel, 1) 
+                    #l = BatchNorm('bn0', l)
+                    #l = tf.nn.relu(l)
+                    l_feats.append(l)
 
-        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
-                                          480000, 0.2, True)
-        wd_cost = 0
-        cost = 0
-        unit_idx = -1
-        anytime_idx = -1
-        online_learn_rewards = []
-        last_cost = None
-        max_reward = 0.0
-        for res_block_i in range(NUM_RES_BLOCKS):
-            for k in range(self.n):
-                scope_name = 'res{}.{:02d}'.format(res_block_i, k)
-                l_feats = \
-                    residual(scope_name, l_feats, 
-                             increase_dim=(k==0 and res_block_i > 0))
-                l_logits, var_list = row_sum_predict(scope_name, l_feats, self.num_classes) 
-                l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
+            wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
+                                              480000, 0.2, True)
+            wd_cost = 0
+            cost = 0
+            unit_idx = -1
+            anytime_idx = -1
+            online_learn_rewards = []
+            last_cost = None
+            max_reward = 0.0
+            for res_block_i in range(NUM_RES_BLOCKS):
+                for k in range(self.n):
+                    scope_name = 'res{}.{:02d}'.format(res_block_i, k)
+                    l_feats = \
+                        residual(scope_name, l_feats, 
+                                 increase_dim=(k==0 and res_block_i > 0))
+                    l_logits, var_list = row_sum_predict(scope_name, l_feats, self.num_classes) 
+                    l_costs, l_wrong = cost_and_eval(scope_name, l_logits, label)
 
-                is_last_row = res_block_i == NUM_RES_BLOCKS-1 and k==self.n-1
-                for ci, c in enumerate(l_costs):
-                    unit_idx += 1
-                    cost_weight = self.weights[unit_idx]
-                    if cost_weight > 0:
-                        anytime_idx += 1
-                        add_weight = 0
-                        if SAMLOSS > 0:
-                            add_weight = tf.cond(tf.equal(anytime_idx, select_idx),
-                                lambda: tf.constant(self.weights[-1] * 2.0, dtype=tf.float32),
-                                lambda: tf.constant(0, dtype=tf.float32))
-                        if SUM_RAND_RATIO > 0:
-                            cost += (cost_weight + add_weight / SUM_RAND_RATIO) * c
-                        else:
-                            cost += add_weight * c
-                        # Regularize weights from FC layers. Should use 
-                        # regularize_cost to get the weights using variable names
-                        wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
-                        
-                        #gs = tf.gradients(c, tf.trainable_variables()) 
-                        #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
-                        if not last_cost is None:
-                            reward = 1.0 - c / last_cost
-                            max_reward = tf.maximum(reward, max_reward)
-                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                                name='reward_{:02d}'.format(anytime_idx-1)))
-                        if ci == len(l_costs)-1 and is_last_row:
-                            reward = max_reward * LAST_REWARD_RATE
-                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                                name='reward_{:02d}'.format(anytime_idx)))
-                            #cost = tf.Print(cost, online_learn_rewards)
-                        last_cost = c
+                    is_last_row = res_block_i == NUM_RES_BLOCKS-1 and k==self.n-1
+                    for ci, c in enumerate(l_costs):
+                        unit_idx += 1
+                        cost_weight = self.weights[unit_idx]
+                        if cost_weight > 0:
+                            anytime_idx += 1
+                            add_weight = 0
+                            if SAMLOSS > 0:
+                                add_weight = tf.cond(tf.equal(anytime_idx, select_idx),
+                                    lambda: tf.constant(self.weights[-1] * 2.0, dtype=tf.float32),
+                                    lambda: tf.constant(0, dtype=tf.float32))
+                            if SUM_RAND_RATIO > 0:
+                                cost += (cost_weight + add_weight / SUM_RAND_RATIO) * c
+                            else:
+                                cost += add_weight * c
+                            # Regularize weights from FC layers. Should use 
+                            # regularize_cost to get the weights using variable names
+                            wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
+                            
+                            #gs = tf.gradients(c, tf.trainable_variables()) 
+                            #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
+                            if not last_cost is None:
+                                reward = 1.0 - c / last_cost
+                                max_reward = tf.maximum(reward, max_reward)
+                                online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                                    name='reward_{:02d}'.format(anytime_idx-1)))
+                            if ci == len(l_costs)-1 and is_last_row:
+                                reward = max_reward * LAST_REWARD_RATE
+                                online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                                    name='reward_{:02d}'.format(anytime_idx)))
+                                #cost = tf.Print(cost, online_learn_rewards)
+                            last_cost = c
 
 
-                        if STOP_GRADIENTS_PARTIAL and not is_last_row: 
-                            l = l_feats[ci]
-                            l = (1 - SG_GAMMA) * tf.stop_gradient(l) + SG_GAMMA * l
-                            l_feats[ci] = l
-                    #endif cost_weight > 0
-                #endfor each width
-            #endfor each n
-        # endfor each block
+                            if STOP_GRADIENTS_PARTIAL and not is_last_row: 
+                                l = l_feats[ci]
+                                l = (1 - SG_GAMMA) * tf.stop_gradient(l) + SG_GAMMA * l
+                                l_feats[ci] = l
+                        #endif cost_weight > 0
+                    #endfor each width
+                #endfor each n
+            # endfor each block
 
         # weight decay on all W on conv layers
         wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
