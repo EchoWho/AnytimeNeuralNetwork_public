@@ -47,7 +47,8 @@ class Exp3CPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
 
-    def _after_run(self, select, reward):
+    def _after_run(self, ctx, run_values):
+        select, reward = run_values.results
         self._select = select
         #print "select: {} , reward: {}".format(select, reward)
         self.average_reward[self._select] += reward
@@ -124,7 +125,8 @@ class RWMCPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
 
-    def _after_run(self, *rewards):
+    def _after_run(self, ctx, run_values):
+        rewards = run_values.results
         #print "select: {} , reward: {}".format(select, reward)
         rewards = np.asarray(rewards).reshape((self.K,))
         self.average_reward += rewards
@@ -198,7 +200,8 @@ class FixedDistributionCPU(Callback):
     def _before_train(self):
         pass
 
-    def _after_run(self, select):
+    def _after_run(self, ctx, run_values):
+        select = run_values.results[0]
         if self.is_active:
             self._select = np.int32(np.argmax(np.random.multinomial(1, self.w)))
             self.assign_selection.eval(feed_dict={self.select_holder : self._select})
@@ -254,7 +257,8 @@ class ThompsonSamplingCPU(Callback):
         self.max_reward = np.zeros(self.K)
         self.reward_cnt = np.ones(self.K)
 
-    def _after_run(self, *rewards):
+    def _after_run(self, ctx, run_values):
+        rewards = run_values.results
         #print "select: {} , reward: {}".format(select, reward)
         rewards = np.asarray(rewards).reshape((self.K,))
         self.average_reward += rewards
