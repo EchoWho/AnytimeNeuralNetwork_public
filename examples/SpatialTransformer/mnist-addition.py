@@ -3,6 +3,7 @@
 # File: mnist-addition.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
+import cv2
 import numpy as np
 import tensorflow as tf
 import os
@@ -19,8 +20,8 @@ HALF_DIFF = (IMAGE_SIZE - WARP_TARGET_SIZE) // 2
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, IMAGE_SIZE, IMAGE_SIZE, 2), 'input'),
-                InputVar(tf.int32, (None,), 'label')]
+        return [InputDesc(tf.float32, (None, IMAGE_SIZE, IMAGE_SIZE, 2), 'input'),
+                InputDesc(tf.int32, (None,), 'label')]
 
     def _build_graph(self, inputs):
         xys = np.array([(y, x, 1) for y in range(WARP_TARGET_SIZE)
@@ -68,7 +69,6 @@ class Model(ModelDesc):
 
         sampled = tf.concat([sampled1, sampled2], 3, 'sampled_concat')
         logits = (LinearWrap(sampled)
-                  .apply(symbf.batch_flatten)
                   .FullyConnected('fc1', out_dim=256, nl=tf.nn.relu)
                   .FullyConnected('fc2', out_dim=128, nl=tf.nn.relu)
                   .FullyConnected('fct', out_dim=19, nl=tf.identity)())
@@ -85,9 +85,13 @@ class Model(ModelDesc):
         summary.add_moving_summary(cost, wd_cost)
         self.cost = tf.add_n([wd_cost, cost], name='cost')
 
-    def get_gradient_processor(self):
-        return [MapGradient(lambda grad: tf.clip_by_global_norm([grad], 5)[0][0]),
-                ScaleGradient(('STN.*', 0.1)), SummaryGradient()]
+    def _get_optimizer(self):
+        lr = symbf.get_scalar_var('learning_rate', 5e-4, summary=True)
+        opt = tf.train.AdamOptimizer(lr, epsilon=1e-3)
+        return optimizer.apply_grad_processors(
+            opt, [
+                gradproc.ScaleGradient(('STN.*', 0.1)),
+                gradproc.SummaryGradient()])
 
 
 def get_data(isTrain):
@@ -149,19 +153,17 @@ def get_config():
     dataset_train, dataset_test = get_data(True), get_data(False)
     steps_per_epoch = dataset_train.size() * 5
 
-    lr = symbf.get_scalar_var('learning_rate', 5e-4, summary=True)
-
     return TrainConfig(
+        model=Model(),
         dataflow=dataset_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-3),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_test,
                             [ScalarStats('cost'), ClassificationError()]),
             ScheduledHyperParamSetter('learning_rate', [(200, 1e-4)])
         ],
-        session_config=get_default_sess_config(0.5),
-        model=Model(),
+        session_creator=sesscreate.NewSessionCreator(
+            config=get_default_sess_config(0.5)),
         steps_per_epoch=steps_per_epoch,
         max_epoch=500,
     )

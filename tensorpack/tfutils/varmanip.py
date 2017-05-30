@@ -7,7 +7,6 @@ import six
 import os
 import tensorflow as tf
 from collections import defaultdict
-import re
 import numpy as np
 from ..utils import logger
 from ..utils.naming import PREDICT_TOWER
@@ -34,8 +33,6 @@ def get_savename_from_varname(
         logger.error("No variable under '{}' name scope should be saved!".format(PREDICT_TOWER))
         # don't overwrite anything in the current prediction graph
         return None
-    if 'tower' in name:
-        name = re.sub('tower[p0-9]+/', '', name)
     if varname_prefix is not None \
             and name.startswith(varname_prefix):
         name = name[len(varname_prefix) + 1:]
@@ -54,14 +51,57 @@ class SessionUpdate(object):
             vars_to_update: a collection of variables to update
         """
         self.sess = sess
-        self.assign_ops = defaultdict(list)
+        self.name_map = defaultdict(list)
         for v in vars_to_update:
-            # p = tf.placeholder(v.dtype, shape=v.get_shape())
-            with tf.device('/cpu:0'):
-                p = tf.placeholder(v.dtype)
-                savename = get_savename_from_varname(v.name)
-                # multiple vars might share one savename
-                self.assign_ops[savename].append((p, v, v.assign(p)))
+            self.name_map[v.name].append(v)
+
+    @staticmethod
+    def load_value_to_var(var, val, strict=False):
+        """
+        Call `var.load(val)` with the default session.
+
+        Args:
+            var (tf.Variable):
+            strict (bool): Behave less strict if set to False.
+        """
+        if strict:
+            var.load(val)
+            return
+        name = var.op.name
+
+        # check incompatible shape
+        varshape = tuple(var.get_shape().as_list())
+        if varshape != val.shape:
+            # TODO only allow reshape when shape different by empty axis
+            assert np.prod(varshape) == np.prod(val.shape), \
+                "{}: {}!={}".format(name, varshape, val.shape)
+            logger.warn("Variable {} is reshaped {}->{} during assigning".format(
+                name, val.shape, varshape))
+            val = val.reshape(varshape)
+
+        # fix some common type incompatibility problem, but is certainly not enough
+        def upcast(vartype, valtype):
+            # allow up-casting
+            if vartype == tf.float64 and valtype == np.float32:
+                return np.float64
+            if vartype in [tf.int64, tf.int32] and valtype in [np.int32, np.int16, np.int8]:
+                return np.int64 if vartype == tf.int64 else np.int32
+            return None
+
+        if hasattr(val, 'dtype'):
+            vartype = var.value().dtype
+            if vartype != val.dtype:
+                msg = "Variable {} has dtype {} but was given a value of dtype {}.".format(name, vartype, val.dtype)
+                newtype = upcast(var.dtype, val.dtype)
+                if newtype is not None:
+                    val = newtype(val)
+                    logger.warn(msg + " Load it after casting!")
+                else:
+                    assert vartype == val.dtype, msg
+        try:
+            var.load(val)
+        except tf.errors.InvalidArgumentError:
+            logger.exc("Cannot load this value to the variable {}".format(name))
 
     def update(self, prms):
         """
@@ -69,23 +109,17 @@ class SessionUpdate(object):
             prms(dict): dict of {variable name: value}
                 Any name in prms must be in the graph and in vars_to_update.
         """
-        for name, value in six.iteritems(prms):
-            assert name in self.assign_ops
-            for p, v, op in self.assign_ops[name]:
-                varshape = tuple(v.get_shape().as_list())
-                if varshape != value.shape:
-                    # TODO only allow reshape when shape different by empty axis
-                    assert np.prod(varshape) == np.prod(value.shape), \
-                        "{}: {}!={}".format(name, varshape, value.shape)
-                    logger.warn("Param {} is reshaped during assigning".format(name))
-                    value = value.reshape(varshape)
-                self.sess.run(op, feed_dict={p: value})
+        with self.sess.as_default():
+            for name, value in six.iteritems(prms):
+                assert name in self.name_map
+                for v in self.name_map[name]:
+                    SessionUpdate.load_value_to_var(v, value)
 
 
 def dump_session_params(path):
     """
     Dump value of all TRAINABLE + MODEL variables to a dict, and save as
-    npy format (loadable by :class:`ParamRestore`).
+    npy format (loadable by :class:`DictRestore`).
 
     Args:
         path(str): the path to save the parameters.
@@ -96,11 +130,7 @@ def dump_session_params(path):
     assert len(set(var)) == len(var), "TRAINABLE and MODEL variables have duplication!"
     result = {}
     for v in var:
-        name = get_savename_from_varname(v.name)
-        if name in result:
-            logger.info("Variable {} would be stored instead of another with \
-the same name".format(v.name))
-        result[name] = v.eval()
+        result[v.name] = v.eval()
     logger.info("Variables to save to {}:".format(path))
     logger.info(str(result.keys()))
     np.save(path, result)
@@ -118,6 +148,7 @@ def get_checkpoint_path(model_path):
     if os.path.basename(model_path) == model_path:
         model_path = os.path.join('.', model_path)  # avoid #4921 and #6142
     if os.path.basename(model_path) == 'checkpoint':
+        assert os.path.isfile(model_path), model_path
         model_path = tf.train.latest_checkpoint(os.path.dirname(model_path))
         # to be consistent with either v1 or v2
 

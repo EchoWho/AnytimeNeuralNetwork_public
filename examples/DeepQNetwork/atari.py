@@ -11,7 +11,8 @@ from collections import deque
 import threading
 import six
 from six.moves import range
-from tensorpack.utils import (get_rng, logger, get_dataset_path, execute_only_once)
+from tensorpack.utils import (get_rng, logger, execute_only_once)
+from tensorpack.utils.fs import get_dataset_path
 from tensorpack.utils.stats import StatCounter
 
 from tensorpack.RL.envbase import RLEnvironment, DiscreteActionSpace
@@ -53,7 +54,7 @@ class AtariPlayer(RLEnvironment):
             "rom {} not found. Please download at {}".format(rom_file, ROM_URL)
 
         try:
-            ALEInterface.setLoggerMode(ALEInterface.Logger.Warning)
+            ALEInterface.setLoggerMode(ALEInterface.Logger.Error)
         except AttributeError:
             if execute_only_once():
                 logger.warn("You're not using latest ALE")
@@ -105,7 +106,7 @@ class AtariPlayer(RLEnvironment):
 
     def current_state(self):
         """
-        :returns: a gray-scale (h, w, 1) uint8 image
+        :returns: a gray-scale (h, w) uint8 image
         """
         ret = self._grab_raw_image()
         # max-pooled over the last screen
@@ -118,7 +119,6 @@ class AtariPlayer(RLEnvironment):
         # 0.299,0.587.0.114. same as rgb2y in torch/image
         ret = cv2.cvtColor(ret, cv2.COLOR_RGB2GRAY)
         ret = cv2.resize(ret, self.image_shape)
-        ret = np.expand_dims(ret, axis=2)
         return ret.astype('uint8')  # to save some memory
 
     def get_action_space(self):

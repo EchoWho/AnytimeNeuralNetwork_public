@@ -4,12 +4,13 @@
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
 import os
-import sys
 from six.moves import urllib
 import errno
+import tqdm
 from . import logger
+from .utils import execute_only_once
 
-__all__ = ['mkdir_p', 'download', 'recursive_walk']
+__all__ = ['mkdir_p', 'download', 'recursive_walk', 'get_dataset_path']
 
 
 def mkdir_p(dirname):
@@ -28,32 +29,36 @@ def mkdir_p(dirname):
             raise e
 
 
-def download(url, dir):
+def download(url, dir, filename=None):
     """
-    Download URL to a directory. Will figure out the filename automatically
-    from URL.
+    Download URL to a directory.
+    Will figure out the filename automatically from URL, if not given.
     """
     mkdir_p(dir)
-    fname = url.split('/')[-1]
-    fpath = os.path.join(dir, fname)
+    if filename is None:
+        filename = url.split('/')[-1]
+    fpath = os.path.join(dir, filename)
 
-    def _progress(count, block_size, total_size):
-        sys.stdout.write('\r>> Downloading %s %.1f%%' %
-                         (fname,
-                             min(float(count * block_size) / total_size,
-                                 1.0) * 100.0))
-        sys.stdout.flush()
+    def hook(t):
+        last_b = [0]
+
+        def inner(b, bsize, tsize=None):
+            if tsize is not None:
+                t.total = tsize
+            t.update((b - last_b[0]) * bsize)
+            last_b[0] = b
+        return inner
     try:
-        fpath, _ = urllib.request.urlretrieve(url, fpath, reporthook=_progress)
+        with tqdm.tqdm(unit='B', unit_scale=True, miniters=1, desc=filename) as t:
+            fpath, _ = urllib.request.urlretrieve(url, fpath, reporthook=hook(t))
         statinfo = os.stat(fpath)
         size = statinfo.st_size
     except:
         logger.error("Failed to download {}".format(url))
         raise
     assert size > 0, "Download an empty file!"
-    sys.stdout.write('\n')
     # TODO human-readable size
-    print('Succesfully downloaded ' + fname + " " + str(size) + ' bytes.')
+    print('Succesfully downloaded ' + filename + ". " + str(size) + ' bytes.')
     return fpath
 
 
@@ -66,6 +71,50 @@ def recursive_walk(rootdir):
         for f in files:
             yield os.path.join(r, f)
 
+global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
+TENSORPACK_DATASET = None
+DATASET_AUTO_DOWNLOAD=False
+
+def set_dataset_path(path, auto_download=False):
+    global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
+    assert os.path.isdir(path)
+    TENSORPACK_DATASET = path
+    DATASET_AUTO_DOWNLOAD=auto_download
+
+def get_dataset_path(*args):
+    """
+    Get the path to some dataset under ``$TENSORPACK_DATASET``.
+
+    Args:
+        args: strings to be joined to form path.
+
+    Returns:
+        str: path to the dataset.
+    """
+    d = os.environ.get('TENSORPACK_DATASET', None)
+    if TENSORPACK_DATASET is not None:
+        logger.warn("the environemnt varible TENSORPACK_DATASET is not set, \
+            but the app received a directory to be set as the TENSORPACK_DATASET")
+        d = TENSORPACK_DATASET
+    if d is None:
+        old_d = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), '..', 'dataflow', 'dataset'))
+        old_d_ret = os.path.join(old_d, *args)
+        new_d = os.path.join(os.path.expanduser('~'), 'tensorpack_data')
+        if os.path.isdir(old_d_ret):
+            # there is an old dir containing data, use it for back-compat
+            logger.warn("You seem to have old data at {}. This is no longer \
+                the default location. You'll need to move it to {} \
+                (the new default location) or another directory set by \
+                $TENSORPACK_DATASET.".format(old_d, new_d))
+        d = new_d
+        if execute_only_once():
+            logger.warn("$TENSORPACK_DATASET not set, using {} for dataset.".format(d))
+        if not os.path.isdir(d):
+            mkdir_p(d)
+            logger.info("Created the directory {}.".format(d))
+    assert os.path.isdir(d), d
+    return os.path.join(d, *args)
 
 if __name__ == '__main__':
     download('http://dl.caffe.berkeleyvision.org/caffe_ilsvrc12.tar.gz', '.')

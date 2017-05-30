@@ -10,13 +10,13 @@ from datetime import datetime
 from tqdm import tqdm
 import numpy as np
 
+
 __all__ = ['change_env',
            'get_rng',
-           'get_dataset_path',
+           'fix_rng_seed',
            'get_tqdm_kwargs',
            'get_tqdm',
            'execute_only_once',
-           'building_rtfd',
            ]
 
 
@@ -39,9 +39,24 @@ def change_env(name, val):
         os.environ[name] = oldval
 
 
+_RNG_SEED = None
+
+
+def fix_rng_seed(seed):
+    """
+    Args:
+        seed (int):
+
+    Note:
+        See https://github.com/ppwwyyxx/tensorpack/issues/196.
+    """
+    global _RNG_SEED
+    _RNG_SEED = int(seed)
+
+
 def get_rng(obj=None):
     """
-    Get a good RNG.
+    Get a good RNG seeded with time, pid and the object.
 
     Args:
         obj: some object to use to generate random seed.
@@ -50,6 +65,8 @@ def get_rng(obj=None):
     """
     seed = (id(obj) + os.getpid() +
             int(datetime.now().strftime("%Y%m%d%H%M%S%f"))) % 4294967295
+    if _RNG_SEED is not None:
+        seed = _RNG_SEED
     return np.random.RandomState(seed)
 
 
@@ -62,8 +79,7 @@ def execute_only_once():
     first time and False afterwards.
 
     Returns:
-        bool: whether this is the first time this function gets called from
-            this line of code.
+        bool: whether this is the first time this function gets called from this line of code.
 
     Example:
         .. code-block:: python
@@ -77,39 +93,6 @@ def execute_only_once():
         return False
     _EXECUTE_HISTORY.add(ident)
     return True
-
-global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
-TENSORPACK_DATASET = None
-DATASET_AUTO_DOWNLOAD=False
-
-def set_dataset_path(path, auto_download=False):
-    global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
-    assert os.path.isdir(path)
-    TENSORPACK_DATASET = path
-    DATASET_AUTO_DOWNLOAD=auto_download
-
-def get_dataset_path(*args):
-    """
-    Get the path to some dataset under ``$TENSORPACK_DATASET``.
-
-    Args:
-        args: strings to be joined to form path.
-
-    Returns:
-        str: path to the dataset.
-    """
-    d = os.environ.get('TENSORPACK_DATASET', None)
-    if TENSORPACK_DATASET is not None:
-        d = TENSORPACK_DATASET
-    if d is None:
-        d = os.path.abspath(os.path.join(
-            os.path.dirname(__file__), '..', 'dataflow', 'dataset'))
-        if execute_only_once():
-            from . import logger
-            logger.info("TENSORPACK_DATASET not set, using {} for dataset.".format(d))
-    assert os.path.isdir(d), d
-    return os.path.join(d, *args)
-
 
 def get_tqdm_kwargs(**kwargs):
     """
@@ -130,7 +113,7 @@ def get_tqdm_kwargs(**kwargs):
     if f.isatty():
         default['mininterval'] = 0.5
     else:
-        default['mininterval'] = 60
+        default['mininterval'] = 300
     default.update(kwargs)
     return default
 
@@ -139,12 +122,3 @@ def get_tqdm(**kwargs):
     """ Similar to :func:`get_tqdm_kwargs`, but returns the tqdm object
     directly. """
     return tqdm(**get_tqdm_kwargs(**kwargs))
-
-
-def building_rtfd():
-    """
-    Returns:
-        bool: if tensorpack is being imported to generate docs now.
-    """
-    return os.environ.get('READTHEDOCS') == 'True' \
-        or os.environ.get('TENSORPACK_DOC_BUILDING')

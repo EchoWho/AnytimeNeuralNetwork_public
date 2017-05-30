@@ -3,16 +3,17 @@
 # File: InfoGAN-mnist.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
+import cv2
 import numpy as np
 import tensorflow as tf
 import os
 import sys
-import cv2
 import argparse
 
 from tensorpack import *
 from tensorpack.utils.viz import *
 from tensorpack.tfutils.distributions import *
+from tensorpack.tfutils.scope_utils import auto_reuse_variable_scope
 import tensorpack.tfutils.symbolic_functions as symbf
 from tensorpack.tfutils.gradproc import ScaleGradient, CheckGradient
 from GAN import GANTrainer, GANModelDesc
@@ -23,6 +24,8 @@ To train:
 
 To visualize:
     ./InfoGAN-mnist.py --sample --load path/to/model
+
+A pretrained model is at https://drive.google.com/open?id=0B9IPQTvr2BBkLUF2M0RXU1NYSkE
 """
 
 BATCH = 128
@@ -41,7 +44,7 @@ class GaussianWithUniformSample(GaussianDistribution):
 
 class Model(GANModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, (None, 28, 28), 'input')]
+        return [InputDesc(tf.float32, (None, 28, 28), 'input')]
 
     def generator(self, z):
         l = FullyConnected('fc0', z, 1024, nl=BNReLU)
@@ -49,12 +52,13 @@ class Model(GANModelDesc):
         l = tf.reshape(l, [-1, 7, 7, 128])
         l = Deconv2D('deconv1', l, [14, 14, 64], 4, 2, nl=BNReLU)
         l = Deconv2D('deconv2', l, [28, 28, 1], 4, 2, nl=tf.identity)
-        l = tf.tanh(l, name='gen')
+        l = tf.sigmoid(l, name='gen')
         return l
 
+    @auto_reuse_variable_scope
     def discriminator(self, imgs):
         with argscope(Conv2D, nl=tf.identity, kernel_shape=4, stride=2), \
-                argscope(LeakyReLU, alpha=0.1):
+                argscope(LeakyReLU, alpha=0.2):
             l = (LinearWrap(imgs)
                  .Conv2D('conv0', 64)
                  .LeakyReLU()
@@ -72,7 +76,7 @@ class Model(GANModelDesc):
 
     def _build_graph(self, inputs):
         real_sample = inputs[0]
-        real_sample = tf.expand_dims(real_sample * 2.0 - 1, -1)
+        real_sample = tf.expand_dims(real_sample, -1)
 
         # latent space is cat(10) x uni(1) x uni(1) x noise(NOISE_DIM)
         self.factors = ProductDistribution("factors", [CategoricalDistribution("cat", 10),
@@ -93,19 +97,13 @@ class Model(GANModelDesc):
                       W_init=tf.truncated_normal_initializer(stddev=0.02)):
             with tf.variable_scope('gen'):
                 fake_sample = self.generator(z)
-                fake_sample_viz = tf.cast((fake_sample + 1) * 128.0, tf.uint8, name='viz')
+                fake_sample_viz = tf.cast((fake_sample) * 255.0, tf.uint8, name='viz')
                 tf.summary.image('gen', fake_sample_viz, max_outputs=30)
 
-            # TODO investigate how bn stats should be updated across two discrim
+            # may need to investigate how bn stats should be updated across two discrim
             with tf.variable_scope('discrim'):
                 real_pred, _ = self.discriminator(real_sample)
-
-            with tf.variable_scope('discrim', reuse=True):
                 fake_pred, dist_param = self.discriminator(fake_sample)
-
-        # post-process output vector from discriminator to become valid
-        # distribution parameters
-        encoder_activation = self.factors.encoder_activation(dist_param)
 
         """
         Mutual information between x (i.e. zc in this case) and some
@@ -130,6 +128,8 @@ class Model(GANModelDesc):
             # Adding this term may make the curve less stable because the
             # entropy estimated from the samples is not the true value.
 
+            # post-process output vector from discriminator to obtain valid distribution parameters
+            encoder_activation = self.factors.encoder_activation(dist_param)
             cond_ents = self.factors.entropy(zc, encoder_activation)
             cond_entropy = tf.add_n(cond_ents, name="total_conditional_entropy")
 
@@ -139,7 +139,7 @@ class Model(GANModelDesc):
         # default GAN objective
         self.build_losses(real_pred, fake_pred)
 
-        # subtract mutual information for latent factores (we want to maximize them)
+        # subtract mutual information for latent factors (we want to maximize them)
         self.g_loss = tf.subtract(self.g_loss, MI, name='total_g_loss')
         self.d_loss = tf.subtract(self.d_loss, MI, name='total_d_loss')
 
@@ -148,9 +148,12 @@ class Model(GANModelDesc):
         # distinguish between variables of generator and discriminator updates
         self.collect_variables()
 
-    def get_gradient_processor_g(self):
+    def _get_optimizer(self):
+        lr = symbf.get_scalar_var('learning_rate', 2e-4, summary=True)
+        opt = tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-6)
         # generator learns 5 times faster
-        return [CheckGradient(), ScaleGradient(('.*', 5), log=False)]
+        return optimizer.apply_grad_processors(
+            opt, [gradproc.ScaleGradient(('gen/.*', 5), log=True)])
 
 
 def get_data():
@@ -161,13 +164,9 @@ def get_data():
 
 def get_config():
     logger.auto_set_dir()
-    dataset = get_data()
-    lr = symbf.get_scalar_var('learning_rate', 2e-4, summary=True)
     return TrainConfig(
-        dataflow=dataset,
-        optimizer=tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-6),
-        callbacks=[ModelSaver()],
-        session_config=get_default_sess_config(0.5),
+        dataflow=get_data(),
+        callbacks=[ModelSaver(keep_freq=0.1)],
         model=Model(),
         steps_per_epoch=500,
         max_epoch=100,
@@ -194,24 +193,24 @@ def sample(model_path):
         z_noise = np.random.uniform(-1, 1, (100, NOISE_DIM))
         zc = np.concatenate((z_cat, z_uni * 0, z_uni * 0), axis=1)
         o = pred(zc, z_noise)[0]
-        viz1 = next(build_patch_list(o, nr_row=10, nr_col=10))
+        viz1 = stack_patches(o, nr_row=10, nr_col=10)
         viz1 = cv2.resize(viz1, (IMG_SIZE, IMG_SIZE))
 
         # show effect of first continous variable with fixed noise
         zc = np.concatenate((z_cat, z_uni, z_uni * 0), axis=1)
         o = pred(zc, z_noise * 0)[0]
-        viz2 = next(build_patch_list(o, nr_row=10, nr_col=10))
+        viz2 = stack_patches(o, nr_row=10, nr_col=10)
         viz2 = cv2.resize(viz2, (IMG_SIZE, IMG_SIZE))
 
         # show effect of second continous variable with fixed noise
         zc = np.concatenate((z_cat, z_uni * 0, z_uni), axis=1)
         o = pred(zc, z_noise * 0)[0]
-        viz3 = next(build_patch_list(o, nr_row=10, nr_col=10))
+        viz3 = stack_patches(o, nr_row=10, nr_col=10)
         viz3 = cv2.resize(viz3, (IMG_SIZE, IMG_SIZE))
 
-        viz = next(build_patch_list(
+        viz = stack_patches(
             [viz1, viz2, viz3],
-            nr_row=1, nr_col=3, border=5, bgcolor=(255, 0, 0)))
+            nr_row=1, nr_col=3, border=5, bgcolor=(255, 0, 0))
 
         interactive_imshow(viz)
 

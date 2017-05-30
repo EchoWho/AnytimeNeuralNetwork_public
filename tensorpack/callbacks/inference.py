@@ -4,16 +4,16 @@
 
 import numpy as np
 from abc import ABCMeta, abstractmethod
-import sys
 import six
 from six.moves import zip
 
-from ..utils import logger
 from ..utils.stats import RatioCounter, BinaryStatistics
 from ..tfutils import get_op_tensor_name
 
 __all__ = ['ScalarStats', 'Inferencer',
            'ClassificationError', 'BinaryClassificationStats', 'StorePrediction']
+
+# TODO rename get_output_tensors to get_output_names
 
 @six.add_metaclass(ABCMeta)
 class Inferencer(object):
@@ -45,8 +45,7 @@ class Inferencer(object):
     def after_inference(self):
         """
         Called after a round of inference ends.
-        Returns a dict of statistics which will be logged by the :class:`InferenceRunner`.
-        The inferencer needs to handle other type of logging by itself, if there is any.
+        Returns a dict of scalar statistics which will be logged to monitors.
         """
         return self._after_inference()
 
@@ -55,7 +54,7 @@ class Inferencer(object):
 
     def get_output_tensors(self):
         """
-        Return a list of tensor names (guranteed not op name) this inferencer needs.
+        Return a list of tensor names (guaranteed not op name) this inferencer needs.
         """
         ret = self._get_output_tensors()
         return [get_op_tensor_name(n)[1] for n in ret]
@@ -71,17 +70,17 @@ class ScalarStats(Inferencer):
     The value will be averaged over all given datapoints.
     """
 
-    def __init__(self, names_to_print, prefix='validation'):
+    def __init__(self, names, prefix='validation'):
         """
         Args:
-            names_to_print(list or str): list of names or just one name. The
+            names(list or str): list of names or just one name. The
                 corresponding tensors have to be scalar.
             prefix(str): a prefix for logging
         """
-        if not isinstance(names_to_print, list):
-            self.names = [names_to_print]
+        if not isinstance(names, list):
+            self.names = [names]
         else:
-            self.names = names_to_print
+            self.names = names
         self.prefix = prefix
 
     def _get_output_tensors(self):
@@ -91,8 +90,6 @@ class ScalarStats(Inferencer):
         self.stats = []
 
     def _datapoint(self, output):
-        for o in output:
-            assert isinstance(o, (float, np.float32)), type(o)
         self.stats.append(output)
 
     def _after_inference(self):
@@ -127,7 +124,7 @@ class ClassificationError(Inferencer):
             wrong_tensor_name(str): name of the ``wrong`` tensor.
                 The default is the same as the default output name of
                 :meth:`prediction_incorrect`.
-            summary_name(str): the name for logging.
+            summary_name(str): the name to log the error with.
         """
         self.wrong_tensor_name = wrong_tensor_name
         self.summary_name = summary_name
@@ -140,14 +137,10 @@ class ClassificationError(Inferencer):
 
     def _datapoint(self, outputs):
         vec = outputs[0]
-        if vec.ndim == 0:
-            logger.error("[DEPRECATED] use a 'wrong vector' for ClassificationError instead of nr_wrong")
-            sys.exit(1)
-        else:
-            # TODO put shape assertion into inferencerrunner
-            assert vec.ndim == 1, "{} is not a vector!".format(self.wrong_tensor_name)
-            batch_size = len(vec)
-            wrong = np.sum(vec)
+        # TODO put shape assertion into inference-runner
+        assert vec.ndim == 1, "{} is not a vector!".format(self.wrong_tensor_name)
+        batch_size = len(vec)
+        wrong = np.sum(vec)
         self.err_stat.feed(wrong, batch_size)
 
     def _after_inference(self):
@@ -160,7 +153,7 @@ class BinaryClassificationStats(Inferencer):
     prediction vector and the label vector.
     """
 
-    def __init__(self, pred_tensor_name, label_tensor_name, summary_prefix='val'):
+    def __init__(self, pred_tensor_name, label_tensor_name, prefix='val'):
         """
         Args:
             pred_tensor_name(str): name of the 0/1 prediction tensor.
@@ -168,7 +161,7 @@ class BinaryClassificationStats(Inferencer):
         """
         self.pred_tensor_name = pred_tensor_name
         self.label_tensor_name = label_tensor_name
-        self.prefix = summary_prefix
+        self.prefix = prefix
 
     def _get_output_tensors(self):
         return [self.pred_tensor_name, self.label_tensor_name]

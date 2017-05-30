@@ -7,7 +7,6 @@ import numpy as np
 
 from .common import layer_register
 from ..utils.argtools import shape2d, shape4d
-from ..tfutils import symbolic_functions as symbf
 from ._test import TestModel
 
 
@@ -15,59 +14,58 @@ __all__ = ['MaxPooling', 'FixedUnPooling', 'AvgPooling', 'GlobalAvgPooling',
            'BilinearUpSample']
 
 
+def _Pooling(func, x, shape, stride, padding, data_format):
+    padding = padding.upper()
+    shape = shape4d(shape, data_format=data_format)
+    if stride is None:
+        stride = shape
+    else:
+        stride = shape4d(stride, data_format=data_format)
+
+    return func(x, ksize=shape,
+                strides=stride, padding=padding,
+                data_format=data_format,
+                name='output')
+
+
 @layer_register()
-def MaxPooling(x, shape, stride=None, padding='VALID'):
+def MaxPooling(x, shape, stride=None, padding='VALID', data_format='NHWC'):
     """
     Max Pooling on 4D tensors.
 
     Args:
-        x (tf.Tensor): a NHWC tensor.
+        x (tf.Tensor): a 4D tensor.
         shape: int or (h, w) tuple
         stride: int or (h, w) tuple. Defaults to be the same as shape.
         padding (str): 'valid' or 'same'.
 
     Returns:
-        tf.Tensor: a NHWC tensor named ``output``.
+        tf.Tensor named ``output``.
     """
-    padding = padding.upper()
-    shape = shape4d(shape)
-    if stride is None:
-        stride = shape
-    else:
-        stride = shape4d(stride)
-
-    return tf.nn.max_pool(x, ksize=shape,
-                          strides=stride, padding=padding,
-                          name='output')
+    return _Pooling(tf.nn.max_pool, x, shape, stride, padding,
+                    data_format=data_format)
 
 
 @layer_register()
-def AvgPooling(x, shape, stride=None, padding='VALID'):
+def AvgPooling(x, shape, stride=None, padding='VALID', data_format='NHWC'):
     """
     Average Pooling on 4D tensors.
 
     Args:
-        x (tf.Tensor): a NHWC tensor.
+        x (tf.Tensor): a 4D tensor.
         shape: int or (h, w) tuple
         stride: int or (h, w) tuple. Defaults to be the same as shape.
         padding (str): 'valid' or 'same'.
 
     Returns:
-        tf.Tensor: a NHWC tensor named ``output``.
+        tf.Tensor named ``output``.
     """
-    padding = padding.upper()
-    shape = shape4d(shape)
-    if stride is None:
-        stride = shape
-    else:
-        stride = shape4d(stride)
-
-    return tf.nn.avg_pool(x, ksize=shape,
-                          strides=stride, padding=padding, name='output')
+    return _Pooling(tf.nn.avg_pool, x, shape, stride, padding,
+                    data_format=data_format)
 
 
 @layer_register()
-def GlobalAvgPooling(x):
+def GlobalAvgPooling(x, data_format='NHWC'):
     """
     Global average pooling as in the paper `Network In Network
     <http://arxiv.org/abs/1312.4400>`_.
@@ -78,7 +76,9 @@ def GlobalAvgPooling(x):
         tf.Tensor: a NC tensor named ``output``.
     """
     assert x.get_shape().ndims == 4
-    return tf.reduce_mean(x, [1, 2], name='output')
+    assert data_format in ['NHWC', 'NCHW']
+    axis = [1, 2] if data_format == 'NHWC' else [2, 3]
+    return tf.reduce_mean(x, axis, name='output')
 
 
 def UnPooling2x2ZeroFilled(x):
@@ -127,9 +127,9 @@ def FixedUnPooling(x, shape, unpool_mat=None):
     assert unpool_mat.get_shape().as_list() == list(shape)
 
     # perform a tensor-matrix kronecker product
-    fx = symbf.flatten(tf.transpose(x, [0, 3, 1, 2]))
+    fx = tf.reshape(tf.transpose(x, [0, 3, 1, 2]), [-1])
     fx = tf.expand_dims(fx, -1)       # (bchw)x1
-    mat = tf.expand_dims(symbf.flatten(unpool_mat), 0)  # 1x(shxsw)
+    mat = tf.expand_dims(tf.reshape(unpool_mat, [-1]), 0)  # 1x(shxsw)
     prod = tf.matmul(fx, mat)  # (bchw) x(shxsw)
     prod = tf.reshape(prod, tf.stack(
         [-1, input_shape[3], input_shape[1], input_shape[2], shape[0], shape[1]]))
@@ -151,11 +151,6 @@ def BilinearUpSample(x, shape):
     Returns:
         tf.Tensor: a NHWC tensor.
     """
-    # inp_shape = tf.shape(x)
-    # return tf.image.resize_bilinear(x,
-    # tf.stack([inp_shape[1]*shape,inp_shape[2]*shape]),
-    # align_corners=True)
-
     inp_shape = x.get_shape().as_list()
     ch = inp_shape[3]
     assert ch is not None
@@ -177,12 +172,16 @@ def BilinearUpSample(x, shape):
         return ret
     w = bilinear_conv_filler(filter_shape)
     w = np.repeat(w, ch * ch).reshape((filter_shape, filter_shape, ch, ch))
+
     weight_var = tf.constant(w, tf.float32,
                              shape=(filter_shape, filter_shape, ch, ch),
                              name='bilinear_upsample_filter')
-    deconv = tf.nn.conv2d_transpose(x, weight_var,
-                                    tf.shape(x) * tf.constant([1, shape, shape, 1], tf.int32),
+    x = tf.pad(x, [[0, 0], [shape - 1, shape - 1], [shape - 1, shape - 1], [0, 0]], mode='SYMMETRIC')
+    out_shape = tf.shape(x) * tf.constant([1, shape, shape, 1], tf.int32)
+    deconv = tf.nn.conv2d_transpose(x, weight_var, out_shape,
                                     [1, shape, shape, 1], 'SAME')
+    edge = shape * (shape - 1)
+    deconv = deconv[:, edge:-edge, edge:-edge, :]
 
     if inp_shape[1]:
         inp_shape[1] *= shape
@@ -193,8 +192,7 @@ def BilinearUpSample(x, shape):
 
 
 class TestPool(TestModel):
-
-    def test_fixed_unpooling(self):
+    def test_FixedUnPooling(self):
         h, w = 3, 4
         mat = np.random.rand(h, w, 3).astype('float32')
         inp = self.make_variable(mat)
@@ -210,8 +208,8 @@ class TestPool(TestModel):
         res[0, ::2, ::2, :] = 0
         self.assertTrue((res == 0).all())
 
-    def test_upsample(self):
-        h, w = 5, 5
+    def test_BilinearUpSample(self):
+        h, w = 12, 12
         scale = 2
 
         mat = np.random.rand(h, w).astype('float32')
@@ -222,14 +220,11 @@ class TestPool(TestModel):
         res = self.run_variable(output)[0, :, :, 0]
 
         from skimage.transform import rescale
-        res2 = rescale(mat, scale)
+        res2 = rescale(mat, scale, mode='edge')
 
         diff = np.abs(res2 - res)
 
-        # not equivalent to rescale on edge?
-        diff[0, :] = 0
-        diff[:, 0] = 0
-        if not diff.max() < 1e-4:
-            import IPython
-            IPython.embed(config=IPython.terminal.ipapp.load_default_config())
-        self.assertTrue(diff.max() < 1e-4)
+        # if not diff.max() < 1e-4:
+        #     import IPython
+        #     IPython.embed(config=IPython.terminal.ipapp.load_default_config())
+        self.assertTrue(diff.max() < 1e-4, diff.max())

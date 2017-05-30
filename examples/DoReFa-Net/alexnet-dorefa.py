@@ -15,7 +15,7 @@ import sys
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.tfutils.varreplace import replace_get_variable
+from tensorpack.tfutils.varreplace import remap_variables
 from dorefa import get_dorefa
 
 """
@@ -41,7 +41,9 @@ Accuracy:
     With (W,A,G)=(1,2,4), 63% error.
 
 Speed:
-    About 2.8 iteration/s on 1 TitanX. (Each epoch is set to 10000 iterations)
+    About 2.2 iteration/s on 1 TitanX. (Each epoch is set to 10000 iterations)
+    Note that this code was written early without using NCHW format. You
+    should expect a 30% speed up after switching to NCHW format.
 
 To Train, for example:
     ./alexnet-dorefa.py --dorefa 1,2,6 --data PATH --gpu 0,1
@@ -75,8 +77,8 @@ BATCH_SIZE = None
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 224, 224, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, 224, 224, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
@@ -87,10 +89,10 @@ class Model(ModelDesc):
         old_get_variable = tf.get_variable
 
         # monkey-patch tf.get_variable to apply fw
-        def new_get_variable(name, shape=None, **kwargs):
-            v = old_get_variable(name, shape, **kwargs)
+        def new_get_variable(v):
+            name = v.op.name
             # don't binarize first and last layer
-            if name != 'W' or 'conv0' in v.op.name or 'fct' in v.op.name:
+            if not name.endswith('W') or 'conv0' in name or 'fct' in name:
                 return v
             else:
                 logger.info("Binarizing weight {}".format(v.op.name))
@@ -104,7 +106,7 @@ class Model(ModelDesc):
         def activate(x):
             return fa(nonlin(x))
 
-        with replace_get_variable(new_get_variable), \
+        with remap_variables(new_get_variable), \
                 argscope(BatchNorm, decay=0.9, epsilon=1e-4), \
                 argscope([Conv2D, FullyConnected], use_bias=False, nl=tf.identity):
             logits = (LinearWrap(image)
@@ -161,6 +163,10 @@ class Model(ModelDesc):
         self.cost = tf.add_n([cost, wd_cost], name='cost')
         add_moving_summary(cost, wd_cost, self.cost)
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 1e-4, summary=True)
+        return tf.train.AdamOptimizer(lr, epsilon=1e-5)
+
 
 def get_data(dataset_name):
     isTrain = dataset_name == 'train'
@@ -172,7 +178,6 @@ def get_data(dataset_name):
 
     if isTrain:
         class Resize(imgaug.ImageAugmentor):
-
             def __init__(self):
                 self._init(locals())
 
@@ -216,7 +221,7 @@ def get_data(dataset_name):
             imgaug.CenterCrop((224, 224)),
             imgaug.MapImage(lambda x: x - pp_mean_224),
         ]
-    ds = AugmentImageComponent(ds, augmentors)
+    ds = AugmentImageComponent(ds, augmentors, copy=False)
     ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchDataZMQ(ds, min(12, multiprocessing.cpu_count()))
@@ -225,16 +230,11 @@ def get_data(dataset_name):
 
 def get_config():
     logger.auto_set_dir()
-
-    # prepare dataset
     data_train = get_data('train')
     data_test = get_data('val')
 
-    lr = get_scalar_var('learning_rate', 1e-4, summary=True)
-
     return TrainConfig(
         dataflow=data_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-5),
         callbacks=[
             ModelSaver(),
             # HumanHyperParamSetter('learning_rate'),
@@ -255,11 +255,10 @@ def run_image(model, sess_init, inputs):
     pred_config = PredictConfig(
         model=model,
         session_init=sess_init,
-        session_config=get_default_sess_config(0.9),
         input_names=['input'],
         output_names=['output']
     )
-    predict_func = get_predict_func(pred_config)
+    predictor = OfflinePredictor(pred_config)
     meta = dataset.ILSVRCMeta()
     pp_mean = meta.get_per_pixel_mean()
     pp_mean_224 = pp_mean[16:-16, 16:-16, :]
@@ -283,7 +282,7 @@ def run_image(model, sess_init, inputs):
         assert img is not None
 
         img = transformers.augment(img)[np.newaxis, :, :, :]
-        outputs = predict_func([img])[0]
+        outputs = predictor([img])[0]
         prob = outputs[0]
         ret = prob.argsort()[-10:][::-1]
 
@@ -309,7 +308,7 @@ if __name__ == '__main__':
 
     if args.run:
         assert args.load.endswith('.npy')
-        run_image(Model(), ParamRestore(np.load(args.load, encoding='latin1').item()), args.run)
+        run_image(Model(), DictRestore(np.load(args.load, encoding='latin1').item()), args.run)
         sys.exit()
 
     assert args.gpu is not None, "Need to specify a list of gpu for training!"

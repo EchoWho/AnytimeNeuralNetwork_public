@@ -2,12 +2,12 @@
 # -*- coding: UTF-8 -*-
 # File: cifar-convnet.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
+from tensorpack import *
 import tensorflow as tf
 import argparse
 import numpy as np
 import os
 
-from tensorpack import *
 import tensorpack.tfutils.symbolic_functions as symbf
 from tensorpack.tfutils.summary import *
 from tensorpack.utils.gpu import get_nr_gpu
@@ -17,7 +17,7 @@ A small convnet model for Cifar10 or Cifar100 dataset.
 
 Cifar10:
     91% accuracy after 50k step.
-    30 step/s on TitanX
+    41 step/s on TitanX
 
 Not a good model for Cifar100, just for demonstration.
 """
@@ -29,8 +29,8 @@ class Model(ModelDesc):
         self.cifar_classnum = cifar_classnum
 
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 30, 30, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')
+        return [InputDesc(tf.float32, [None, 30, 30, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')
                 ]
 
     def _build_graph(self, inputs):
@@ -40,9 +40,15 @@ class Model(ModelDesc):
 
         if is_training:
             tf.summary.image("train_image", image, 10)
+        if tf.test.is_gpu_available():
+            image = tf.transpose(image, [0, 3, 1, 2])
+            data_format = 'NCHW'
+        else:
+            data_format = 'NHWC'
 
         image = image / 4.0     # just to make range smaller
-        with argscope(Conv2D, nl=BNReLU, use_bias=False, kernel_shape=3):
+        with argscope(Conv2D, nl=BNReLU, use_bias=False, kernel_shape=3), \
+                argscope([Conv2D, MaxPooling, BatchNorm], data_format=data_format):
             logits = LinearWrap(image) \
                 .Conv2D('conv1.1', out_channel=64) \
                 .Conv2D('conv1.2', out_channel=64) \
@@ -71,6 +77,10 @@ class Model(ModelDesc):
         add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([cost, wd_cost], name='cost')
 
+    def _get_optimizer(self):
+        lr = symbf.get_scalar_var('learning_rate', 1e-2, summary=True)
+        return tf.train.AdamOptimizer(lr, epsilon=1e-3)
+
 
 def get_data(train_or_test, cifar_classnum):
     isTrain = train_or_test == 'train'
@@ -97,7 +107,7 @@ def get_data(train_or_test, cifar_classnum):
     ds = AugmentImageComponent(ds, augmentors)
     ds = BatchData(ds, 128, remainder=not isTrain)
     if isTrain:
-        ds = PrefetchDataZMQ(ds, 3)
+        ds = PrefetchDataZMQ(ds, 5)
     return ds
 
 
@@ -106,30 +116,21 @@ def get_config(cifar_classnum):
 
     # prepare dataset
     dataset_train = get_data('train', cifar_classnum)
-    steps_per_epoch = dataset_train.size()
     dataset_test = get_data('test', cifar_classnum)
-
-    sess_config = get_default_sess_config(0.5)
-
-    lr = symbf.get_scalar_var('learning_rate', 1e-2, summary=True)
 
     def lr_func(lr):
         if lr < 3e-5:
             raise StopTraining()
         return lr * 0.31
-
     return TrainConfig(
+        model=Model(cifar_classnum),
         dataflow=dataset_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-3),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_test, ClassificationError()),
             StatMonitorParamSetter('learning_rate', 'val_error', lr_func,
                                    threshold=0.001, last_k=10),
         ],
-        session_config=sess_config,
-        model=Model(cifar_classnum),
-        steps_per_epoch=steps_per_epoch,
         max_epoch=150,
     )
 

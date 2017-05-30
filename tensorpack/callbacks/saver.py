@@ -5,15 +5,16 @@
 import tensorflow as tf
 import os
 import shutil
+import glob
 
-from .base import Triggerable
+from .base import Callback
 from ..utils import logger
-from ..tfutils.varmanip import get_savename_from_varname
+from ..tfutils.common import get_tf_version_number
 
 __all__ = ['ModelSaver', 'MinSaver', 'MaxSaver']
 
 
-class ModelSaver(Triggerable):
+class ModelSaver(Callback):
     """
     Save the model every epoch.
     """
@@ -35,6 +36,7 @@ class ModelSaver(Triggerable):
         self.var_collections = var_collections
         if checkpoint_dir is None:
             checkpoint_dir = logger.LOG_DIR
+        assert os.path.isdir(checkpoint_dir), checkpoint_dir
         self.checkpoint_dir = checkpoint_dir
 
     def _setup_graph(self):
@@ -42,27 +44,20 @@ class ModelSaver(Triggerable):
         for key in self.var_collections:
             vars.extend(tf.get_collection(key))
         self.path = os.path.join(self.checkpoint_dir, 'model')
-        self.saver = tf.train.Saver(
-            var_list=ModelSaver._get_var_dict(vars),
-            max_to_keep=self.keep_recent,
-            keep_checkpoint_every_n_hours=self.keep_freq,
-            write_version=tf.train.SaverDef.V2)
+        if get_tf_version_number() <= 1.1:
+            self.saver = tf.train.Saver(
+                var_list=vars,
+                max_to_keep=self.keep_recent,
+                keep_checkpoint_every_n_hours=self.keep_freq,
+                write_version=tf.train.SaverDef.V2)
+        else:
+            self.saver = tf.train.Saver(
+                var_list=vars,
+                max_to_keep=self.keep_recent,
+                keep_checkpoint_every_n_hours=self.keep_freq,
+                write_version=tf.train.SaverDef.V2,
+                save_relative_paths=True)
         self.meta_graph_written = False
-
-    @staticmethod
-    def _get_var_dict(vars):
-        var_dict = {}
-        for v in vars:
-            name = get_savename_from_varname(v.name)
-            if name not in var_dict:
-                if name != v.name:
-                    logger.info(
-                        "[ModelSaver] {} renamed to {} when saving model.".format(v.name, name))
-                var_dict[name] = v
-            else:
-                logger.info("[ModelSaver] Variable {} won't be saved \
-due to an alternative in a different tower: {}".format(v.name, var_dict[name].name))
-        return var_dict
 
     def _trigger(self):
         try:
@@ -82,7 +77,7 @@ due to an alternative in a different tower: {}".format(v.name, var_dict[name].na
             logger.exception("Exception in ModelSaver.trigger_epoch!")
 
 
-class MinSaver(Triggerable):
+class MinSaver(Callback):
     """
     Separately save the model with minimum value of some statistics.
     """
@@ -114,7 +109,7 @@ class MinSaver(Triggerable):
 
     def _get_stat(self):
         try:
-            v = self.trainer.stat_holder.get_stat_now(self.monitor_stat)
+            v = self.trainer.monitors.get_latest(self.monitor_stat)
         except KeyError:
             v = None
         return v
@@ -137,10 +132,14 @@ class MinSaver(Triggerable):
             raise RuntimeError(
                 "Cannot find a checkpoint state. Do you forget to use ModelSaver?")
         path = ckpt.model_checkpoint_path
+
         newname = os.path.join(logger.LOG_DIR,
                                self.filename or
-                               ('max-' if self.reverse else 'min-' + self.monitor_stat + '.tfmodel'))
-        shutil.copy(path, newname)
+                               ('max-' + self.monitor_stat if self.reverse else 'min-' + self.monitor_stat))
+        files_to_copy = glob.glob(path + '*')
+        for file_to_copy in files_to_copy:
+            shutil.copy(file_to_copy, file_to_copy.replace(path, newname))
+        #shutil.copy(path, newname)
         logger.info("Model with {} '{}' saved.".format(
             'maximum' if self.reverse else 'minimum', self.monitor_stat))
 

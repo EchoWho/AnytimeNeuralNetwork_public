@@ -8,12 +8,11 @@ import argparse
 import numpy as np
 import os
 import tensorflow as tf
+import multiprocessing
 
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-
-import multiprocessing
 
 """
 InceptionV3 on ILSVRC12.
@@ -22,22 +21,19 @@ See "Rethinking the Inception Architecture for Computer Vision", arxiv:1512.0056
 This config follows the official inceptionv3 setup
 (https://github.com/tensorflow/models/tree/master/inception/inception)
 with much much fewer lines of code.
-It reaches 74% single-crop validation accuracy,
-and has the same running speed as the official code.
-The hyperparameters here are for 8 GPUs, so the effective batch size is 8*64 = 512.
-With 8 TitanX it runs about 0.45 it/s.
+It reaches 74% single-crop validation accuracy, similar to the official code.
 """
 
 TOTAL_BATCH_SIZE = 512
-NR_GPU = 8
-BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
+NR_GPU = None
+BATCH_SIZE = None
 INPUT_SHAPE = 299
 
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
@@ -196,6 +192,10 @@ class Model(ModelDesc):
         self.cost = tf.add_n([0.4 * loss1, loss2, wd_cost], name='cost')
         add_moving_summary(loss1, loss2, wd_cost, self.cost)
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.045, summary=True)
+        return tf.train.AdamOptimizer(lr, epsilon=1e-3)
+
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
@@ -250,7 +250,7 @@ def get_data(train_or_test):
             imgaug.CenterCrop((299, 299)),
             imgaug.MapImage(lambda x: x - pp_mean_299),
         ]
-    ds = AugmentImageComponent(ds, augmentors)
+    ds = AugmentImageComponent(ds, augmentors, copy=False)
     ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
     if isTrain:
         ds = PrefetchDataZMQ(ds, min(12, multiprocessing.cpu_count()))
@@ -262,10 +262,8 @@ def get_config():
     dataset_train = get_data('train')
     dataset_val = get_data('val')
 
-    lr = get_scalar_var('learning_rate', 0.045, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.AdamOptimizer(lr, epsilon=1e-3),
         callbacks=[
             ModelSaver(),
             InferenceRunner(dataset_val, [
@@ -277,7 +275,6 @@ def get_config():
                                        (41, 8e-5), (48, 1e-5), (53, 2e-6)]),
             HumanHyperParamSetter('learning_rate')
         ],
-        session_config=get_default_sess_config(0.9),
         model=Model(),
         steps_per_epoch=5000,
         max_epoch=100,
@@ -286,19 +283,19 @@ def get_config():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
+    parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.', required=True)
     parser.add_argument('--data', help='ILSVRC dataset dir')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
 
     logger.auto_set_dir()
 
-    if args.gpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    NR_GPU = len(args.gpu.split(','))
+    BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
 
     config = get_config()
     if args.load:
         config.session_init = SaverRestore(args.load)
-    if args.gpu:
-        config.nr_tower = len(args.gpu.split(','))
+    config.nr_tower = NR_GPU
     SyncMultiGPUTrainer(config).train()
