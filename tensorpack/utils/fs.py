@@ -10,7 +10,7 @@ import tqdm
 from . import logger
 from .utils import execute_only_once
 
-__all__ = ['mkdir_p', 'download', 'recursive_walk', 'get_dataset_path']
+__all__ = ['mkdir_p', 'download', 'recursive_walk', 'get_dataset_path', 'set_dataset_path']
 
 
 def mkdir_p(dirname):
@@ -93,8 +93,8 @@ def get_dataset_path(*args):
     """
     d = os.environ.get('TENSORPACK_DATASET', None)
     if TENSORPACK_DATASET is not None:
-        logger.warn("the environemnt varible TENSORPACK_DATASET is not set, \
-            but the app received a directory to be set as the TENSORPACK_DATASET")
+        logger.info("the environemnt varible TENSORPACK_DATASET is not set, \
+                    but the app received a directory to be set as the TENSORPACK_DATASET")
         d = TENSORPACK_DATASET
     if d is None:
         old_d = os.path.abspath(os.path.join(
