@@ -9,7 +9,9 @@ import os
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.utils import anytime_loss, logger, utils
+from tensorpack.utils import anytime_loss, logger, utils, fs
+from tensorpack.callbacks import FixedDistributionCPU
+from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 Modified for generating anytime prediction after
@@ -17,24 +19,33 @@ a network is trained.
 added FUNC_TYPE 9 for this.
 ModelSaver keep_freq=1 for this
 """
+# dataset selection
 NUM_CLASSES=10
 DO_VALID=False
 
+# fs path set up
 MODEL_DIR=None
 
+# model complexity param (dense net param)
 BATCH_SIZE=64
 NUM_RES_BLOCKS=3
 NUM_UNITS=12
 GROWTH_RATE=16
 INIT_CHANNEL=16
 
+# LOG DENSE specific
+LOG_SELECT_METHOD=0
+LOG_ANN_SELECT_METHOD=0
+
+# ANN period
 NUM_UNITS_PER_STACK=2
 
-# For other loss weight assignments
+# TODO move this to utils
+# Control loss weight assignment 
+# Also hack: TODO remove hack 109 type is for partially stop grad
 FUNC_TYPE=5
 OPTIMAL_AT=-1
 EXP_BASE=2.0
-
 
 def loss_weights(N):
     if FUNC_TYPE == 0: # exponential spacing
@@ -55,7 +66,7 @@ def loss_weights(N):
         return anytime_loss.half_constant_half_optimal(N, -1)
     elif FUNC_TYPE == 8: # quater constant, half optimal
         return anytime_loss.quater_constant_half_optimal(N)
-    elif FUNC_TYPE == 9: # train anytime predictor after the final is fixed through no-backs
+    elif FUNC_TYPE == 109: # train anytime predictor after the final is fixed through no-backs
         return anytime_loss.stack_loss_weights(N, 
             NUM_UNITS_PER_STACK, 
             anytime_loss.constant_weights)
@@ -73,114 +84,159 @@ class Model(ModelDesc):
         self.reduction_rate = 1
 
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, 32, 32, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
-        image = image / 128.0 - 1
-
-        def conv(name, l, channel, stride, kernel=3):
-            return Conv2D(name, l, channel, kernel, stride=stride,
-                          nl=tf.identity, use_bias=False,
-                          W_init=tf.random_normal_initializer(stddev=np.sqrt(2.0/kernel/kernel/channel)))
-        wd_cost = 0
-        total_cost = 0
-        total_units = NUM_RES_BLOCKS * self.n
-        cost_weights = loss_weights(total_units) 
-        unit_idx = -1
+        image = image / 128.0
+        image = tf.transpose(image, [0, 3, 1, 2]) 
 
         # total depth (block * n) + initial 
+        total_units = NUM_RES_BLOCKS * self.n
+        cost_weights = loss_weights(total_units) 
+
+        ls_K = np.sum(np.asarray(cost_weights) > 0)
+        if ls_K > 1:
+            select_idx = tf.get_variable('select_idx', (), tf.int32,
+                initializer=tf.constant_initializer(ls_K-1), trainable=False)
+            for i in range(ls_K):
+                weight_i = tf.cast(tf.equal(select_idx, i), \
+                    tf.float32, name='weight_{}'.format(i))
+                add_moving_summary(weight_i)
+        
         exponential = 1
         exponentials = []
         while exponential < total_units + 1:
             exponentials.append(exponential)
             exponential *= 2
-        
-        past_feats = []
-        prev_logits = None
-        for bi in range(NUM_RES_BLOCKS):
-            if bi == 0:
-                with tf.variable_scope('init_conv') as scope:
-                    l = conv('conv', image, self.init_channel, 1) 
-                past_feats.append(l)
-            else:
-                new_past_feats = []
-                with tf.variable_scope('trans_{}'.format(bi)) as scope:
-                    for pfi, pf in enumerate(past_feats):
-                        l = BatchNorm('bn_{}_{}'.format(bi, pfi), pf)
-                        l = tf.nn.relu(l)
-                        l = conv('conv_{}_{}'.format(bi, pfi), \
-                            l, int(l.get_shape().as_list()[3] / self.reduction_rate), 1)
-                        l = tf.nn.relu(l)
-                        l = AvgPooling('pool', l, 2)
-                        new_past_feats.append(l)
-                past_feats = new_past_feats
 
-            for k in range(self.n):
-                unit_idx += 1
-                cost_weight = cost_weights[unit_idx]
-                scope_name = 'dense{}.{}'.format(bi, k)
-                is_last_node = not (k < self.n - 1 or bi < NUM_RES_BLOCKS -1)
-                with tf.variable_scope(scope_name) as scope:
-                    if not is_last_node:
-                        selected_feats = [ past_feats[unit_idx - e + 1] \
-                            for e in exponentials if unit_idx - e + 1 >= 0]
-                        
-                        selected_feats_idx = [ unit_idx - e + 1 \
-                            for e in exponentials if unit_idx - e + 1 >= 0]
-                    else:
-                        selected_feats = past_feats
-                        selected_feats_idx = list(range(len(past_feats)))
-                    print "unit_idx = {}, len past_feats = {}, selected_feats: {}".format(unit_idx,
-                        len(past_feats), selected_feats_idx)
-                    l = tf.concat(3, selected_feats, name='concat')
-                    #l = BatchNorm('bn0', l)
-                    #l = tf.nn.relu(l)
-                    #l = conv('conv0', l, self.growth_rate * self.bottleneck_width, 1, 1)
-                    l = BatchNorm('bn1', l)
-                    l = tf.nn.relu(l)
-                    l = conv('conv1', l, self.growth_rate, 1)
+        def log_select_indices(u_idx):
+            if LOG_SELECT_METHOD == 0:
+                diffs = exponentials 
+            elif LOG_SELECT_METHOD == 1:
+                diffs = list(range(1, int(np.log2(u_idx + 1)) + 1))
+            elif LOG_SELECT_METHOD == 2:
+                diffs = list(range(1, int(np.log2(total_units + 1)) + 1))
+            elif LOG_SELECT_METHOD == 3:
+                delta = int(np.log2(total_units + 1))
+                diffs = list(range(1, total_units + 1, delta)) 
+            indices = [u_idx - e + 1 \
+                for e in diffs if u_idx - e + 1 >= 0 ]
+            return indices
+               
+        with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling, MaxPooling], 
+                      data_format='NCHW'),\
+                argscope(Conv2D, nl=tf.identity, use_bias=False, kernel_shape=3, 
+                         W_init=variance_scaling_initializer(mode='FAN_OUT')):
+            past_feats = []
+            prev_logits = None
+            unit_idx = -1
+            anytime_idx = -1
+            wd_cost = 0
+            total_cost = 0
+            # regularzation weight
+            wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
+                                              480000, 0.2, True)
+            for bi in range(NUM_RES_BLOCKS):
+                ##### Transition / initial layer 
+                if bi == 0:
+                    with tf.variable_scope('init_conv') as scope:
+                        l = Conv2D('conv', image, self.init_channel) 
                     past_feats.append(l)
-                    
-                    if cost_weight > 0:
-                        #print "Stop gradient at {}".format(scope_name)
-                        #merged_feats = tf.stop_gradient(merged_feats)
-                        if not is_last_node and FUNC_TYPE == 9:
-                            l = tf.stop_gradient(l)
-                        l = BatchNorm('bn_pred', l)
-                        l = tf.nn.relu(l)
-                        l = GlobalAvgPooling('gap', l)
-                        logits, vl = FullyConnected('linear', l, out_dim=NUM_CLASSES, nl=tf.identity, return_vars=True)
+                else:
+                    new_past_feats = []
+                    with tf.variable_scope('trans_{}'.format(bi)) as scope:
+                        for pfi, pf in enumerate(past_feats):
+                            l = BatchNorm('bn_{}_{}'.format(bi, pfi), pf)
+                            l = tf.nn.relu(l)
+                            ch_in = l.get_shape().as_list()[1]
+                            l = Conv2D('conv_{}_{}'.format(bi, pfi), l, \
+                                       ch_in // self.reduction_rate) 
+                            l = tf.nn.relu(l)
+                            l = AvgPooling('pool', l, 2)
+                            new_past_feats.append(l)
+                    past_feats = new_past_feats
+                
+                ###### Dense block
+                for k in range(self.n):
+                    unit_idx += 1
+                    cost_weight = cost_weights[unit_idx]
+                    scope_name = 'dense{}.{}'.format(bi, k)
+                    is_last_node = k == self.n - 1 and bi == NUM_RES_BLOCKS - 1
+                    with tf.variable_scope(scope_name) as scope:
+                        selected_indices = log_select_indices(unit_idx)
+                        logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(unit_idx, len(past_feats), selected_indices))
+                        selected_feats = [past_feats[s_idx] for s_idx in selected_indices]
+                        l = tf.concat(selected_feats, 1, name='concat')
+                        #l = BatchNorm('bn0', l)
+                        #l = tf.nn.relu(l)
+                        #l = Conv2D('conv0', l, 
+                        #            self.growth_rate * self.bottleneck_width, kernel_shape=1)
+                        l = BatchNorm('bn1', l)
+                        merged_feats = tf.nn.relu(l)
+                        l = Conv2D('conv1', merged_feats, self.growth_rate)
+                        past_feats.append(l)
+                        
+                        if cost_weight > 0:
+                            #print "Stop gradient at {}".format(scope_name)
+                            #merged_feats = tf.stop_gradient(merged_feats)
+                            if not is_last_node and FUNC_TYPE == 109:
+                                l = tf.stop_gradient(l)
+                            l = BatchNorm('bn_pred', l)
+                            l = tf.nn.relu(l)
+                            l = GlobalAvgPooling('gap', l)
+                            if LOG_ANN_SELECT_METHOD == 0:
+                                l_prev = GlobalAvgPooling('gap_prev', merged_feats)
+                                l = tf.concat([l, l_prev], 1, name='gap_concat')
+                            elif LOG_ANN_SELECT_METHOD == 1:
+                                l = l
+                            logits = FullyConnected('linear', l, out_dim=NUM_CLASSES, nl=tf.identity)
 
-                        if not is_last_node and FUNC_TYPE == 9:
-                            if prev_logits is not None:
-                                logits += prev_logits
-                            prev_logits = tf.stop_gradient(logits)
-                        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, label)
-                        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+                            if not is_last_node and FUNC_TYPE == 109:
+                                if prev_logits is not None:
+                                    logits += prev_logits
+                                prev_logits = tf.stop_gradient(logits)
+                            cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
+                            cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
-                        wrong = prediction_incorrect(logits, label)
-                        tra_err = tf.reduce_mean(wrong, name='train_error')
+                            wrong = prediction_incorrect(logits, label)
+                            tra_err = tf.reduce_mean(wrong, name='train_error')
 
-                        total_cost += cost_weight * cost
-                        #wd_cost += cost_weight * wd_w * (tf.nn.l2_loss(vl[0]) + tf.nn.l2_loss(vl[1]))
-                        #wd_cost += wd_w * regularize_cost('{}/conv/W'.format(scope_name), tf.nn.l2_loss)
+                            # because cost_weight >0, anytime_idx inc
+                            anytime_idx += 1
+                            add_weight = 0
+                            if ls_K > 1: # use SAMLOSS == 6 to sample weights
+                                add_weight = tf.cond(tf.equal(anytime_idx, select_idx),
+                                    lambda: tf.constant(cost_weights[-1], dtype=tf.float32),
+                                    lambda: tf.constant(0, dtype=tf.float32))
+                            total_cost += (cost_weight + add_weight) * cost
 
-                        print '{} {} {}'.format(bi, k, cost_weight)
+                            # cost_weight adjusted regularzation:
+                            wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W) 
 
-                        add_moving_summary(cost)
-                        add_moving_summary(tra_err)
+                            print '{} {} {}'.format(bi, k, cost_weight)
+
+                            add_moving_summary(cost)
+                            add_moving_summary(tra_err)
+                    # end var-scope of a unit
+                # end for each unit 
+            # end for each block
+        # END argscope
 
         # regularize conv
-        wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
-                                          480000, 0.2, True)
-        wd_cost = tf.mul(wd_w, regularize_cost('.*/W', tf.nn.l2_loss), name='wd_cost')
+        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
+                         name='wd_cost')
         total_cost = tf.identity(total_cost, name='pred_cost')
         
         add_moving_summary(total_cost, wd_cost)
         add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([total_cost, wd_cost], name='cost')
+
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.01, summary=True)
+        opt = tf.train.MomentumOptimizer(lr, 0.9)
+        return opt
 
 
 def get_data(train_or_test):
@@ -215,31 +271,32 @@ def get_config():
 
     vcs = []
     total_units = NUM_RES_BLOCKS * NUM_UNITS
-    cost_weights = loss_weights(total_units)
-    unit_idx = 0
+    weights = loss_weights(total_units)
+    unit_idx = -1
     for bi in range(NUM_RES_BLOCKS):
         for ui in range(NUM_UNITS):
+            unit_idx += 1
             scope_name = 'dense{}.{}/'.format(bi, ui)
-            if cost_weights[unit_idx] > 0:
+            if weights[unit_idx] > 0:
                 vcs.append(ClassificationError(\
                     wrong_tensor_name=scope_name+'incorrect_vector:0', 
                     summary_name=scope_name+'val_err'))
-            unit_idx += 1
 
-    get_global_step_var()
-    lr = tf.Variable(0.01, trainable=False, name='learning_rate')
-    tf.summary.scalar('learning_rate', lr)
+    ls_K = np.sum(np.asarray(weights) > 0)
+    if ls_K > 1: 
+        ann_cbs = [FixedDistributionCPU(ls_K, 'select_idx:0', weights[weights>0])]
+    else:
+        ann_cbs = []
+    
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
-            StatPrinter(),
-            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=1),
+            ModelSaver(checkpoint_dir=MODEL_DIR),
             InferenceRunner(dataset_test,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
                                       [(1, 0.1), (150, 0.01), (225, 0.001)])
-        ],
+        ] + ann_cbs,
         model=Model(n=NUM_UNITS, growth_rate=GROWTH_RATE, init_channel=INIT_CHANNEL),
         steps_per_epoch=steps_per_epoch,
         max_epoch=300,
@@ -256,7 +313,7 @@ if __name__ == '__main__':
                         type=str, default=None)
     parser.add_argument('-n', '--num_units',
                         help='number of units in each stage',
-                        type=int, default=12)
+                        type=int, default=NUM_UNITS)
     parser.add_argument('-g', '--growth_rate',
                         help='number of channel per new layer',
                         type=int, default=GROWTH_RATE)
@@ -265,7 +322,11 @@ if __name__ == '__main__':
                         type=int, default=INIT_CHANNEL)
     parser.add_argument('-s', '--stack', 
                         help='number of units per stack, i.e., number of units per prediction',
-                        type=int, default=1)
+                        type=int, default=NUM_UNITS_PER_STACK)
+    parser.add_argument('--log_method', help='LOG_SELECT_METHOD', 
+                        type=int, default=LOG_SELECT_METHOD)
+    parser.add_argument('--log_ann_method', help='LOG_ANN_SELECT_METHOD',
+                        type=int, default=LOG_ANN_SELECT_METHOD)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=NUM_CLASSES)
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
@@ -287,6 +348,8 @@ if __name__ == '__main__':
     GROWTH_RATE = args.growth_rate
     INIT_CHANNEL = args.init_channel
     NUM_UNITS_PER_STACK = args.stack
+    LOG_SELECT_METHOD = args.log_method
+    LOG_ANN_SELECT_METHOD = args.log_ann_method
     FUNC_TYPE = args.func_type
     EXP_BASE = args.base
     OPTIMAL_AT = args.opt_at
@@ -296,8 +359,9 @@ if __name__ == '__main__':
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-    logger.auto_set_dir(log_root=args.log_dir)
-    utils.set_dataset_path(path=args.data_dir, auto_download=False)
+    logger.set_log_root(args.log_dir)
+    logger.auto_set_dir()
+    fs.set_dataset_path(path=args.data_dir, auto_download=False)
     MODEL_DIR = args.model_dir
 
     config = get_config()
