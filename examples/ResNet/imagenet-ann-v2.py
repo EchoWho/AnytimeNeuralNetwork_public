@@ -16,7 +16,7 @@ from tensorpack import *
 from tensorpack.utils.stats import RatioCounter
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.utils import anytime_loss
+from tensorpack.utils import anytime_loss, fs, logger, utils
 from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
 
@@ -79,11 +79,12 @@ def loss_weights(N):
 
 class Model(ModelDesc):
     def _get_inputs(self):
-        return [InputVar(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
+        return [InputDesc(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
+                InputDesc(tf.int32, [None], 'label')]
 
     def _build_graph(self, inputs):
         image, label = inputs
+        image = tf.transpose(image, [0, 3, 1, 2])
 
         def shortcut(l, n_in, n_out, stride):
             if n_in != n_out:
@@ -92,7 +93,7 @@ class Model(ModelDesc):
                 return l
 
         def basicblock(l, ch_out, stride, preact):
-            ch_in = l.get_shape().as_list()[-1]
+            ch_in = l.get_shape().as_list()[1]
             if preact == 'both_preact':
                 l = BNReLU('preact', l)
                 input = l
@@ -106,7 +107,7 @@ class Model(ModelDesc):
             return l + shortcut(input, ch_in, ch_out, stride)
 
         def bottleneck(l, ch_out, stride, preact):
-            ch_in = l.get_shape().as_list()[-1]
+            ch_in = l.get_shape().as_list()[1]
             if preact == 'both_preact':
                 l = BNReLU('preact', l)
                 input = l
@@ -152,7 +153,8 @@ class Model(ModelDesc):
         N = cfg_N[DEPTH]
 
         with argscope(Conv2D, nl=tf.identity, use_bias=False,
-                      W_init=variance_scaling_initializer(mode='FAN_OUT')):
+                      W_init=variance_scaling_initializer(mode='FAN_OUT')), \
+             argscope([Conv2D, MaxPooling, GlobalAvgPooling, BatchNorm], data_format='NCHW'):
             
             l_preprocess = (LinearWrap(image)
                       .Conv2D('conv0', 64, 7, stride=2, nl=BNReLU)
@@ -223,6 +225,10 @@ class Model(ModelDesc):
         add_moving_summary(loss, wd_cost)
         self.cost = tf.add_n([loss, wd_cost], name='cost')
 
+    def _get_optimizer(self):
+        lr = get_scalar_var('learning_rate', 0.01, summary=True)
+        return tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True)
+
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
     ds = dataset.ILSVRC12TFRecord(args.data_dir, 
@@ -292,10 +298,8 @@ def get_config():
     else:
         online_learn_cb = []
 
-    lr = get_scalar_var('learning_rate', 0.01, summary=True)
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
             ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=0.01),
             InferenceRunner(dataset_val, vcs),
@@ -328,7 +332,7 @@ def eval_on_ILSVRC12(model_file, data_dir):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
-    parser.add_argument('--data_dir', help='ILSVRC dataset dir')
+    parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly')
     parser.add_argument('--log_dir', help='log_dir for stdout')
     parser.add_argument('--model_dir', help='dir for saving models')
     parser.add_argument('--load', help='load model')
@@ -361,7 +365,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # directory setup
     MODEL_DIR = args.model_dir
-    logger.auto_set_dir(log_root=args.log_dir)
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
 
     TOTAL_BATCH_SIZE = args.batch_size
     FUNC_TYPE = args.func_type
