@@ -66,7 +66,7 @@ python $CONFIG_DIR/examples/ResNet/cifar-logdense.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 -f=2 \
---opt_at=48 \
+--opt_at=47 \
 -n=32 \
 -g=16 \
 -s=3 \

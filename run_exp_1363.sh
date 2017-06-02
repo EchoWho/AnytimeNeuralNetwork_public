@@ -66,7 +66,7 @@ python $CONFIG_DIR/examples/ResNet/svhn-logdense.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 -f=2 \
---opt_at=156 \
+--opt_at=155 \
 -n=52 \
 -g=16 \
 -s=6 \
