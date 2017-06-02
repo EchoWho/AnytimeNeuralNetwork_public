@@ -16,7 +16,7 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 """
 Modified for generating anytime prediction after
 a network is trained. 
-added FUNC_TYPE 9 for this.
+added FUNC_TYPE 109 for this.
 ModelSaver keep_freq=1 for this
 """
 # dataset selection
@@ -162,10 +162,13 @@ class Model(ModelDesc):
                 for k in range(self.n):
                     unit_idx += 1
                     cost_weight = cost_weights[unit_idx]
-                    scope_name = 'dense{}.{}'.format(bi, k)
+                    scope_name = 'dense{}.{:02d}'.format(bi, k)
                     is_last_node = k == self.n - 1 and bi == NUM_RES_BLOCKS - 1
                     with tf.variable_scope(scope_name) as scope:
-                        selected_indices = log_select_indices(unit_idx)
+                        if is_last_node:
+                            selected_indices = list(range(unit_idx+1))
+                        else:
+                            selected_indices = log_select_indices(unit_idx)
                         logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(unit_idx, len(past_feats), selected_indices))
                         selected_feats = [past_feats[s_idx] for s_idx in selected_indices]
                         l = tf.concat(selected_feats, 1, name='concat')
@@ -276,7 +279,7 @@ def get_config():
     for bi in range(NUM_RES_BLOCKS):
         for ui in range(NUM_UNITS):
             unit_idx += 1
-            scope_name = 'dense{}.{}/'.format(bi, ui)
+            scope_name = 'dense{}.{:02d}/'.format(bi, ui)
             if weights[unit_idx] > 0:
                 vcs.append(ClassificationError(\
                     wrong_tensor_name=scope_name+'incorrect_vector:0', 
