@@ -26,7 +26,7 @@ FLAGS = tf.app.flags.FLAGS
 #        """Number of images to process in a batch.""")
 #tf.app.flags.DEFINE_integer('image_size', 299,
 #        """Provide square images of this size.""")
-tf.app.flags.DEFINE_integer('num_preprocess_threads', 1,
+tf.app.flags.DEFINE_integer('num_preprocess_threads', 4,
                             """Number of preprocessing threads per tower. """
                             """Please make this a multiple of 4.""")
 tf.app.flags.DEFINE_integer('num_readers', 4,
@@ -552,9 +552,9 @@ class ILSVRC12TFRecord(RNGDataFlow):
                                                                     shuffle=False,
                                                                     capacity=1)
                 num_preprocess_threads = FLAGS.num_preprocess_threads
-                #if num_preprocess_threads % 4:
-                #    raise ValueError('Please make num_preprocess_threads a multiple '
-                #                     'of 4 (%d % 4 != 0).', num_preprocess_threads)
+                if num_preprocess_threads % 4:
+                    raise ValueError('Please make num_preprocess_threads a multiple '
+                                     'of 4 (%d % 4 != 0).', num_preprocess_threads)
 
                 num_readers = FLAGS.num_readers
                 if num_readers < 1:
