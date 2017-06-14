@@ -125,11 +125,11 @@ class Model(ModelDesc):
                 for e in diffs if u_idx - e + 1 >= 0 ]
             return indices
 
-        def feat_map_to_1x1_feat(feat):
-            ch_in = feat.get_shape().as_list()[1] 
-            l = Conv2D('conv1x1', feat, ch_in, kernel_shape=1)
-            l = BatchNorm('bn_f2p0', l)
-            l = tf.nn.relu(l)
+        def feat_map_to_1x1_feat(l):
+            ch_in = l.get_shape().as_list()[1] 
+            #l = Conv2D('conv1x1', l, ch_in, kernel_shape=1)
+            #l = BatchNorm('bn_f2p0', l)
+            #l = tf.nn.relu(l)
             l = GlobalAvgPooling('gap_1x1', l)
             return l
                
