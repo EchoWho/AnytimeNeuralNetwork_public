@@ -26,7 +26,7 @@ FLAGS = tf.app.flags.FLAGS
 #        """Number of images to process in a batch.""")
 #tf.app.flags.DEFINE_integer('image_size', 299,
 #        """Provide square images of this size.""")
-tf.app.flags.DEFINE_integer('num_preprocess_threads', 4,
+tf.app.flags.DEFINE_integer('num_preprocess_threads', 1,
                             """Number of preprocessing threads per tower. """
                             """Please make this a multiple of 4.""")
 tf.app.flags.DEFINE_integer('num_readers', 4,
@@ -521,9 +521,10 @@ class ILSVRC12TFRecord(RNGDataFlow):
             n_samples = 50000
         n_batch = n_samples // self.batch_size
         remainder = n_samples % self.batch_size
-        if remainder == 0:
-            return n_batch
-        return n_batch + int(self.subset == 'validation')
+        #if remainder == 0:
+        #    return n_batch
+        #return n_batch + int(self.subset == 'validation')
+        return n_batch
 
 
     def data_files(self):
@@ -551,9 +552,9 @@ class ILSVRC12TFRecord(RNGDataFlow):
                                                                     shuffle=False,
                                                                     capacity=1)
                 num_preprocess_threads = FLAGS.num_preprocess_threads
-                if num_preprocess_threads % 4:
-                    raise ValueError('Please make num_preprocess_threads a multiple '
-                                     'of 4 (%d % 4 != 0).', num_preprocess_threads)
+                #if num_preprocess_threads % 4:
+                #    raise ValueError('Please make num_preprocess_threads a multiple '
+                #                     'of 4 (%d % 4 != 0).', num_preprocess_threads)
 
                 num_readers = FLAGS.num_readers
                 if num_readers < 1:
@@ -605,7 +606,7 @@ class ILSVRC12TFRecord(RNGDataFlow):
                     image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
                     image_std_inv = 1.0 / np.array([0.229, 0.224, 0.225], dtype='float32')
                     image = tf.subtract(image, image_mean)
-                    image = tf.mul(image, image_std_inv)
+                    image = tf.multiply(image, image_std_inv)
                     
                     inputs.append([image, label_index])
 
@@ -712,7 +713,7 @@ class ILSVRC12TFRecord(RNGDataFlow):
       ymax = tf.expand_dims(features['image/object/bbox/ymax'].values, 0)
 
       # Note that we impose an ordering of (y, x) just to make life difficult.
-      bbox = tf.concat(0, [ymin, xmin, ymax, xmax])
+      bbox = tf.concat([ymin, xmin, ymax, xmax], 0)
 
       # Force the variable number of bounding boxes into the shape
       # [1, num_boxes, coords].
