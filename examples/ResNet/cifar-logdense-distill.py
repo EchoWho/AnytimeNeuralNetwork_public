@@ -16,7 +16,6 @@ from tensorflow.contrib.layers import variance_scaling_initializer
 """
 Modified for generating anytime prediction after
 a network is trained. 
-added FUNC_TYPE 109 for this.
 ModelSaver keep_freq=1 for this
 """
 # dataset selection
@@ -37,12 +36,15 @@ INIT_CHANNEL=16
 LOG_SELECT_METHOD=0
 LOG_ANN_SELECT_METHOD=0
 
+# DISTILL variable
+TEMPERATURE=8
+HARD_ONLY=False
+
 # ANN period
 NUM_UNITS_PER_STACK=2
 
 # TODO move this to utils
 # Control loss weight assignment 
-# Also hack: TODO remove hack 109 type is for partially stop grad
 FUNC_TYPE=5
 OPTIMAL_AT=-1
 EXP_BASE=2.0
@@ -66,10 +68,6 @@ def loss_weights(N):
         return anytime_loss.half_constant_half_optimal(N, -1)
     elif FUNC_TYPE == 8: # quater constant, half optimal
         return anytime_loss.quater_constant_half_optimal(N)
-    elif FUNC_TYPE == 109: # train anytime predictor after the final is fixed through no-backs
-        return anytime_loss.stack_loss_weights(N, 
-            NUM_UNITS_PER_STACK, 
-            anytime_loss.constant_weights)
     else:
         raise NameError('func type must be either 0: exponential or 1: square\
             or 2: optimal at --opt_at, or 3: exponential weight with base --base')
@@ -96,7 +94,9 @@ class Model(ModelDesc):
         total_units = NUM_RES_BLOCKS * self.n
         cost_weights = loss_weights(total_units) 
 
-        ls_K = np.sum(np.asarray(cost_weights) > 0)
+        mask_ann_indices = np.asarray(cost_weights) > 0
+        ls_K = np.sum(mask_ann_indices)
+        unit_idx_to_ann_idx = np.cumsum(mask_ann_indices) - 1
         if ls_K > 1:
             select_idx = tf.get_variable('select_idx', (), tf.int32,
                 initializer=tf.constant_initializer(ls_K-1), trainable=False)
@@ -124,45 +124,55 @@ class Model(ModelDesc):
             indices = [u_idx - e + 1 \
                 for e in diffs if u_idx - e + 1 >= 0 ]
             return indices
+
+        def feat_map_to_1x1_feat(feat):
+            ch_in = feat.get_shape().as_list()[1] 
+            l = Conv2D('conv1x1', feat, ch_in, kernel_shape=1)
+            l = BatchNorm('bn_f2p0', l)
+            l = tf.nn.relu(l)
+            l = GlobalAvgPooling('gap_1x1', l)
+            return l
                
         with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling, MaxPooling], 
                       data_format='NCHW'),\
                 argscope(Conv2D, nl=tf.identity, use_bias=False, kernel_shape=3, 
                          W_init=variance_scaling_initializer(mode='FAN_OUT')):
-            past_feats = []
-            prev_logits = None
             unit_idx = -1
-            anytime_idx = -1
-            wd_cost = 0
-            total_cost = 0
             # regularzation weight
             wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                               480000, 0.2, True)
-            l_merged_feats = []
-            for bi in range(NUM_RES_BLOCKS):
+
+            boundaries = [50000 * 100, 50000 * 150, 50000 * 200]
+            boundaries = [np.int64(boundary) for boundary in boundaries]
+            hard_rate = tf.train.piecewise_constant(get_global_step_var(), \
+                boundaries=boundaries, \
+                values=[1.0, 0.84, 0.67, 0.5])
+            for bi in list(range(NUM_RES_BLOCKS)):
                 ##### Transition / initial layer 
                 if bi == 0:
                     with tf.variable_scope('init_conv') as scope:
                         l = Conv2D('conv', image, self.init_channel) 
-                    past_feats.append(l)
+                        l_merged_feats = []
+                        l_feats = [l]
+                        ll_feats = [l_feats]
                 else:
-                    new_past_feats = []
-                    with tf.variable_scope('trans_{}'.format(bi)) as scope:
-                        for pfi, pf in enumerate(past_feats):
-                            l = BatchNorm('bn_{}_{}'.format(bi, pfi), pf)
+                    new_l_feats = []
+                    for pfi, pf in enumerate(l_feats):
+                        with tf.variable_scope('trans_{}_{}'.format(bi,pfi)) as scope:
+                            l = BatchNorm('bn'.format(bi, pfi), pf)
                             l = tf.nn.relu(l)
                             ch_in = l.get_shape().as_list()[1]
-                            l = Conv2D('conv_{}_{}'.format(bi, pfi), l, \
+                            l = Conv2D('conv'.format(bi, pfi), l, \
                                        ch_in // self.reduction_rate) 
                             l = tf.nn.relu(l)
                             l = AvgPooling('pool', l, 2)
-                            new_past_feats.append(l)
-                    past_feats = new_past_feats
+                            new_l_feats.append(l)
+                    l_feats = new_l_feats
+                    ll_feats.append(l_feats)
                 
-                ###### Dense block
-                for k in range(self.n):
+                ###### Dense block features
+                for k in list(range(self.n)):
                     unit_idx += 1
-                    cost_weight = cost_weights[unit_idx]
                     scope_name = 'dense{}.{:02d}'.format(bi, k)
                     is_last_node = k == self.n - 1 and bi == NUM_RES_BLOCKS - 1
                     with tf.variable_scope(scope_name) as scope:
@@ -170,8 +180,8 @@ class Model(ModelDesc):
                             selected_indices = list(range(unit_idx+1))
                         else:
                             selected_indices = log_select_indices(unit_idx)
-                        logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(unit_idx, len(past_feats), selected_indices))
-                        selected_feats = [past_feats[s_idx] for s_idx in selected_indices]
+                        logger.info("unit_idx = {}, len l_feats = {}, selected_feats: {}".format(unit_idx, len(l_feats), selected_indices))
+                        selected_feats = [l_feats[s_idx] for s_idx in selected_indices]
                         l = tf.concat(selected_feats, 1, name='concat')
                         #l = BatchNorm('bn0', l)
                         #l = tf.nn.relu(l)
@@ -181,52 +191,80 @@ class Model(ModelDesc):
                         merged_feats = tf.nn.relu(l)
                         l_merged_feats.append(merged_feats)
                         l = Conv2D('conv1', merged_feats, self.growth_rate)
-                        past_feats.append(l)
-                        
-                        if cost_weight > 0:
-                            #print "Stop gradient at {}".format(scope_name)
-                            #merged_feats = tf.stop_gradient(merged_feats)
-                            if not is_last_node and FUNC_TYPE == 109:
-                                l = tf.stop_gradient(l)
-                            l = BatchNorm('bn_pred', l)
+                        l_feats.append(l)
+
+                        if is_last_node:
+                            l = BatchNorm('bn_last', l)
                             l = tf.nn.relu(l)
-                            l = GlobalAvgPooling('gap', l)
-                            if LOG_ANN_SELECT_METHOD == 0:
-                                l_prev = GlobalAvgPooling('gap_prev', merged_feats)
-                                l = tf.concat([l, l_prev], 1, name='gap_concat')
-                            elif LOG_ANN_SELECT_METHOD == 1:
-                                l = l
-                            logits = FullyConnected('linear', l, out_dim=NUM_CLASSES, nl=tf.identity)
+                            merged_feats = tf.concat([l_merged_feats[-1], l], \
+                                                     1, name='concat')
+                            l_merged_feats.append(merged_feats)
+                    #end scope with dense{}{}
+                # end for each unit
+            #end for each dense block
+            
+            wd_cost = 0
+            total_cost = 0
+            prev_logits = None
+            # compute the final prediction first:
+            for unit_idx in list(reversed(range(total_units))):
+                cost_weight = cost_weights[unit_idx]        
+                is_last_node = unit_idx == total_units - 1
+                if cost_weight > 0:
+                    ann_idx = np.int32(unit_idx_to_ann_idx[unit_idx])
+                    print "ann_idx = {}, unit_idx = {}".format(ann_idx, unit_idx)
+                    scope_name = 'pred_{:03d}'.format(unit_idx)
+                    with tf.variable_scope(scope_name) as scope:
+                        merged_feats = l_merged_feats[unit_idx+1]
+                        l = feat_map_to_1x1_feat(merged_feats)
+                        logits = FullyConnected('linear', l, \
+                            out_dim=NUM_CLASSES, nl=tf.identity)
 
-                            if not is_last_node and FUNC_TYPE == 109:
-                                if prev_logits is not None:
-                                    logits += prev_logits
-                                prev_logits = tf.stop_gradient(logits)
-                            cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
-                            cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+                        # Distills:
+                        if is_last_node:
+                            target_logits = logits / TEMPERATURE
+                            target_prob = \
+                                tf.stop_gradient(tf.nn.softmax(target_logits, \
+                                    name='final_prob'))
+                            #target_prob = tf.Print(target_prob, [target_logits, target_prob])
+                            cost = \
+                                tf.nn.sparse_softmax_cross_entropy_with_logits(\
+                                    logits=target_logits, labels=label)
+                        else:
+                            cost_hard = tf.nn.sparse_softmax_cross_entropy_with_logits(\
+                                logits=logits, labels=label)
+                            if HARD_ONLY:
+                                cost = cost_hard
+                            else:
+                                cost_soft = \
+                                    tf.nn.softmax_cross_entropy_with_logits(\
+                                        logits=logits / TEMPERATURE, labels=target_prob)\
+                                    #* TEMPERATURE**2
+                                cost =  cost_soft * (1-hard_rate) + cost_hard * hard_rate
 
-                            wrong = prediction_incorrect(logits, label)
-                            tra_err = tf.reduce_mean(wrong, name='train_error')
+                        #cost = tf.Print(cost, [target_logits, target_prob])
 
-                            # because cost_weight >0, anytime_idx inc
-                            anytime_idx += 1
-                            add_weight = 0
-                            if ls_K > 1: # use SAMLOSS == 6 to sample weights
-                                add_weight = tf.cond(tf.equal(anytime_idx, select_idx),
-                                    lambda: tf.constant(cost_weights[-1], dtype=tf.float32),
-                                    lambda: tf.constant(0, dtype=tf.float32))
-                            total_cost += (cost_weight + add_weight) * cost
+                        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
-                            # cost_weight adjusted regularzation:
-                            wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W) 
+                        wrong = prediction_incorrect(logits, label)
+                        tra_err = tf.reduce_mean(wrong, name='train_error')
 
-                            print '{} {} {}'.format(bi, k, cost_weight)
+                        # because cost_weight >0, ann_idx inc
+                        add_weight = 0
+                        if ls_K > 1: # use SAMLOSS == 6 to sample weights
+                            add_weight = tf.cond(tf.equal(ann_idx, select_idx),
+                                lambda: tf.constant(cost_weights[-1], dtype=tf.float32),
+                                lambda: tf.constant(0, dtype=tf.float32))
+                        total_cost += (cost_weight + add_weight) * cost
 
-                            add_moving_summary(cost)
-                            add_moving_summary(tra_err)
+                        # cost_weight adjusted regularzation:
+                        wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W) 
+
+                        add_moving_summary(cost)
+                        add_moving_summary(tra_err)
                     # end var-scope of a unit
-                # end for each unit 
-            # end for each block
+                # end if cost_weight > 0 
+            # end for unit 
         # END argscope
 
         # regularize conv
@@ -281,7 +319,7 @@ def get_config():
     for bi in range(NUM_RES_BLOCKS):
         for ui in range(NUM_UNITS):
             unit_idx += 1
-            scope_name = 'dense{}.{:02d}/'.format(bi, ui)
+            scope_name = 'pred_{:03d}/'.format(unit_idx)
             if weights[unit_idx] > 0:
                 vcs.append(ClassificationError(\
                     wrong_tensor_name=scope_name+'incorrect_vector:0', 
@@ -332,6 +370,10 @@ if __name__ == '__main__':
                         type=int, default=LOG_SELECT_METHOD)
     parser.add_argument('--log_ann_method', help='LOG_ANN_SELECT_METHOD',
                         type=int, default=LOG_ANN_SELECT_METHOD)
+    parser.add_argument('--temperature', help='temperature for logits', 
+                        type=float, default=TEMPERATURE)
+    parser.add_argument('--hard_only', help='Whether to use hard target only',
+                        type=bool, default=HARD_ONLY)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=NUM_CLASSES)
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
@@ -355,6 +397,8 @@ if __name__ == '__main__':
     NUM_UNITS_PER_STACK = args.stack
     LOG_SELECT_METHOD = args.log_method
     LOG_ANN_SELECT_METHOD = args.log_ann_method
+    TEMPERATURE = args.temperature
+    HARD_ONLY = args.hard_only
     FUNC_TYPE = args.func_type
     EXP_BASE = args.base
     OPTIMAL_AT = args.opt_at
