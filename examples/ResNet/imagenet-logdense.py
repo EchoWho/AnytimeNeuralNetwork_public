@@ -267,7 +267,7 @@ def get_config():
         optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
             StatPrinter(),
-            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=10000),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=12),
             InferenceRunner(dataset_val,
                 [ScalarStats('cost')] + vcs),
             ScheduledHyperParamSetter('learning_rate',
@@ -344,7 +344,7 @@ if __name__ == '__main__':
     BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
 
     config = get_config()
-    if args.load:
+    if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = NR_GPU
     SyncMultiGPUTrainer(config).train()

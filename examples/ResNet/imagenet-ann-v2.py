@@ -301,7 +301,7 @@ def get_config():
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=0.01),
+            ModelSaver(checkpoint_dir=MODEL_DIR, keep_freq=12),
             InferenceRunner(dataset_val, vcs),
             ScheduledHyperParamSetter('learning_rate',
                                       [(1, 0.1), (30, 0.01), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
