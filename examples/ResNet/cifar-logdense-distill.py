@@ -36,6 +36,8 @@ INIT_CHANNEL=16
 LOG_SELECT_METHOD=0
 LOG_ANN_SELECT_METHOD=0
 
+ADDITIONAL_CONV=False
+
 # DISTILL variable
 TEMPERATURE=8
 HARD_ONLY=False
@@ -127,9 +129,10 @@ class Model(ModelDesc):
 
         def feat_map_to_1x1_feat(l):
             ch_in = l.get_shape().as_list()[1] 
-            #l = Conv2D('conv1x1', l, ch_in, kernel_shape=1)
-            #l = BatchNorm('bn_f2p0', l)
-            #l = tf.nn.relu(l)
+            if ADDITIONAL_CONV:
+                l = Conv2D('conv1x1', l, ch_in, kernel_shape=1)
+                l = BatchNorm('bn_f2p0', l)
+                l = tf.nn.relu(l)
             l = GlobalAvgPooling('gap_1x1', l)
             return l
                
@@ -370,6 +373,9 @@ if __name__ == '__main__':
                         type=int, default=LOG_SELECT_METHOD)
     parser.add_argument('--log_ann_method', help='LOG_ANN_SELECT_METHOD',
                         type=int, default=LOG_ANN_SELECT_METHOD)
+    parser.add_argument('--additional_conv', 
+        help='whether to use 1x1 conv b/f fully connected prediction', 
+        type=bool, default=ADDITIONAL_CONV)
     parser.add_argument('--temperature', help='temperature for logits', 
                         type=float, default=TEMPERATURE)
     parser.add_argument('--hard_only', help='Whether to use hard target only',
@@ -397,6 +403,7 @@ if __name__ == '__main__':
     NUM_UNITS_PER_STACK = args.stack
     LOG_SELECT_METHOD = args.log_method
     LOG_ANN_SELECT_METHOD = args.log_ann_method
+    ADDITIONAL_CONV = args.additional_conv
     TEMPERATURE = args.temperature
     HARD_ONLY = args.hard_only
     FUNC_TYPE = args.func_type
