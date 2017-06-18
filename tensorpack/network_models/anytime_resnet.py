@@ -248,7 +248,7 @@ class AnytimeResnet(ModelDesc):
                 ef = BatchNorm('bn2', ef)
                 l = l_feats[w]
                 if increase_dim:
-                    l = AvgPooling('pool', l, 2)
+                    l = AvgPooling('pool', l, shape=2, stride=2)
                     l = tf.pad(l, [[0,0], [in_channel//2, in_channel//2], [0,0], [0,0]])
                 ef += l
                 l_end_feats.append(ef)
@@ -294,21 +294,17 @@ class AnytimeResnet(ModelDesc):
                     merged_feats = l
                 else:
                     merged_feats = tf.concat([merged_feats, l], 1, name='concat') 
-                l = Conv2D('conv1x1_0', merged_feats, ch_base, 1, nl=BNReLU)
-                l = Conv2D('conv3x3_1', l, ch_base, 3, nl=BNReLU)
-                if stride > 1:
-                    l = MaxPooling('pool_12', l, 1, stride=stride) 
-                l = Conv2D('conv1x1_2', l, ch_base*4, 1)
+                l = (LinearWrap(merged_feats)
+                    .Conv2D('conv1x1_0', ch_base, 1, nl=BNReLU)
+                    .Conv2D('conv3x3_1', ch_base, 3, stride=stride, nl=BNReLU)
+                    .Conv2D('conv1x1_2', ch_base*4, 1)())
                 l = BatchNorm('bn_3', l)
 
                 shortcut = l_feats[w]
-                if ch_in_to_ch_base != 4:
-                    # first residual unit of the first block
-                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, 1)
-                    if stride > 1:
-                        # first residual unit of a non-first block
-                        shortcut = MaxPooling('pool_12_short', shortcut, 1, stride)
-                    shortcut = BatchNorm('bn_shortcut', shortcut)
+                if ch_in_to_ch_base < 4:
+                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, \
+                                      1, stride=stride)
+                    shortcut = BatchNorm('bn_short', shortcut)
                 l = l + shortcut
                 l_new_feats.append(l)
             # end var scope
@@ -391,7 +387,7 @@ class AnytimeResnet(ModelDesc):
                         assert self.resnet_config.s_type == 'imagenet'
                         l = Conv2D('conv0', image, self.init_channel,\
                                    7, stride=2, nl=BNReLU)
-                        l = MaxPooling('pool0', l, 3, 2, padding='SAME')
+                        l = MaxPooling('pool0', l, shape=3, stride=2, padding='SAME')
                     l_feats.append(l)
 
             wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
