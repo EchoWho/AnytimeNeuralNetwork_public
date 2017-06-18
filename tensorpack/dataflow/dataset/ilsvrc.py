@@ -634,7 +634,8 @@ class ILSVRC12TFRecord(RNGDataFlow):
                 raise Exception("Expect there is a default session")
 
             # label -1 because imagenet default labels are 1 based. (0 is background)
-            yield [im, label -1]
+            offset = 1
+            yield [im, label - offset]
 
     @staticmethod
     def decode_jpeg(image_buffer, scope=None):

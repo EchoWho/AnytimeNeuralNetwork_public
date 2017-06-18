@@ -10,19 +10,65 @@ from tensorpack.utils import anytime_loss, logger, utils, fs
 from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
 from tensorflow.contrib.layers import variance_scaling_initializer
+from collections import namedtuple
 
-NUM_RES_BLOCKS = 3
+
+"""
+    cfg is a tuple that contains
+    ([ <list of n_units per block], <b_type>, <start_type>)
+
+    n_units_per_block is a list of int
+    b_type is in ["basic", "bottleneck"]
+    start_type is in ["basic", "imagenet"]
+"""
+ResnetConfig = namedtuple('Config', ['n_units_per_block', 'b_type', 's_type'])
 
 
-def uniform_cfg(n_units_per_block, n_blocks=NUM_RES_BLOCKS):
-    return ([n_units_per_block] * n_blocks, residual)
+def compute_cfg(options):
+    if options.depth is not None:
+        if options.depth == 18:
+            n_units_per_block = [2,2,2,2]
+            b_type = 'basic'
+        elif options.depth == 34:
+            n_units_per_block = [3,4,6,3]
+            b_type = 'basic'
+        elif options.depth == 50:
+            n_units_per_block = [3,4,6,3]
+            b_type = 'bottleneck'
+        elif options.depth == 101:
+            n_units_per_block = [3,4,23,3]
+            b_type = 'bottleneck'
+        elif options.depth == 152:
+            n_units_per_block = [3,8,36,3]
+            b_type = 'bottleneck'
+        else:
+            raise ValueError('depth {} must be in [18, 34, 50, 101, 152]'\
+                .format(options.depth))
+        s_type = 'imagenet' 
+        return ResnetConfig(n_units_per_block, b_type, s_type)
+
+    else: #option.n is set
+        return ResnetConfig([options.num_units]*options.n_blocks, 'basic', 'basic')
+
+
+def compute_total_units(options):
+    config = compute_cfg(options)
+    return sum(config.n_units_per_block) * options.width
+
 
 def parser_add_arguments(parser):
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=128)
-    parser.add_argument('-n', '--num_units',
+
+    depth_group = parser.add_mutually_exclusive_group(required=True)
+    depth_group.add_argument('-n', '--num_units',
                         help='number of units in each stage',
-                        type=int, default=5)
+                        type=int)
+    depth_group.add_argument('-d', '--depth',
+                        help='depth of the network in number of conv',
+                        type=int)
+    parser.add_argument('--n_blocks', help='Number of residual blocks',
+                        type=int, default=3)
     parser.add_argument('-w', '--width',
                         help='width of the network',
                         type=int, default=1)
@@ -35,6 +81,9 @@ def parser_add_arguments(parser):
                         type=int, default=1)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=10)
+    parser.add_argument('--prediction_1x1_conv', 
+                        help='whether use 1x1 before fc to predict',
+                        type=bool, default=False)
     parser.add_argument('--stop_gradient', help='Whether to stop gradients.',
                         type=bool, default=False)
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
@@ -57,37 +106,37 @@ def parser_add_arguments(parser):
                         type=int, default=-1)
     return parser
 
+
+
 class AnytimeResnet(ModelDesc):
-    """
-    """
-    def __init__(self, n, width, init_channel, num_classes, 
-                 weights, input_size, args):
-        """
-        """
+    def __init__(self, input_size, args):
         super(AnytimeResnet, self).__init__()
-        self.n = n
-        self.width = width
-        self.init_channel = init_channel
-        self.num_classes = num_classes
-        self.weights = weights
-        self.input_size = input_size
-        self.select_idx_name = "select_idx"
-
         self.options = args
-        self.options.ls_method = self.options.samloss
+        self.input_size = input_size
+        self.resnet_config = compute_cfg(self.options)
+        self.total_units = compute_total_units(self.options)
 
-        self.total_units = AnytimeResnet.compute_total_units(NUM_RES_BLOCKS, 
-            self.n, self.width)
+        # Ugly :(
+        self.init_channel = args.init_channel
+        if self.resnet_config.s_type == 'imagenet' and self.init_channel != 64:
+            logger.warn('Resnet imagenet requires 64 initial channels')
+
+        self.n_blocks = len(self.resnet_config.n_units_per_block) 
+        self.width = args.width
+        self.num_classes = args.num_classes
+
+        self.weights = anytime_loss.loss_weights(self.total_units, args)
+        logger.info('weights: {}'.format(self.weights))
+
+        # special names
+        self.select_idx_name = "select_idx"
+        self.options.ls_method = self.options.samloss
 
     def _get_inputs(self):
         return [InputDesc(tf.float32, \
                     [None, self.input_size, self.input_size, 3], 'input'),
                 InputDesc(tf.int32, [None], 'label')]
     
-    @staticmethod
-    def compute_total_units(n_blocks, n, width):
-        return n_blocks * n * width
-
     def compute_scope_basename(self, layer_idx):
         return "layer{:03d}".format(layer_idx)
 
@@ -96,8 +145,8 @@ class AnytimeResnet(ModelDesc):
         total_units = self.total_units
         unit_idx = -1
         layer_idx=-1
-        for bi in range(NUM_RES_BLOCKS):
-            for k in range(self.n):
+        for n_block in self.resnet_config.n_units_per_block:
+            for k in range(n_block):
                 layer_idx += 1
                 for wi in range(self.width):
                     unit_idx += 1
@@ -142,7 +191,7 @@ class AnytimeResnet(ModelDesc):
         return online_learn_cbs
 
 
-    def residual(name, l_feats, increase_dim=False):
+    def residual(self, name, l_feats, increase_dim=False):
         """
         Basic residual function for WANN: for index w, 
         the input feat is the concat of all featus upto and including 
@@ -181,7 +230,7 @@ class AnytimeResnet(ModelDesc):
                     merged_feats = l
                 else:
                     merged_feats = tf.concat([merged_feats, l], 1, name='concat_mf')
-                l = Conv2D('conv1', merged_feats, out_channel, stride=stride1)
+                l = Conv2D('conv1', merged_feats, out_channel, 3, stride=stride1)
                 l = BatchNorm('bn1', l)
                 l = tf.nn.relu(l)
                 l_mid_feats.append(l)
@@ -194,7 +243,7 @@ class AnytimeResnet(ModelDesc):
                     merged_feats = l
                 else: 
                     merged_feats = tf.concat([merged_feats, l], 1, name='concat_ef')
-                ef = Conv2D('conv2', merged_feats, out_channel)
+                ef = Conv2D('conv2', merged_feats, out_channel, 3)
                 # The second conv need to be BN before addition.
                 ef = BatchNorm('bn2', ef)
                 l = l_feats[w]
@@ -206,7 +255,7 @@ class AnytimeResnet(ModelDesc):
         return l_end_feats
 
 
-    def residual_bottleneck(name, l_feats, ch_in_to_ch_base=4):
+    def residual_bottleneck(self, name, l_feats, ch_in_to_ch_base=4):
         """
         Bottleneck resnet unit for WANN. Input of index w, is 
         the concat of l_feats[0], ..., l_feats[w]. 
@@ -245,19 +294,21 @@ class AnytimeResnet(ModelDesc):
                     merged_feats = l
                 else:
                     merged_feats = tf.concat([merged_feats, l], 1, name='concat') 
-                l = (LinearWrap(merged_feats)
-                    .Conv2D('conv1x1_0', ch_base, kernel_shape=1, nl=BNReLU)
-                    .Conv2D('conv3x3_1', ch_base, stride=stride, nl=BNReLU) 
-                    .Conv2D('conv1x1_2', ch_base*4, kernel_shape=1, nl=BatchNorm)())
+                l = Conv2D('conv1x1_0', merged_feats, ch_base, 1, nl=BNReLU)
+                l = Conv2D('conv3x3_1', l, ch_base, 3, nl=BNReLU)
+                if stride > 1:
+                    l = MaxPooling('pool_12', l, 1, stride=stride) 
+                l = Conv2D('conv1x1_2', l, ch_base*4, 1)
+                l = BatchNorm('bn_3', l)
 
                 shortcut = l_feats[w]
-                if ch_in_to_ch_base == 1:
+                if ch_in_to_ch_base != 4:
                     # first residual unit of the first block
-                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, kernel_shape=1)
-                elif ch_in_to_ch_base == 2:
-                    # first residual unit of a block
-                    shortcut = AvgPooling('pool', shortcut, stride)
-                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, kernel_shape=1)
+                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, 1)
+                    if stride > 1:
+                        # first residual unit of a non-first block
+                        shortcut = MaxPooling('pool_12_short', shortcut, 1, stride)
+                    shortcut = BatchNorm('bn_shortcut', shortcut)
                 l = l + shortcut
                 l_new_feats.append(l)
             # end var scope
@@ -278,17 +329,18 @@ class AnytimeResnet(ModelDesc):
             for w in range(self.width):
                 with tf.variable_scope(name+'.'+str(w)+'.pred') as scope:
                     l = tf.nn.relu(l_feats[w])
-                    if self.options.prediction_1x1_conv:
-                        ch_in = l.get_shape().as_list()[1]
-                        l = Conv2D('conv1x1', l, ch_in, kernel_shape=1)
-                        l = BNReLU('bnrelu1x1', l)
-                    l = GlobalAvgPooling('gap', l)
                     if w == 0:
                         merged_feats = l
                     else:
                         merged_feats = tf.concat([merged_feats, l], 1, name='concat')
-                    logits = FullyConnected('linear', merged_feats, out_dim, \
-                                            nl=tf.identity)
+                    l = merged_feats
+                    if self.options.prediction_1x1_conv:
+                        ch_in = l.get_shape().as_list()[1]
+                        l = Conv2D('conv1x1', l, ch_in, 1)
+                        l = BNReLU('bnrelu1x1', l)
+                    l = GlobalAvgPooling('gap', l)
+
+                    logits = FullyConnected('linear', l, out_dim, nl=tf.identity)
                     var_list.append(logits.variables.W)
                     var_list.append(logits.variables.b)
                     #if w != 0:
@@ -323,17 +375,23 @@ class AnytimeResnet(ModelDesc):
                                    name='weight_{:02d}'.format(i))
                 add_moving_summary(weight_i)
 
-        with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling], 
+        with argscope([Conv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format='NCHW'), \
-             argscope(Conv2D, kernel_shape=3, nl=tf.identity, use_bias=False, 
+             argscope(Conv2D, nl=tf.identity, use_bias=False, 
                       W_init=variance_scaling_initializer(mode='FAN_OUT')):
             l_feats = [] 
             ll_feats = []
             for w in range(self.width):
                 with tf.variable_scope('init_conv'+str(w)) as scope:
-                    l = Conv2D('conv0', image, self.init_channel) 
-                    #l = BatchNorm('bn0', l)
-                    #l = tf.nn.relu(l)
+                    if self.resnet_config.s_type == 'basic':
+                        l = Conv2D('conv0', image, self.init_channel, 3) 
+                        #l = BatchNorm('bn0', l)
+                        #l = tf.nn.relu(l)
+                    else:
+                        assert self.resnet_config.s_type == 'imagenet'
+                        l = Conv2D('conv0', image, self.init_channel,\
+                                   7, stride=2, nl=BNReLU)
+                        l = MaxPooling('pool0', l, 3, 2, padding='SAME')
                     l_feats.append(l)
 
             wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
@@ -352,16 +410,28 @@ class AnytimeResnet(ModelDesc):
             online_learn_rewards = []
             last_cost = None
             max_reward = 0.0
-            for res_block_i in range(NUM_RES_BLOCKS):
-                for k in range(self.n):
+            for res_block_i, n_block in \
+                enumerate(self.resnet_config.n_units_per_block):
+                for k in range(n_block):
                     layer_idx += 1
                     scope_name = self.compute_scope_basename(layer_idx)
-                    l_feats = residual(scope_name, l_feats, \
-                                       increase_dim=(k==0 and res_block_i > 0))
+                    if self.resnet_config.b_type == 'basic':
+                        l_feats = self.residual(scope_name, l_feats, \
+                            increase_dim=(k==0 and res_block_i > 0))
+                    else:
+                        assert self.resnet_config.b_type == 'bottleneck'
+                        ch_in_to_ch_base = 4
+                        if k == 0:
+                            ch_in_to_ch_base = 2
+                            if res_block_i == 0:
+                                ch_in_to_ch_base = 1
+                        l_feats = self.residual_bottleneck(scope_name, l_feats, \
+                            ch_in_to_ch_base)
                     ll_feats.append(l_feats)
 
                     # In case that we need to stop gradients
-                    is_last_row = res_block_i == NUM_RES_BLOCKS-1 and k==self.n-1
+                    is_last_row = \
+                        res_block_i == self.n_blocks - 1 and k==n_block-1
                     if self.options.stop_gradient and not is_last_row:
                         l_new_feats = []
                         for fi, f in enumerate(l_feats):
@@ -371,7 +441,7 @@ class AnytimeResnet(ModelDesc):
                                    + self.options.sg_gamma*f
                             l_new_feats.append(f)
                         l_feats = l_new_feats
-                # end for each k in self.n
+                # end for each k in n_block
             #end for each block
             
             unit_idx = -1
