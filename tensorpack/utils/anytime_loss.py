@@ -5,7 +5,8 @@ __all__ = ['sieve_loss_weights',  'eann_sieve',
     'exponential_weights', 'at_func', 
     'constant_weights', 'stack_loss_weights',
     'half_constant_half_optimal', 'linear',
-    'quater_constant_half_optimal']
+    'quater_constant_half_optimal',
+    'loss_weights']
 
 def sieve_loss_weights(N):
     if N == 1:
@@ -92,3 +93,29 @@ def stack_loss_weights(N, stack, method=sieve_loss_weights):
     weights = np.zeros(N, dtype=np.float32)
     weights[(N-1)%stack:N:stack] = method(1+(N-1)//stack)
     return weights
+
+def loss_weights(N, args):
+    FUNC_TYPE = args.func_type
+    if FUNC_TYPE == 0: # exponential spacing
+        return at_func(N, func=lambda x:2**x)
+    elif FUNC_TYPE == 1: # square spacing
+        return at_func(N, func=lambda x:x**2)
+    elif FUNC_TYPE == 2: #optimal at ?
+        return optimal_at(N, args.opt_at)
+    elif FUNC_TYPE == 3: #exponential weights
+        return exponential_weights(N, base=args.exponential_base)
+    elif FUNC_TYPE == 4: #constant weights
+        return constant_weights(N) 
+    elif FUNC_TYPE == 5: # sieve with stack
+        return stack_loss_weights(N, args.stack)
+    elif FUNC_TYPE == 6: # linear
+        return linear(N, a=0.25, b=1.0)
+    elif FUNC_TYPE == 7: # half constant, half optimal at -1
+        return half_constant_half_optimal(N, -1)
+    elif FUNC_TYPE == 8: # quater constant, half optimal
+        return quater_constant_half_optimal(N)
+    else:
+        raise NameError('func type must be either 0: exponential or 1: square\
+            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
+
+
