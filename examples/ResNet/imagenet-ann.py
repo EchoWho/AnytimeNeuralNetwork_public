@@ -11,231 +11,26 @@ import os
 import multiprocessing
 
 import tensorflow as tf
-from tensorflow.contrib.layers import variance_scaling_initializer
 from tensorpack import *
-from tensorpack.utils.stats import RatioCounter
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.models import Exp3,HalfEndHalfExp3,RandSelect,RWM
-from tensorpack.utils import anytime_loss
+from tensorpack.utils import logger
+from tensorpack.utils import utils
+from tensorpack.utils.stats import RatioCounter
 
-"""
-Training code of Pre-Activation version of ResNet on ImageNet.
-It mainly follows the setup in fb.resnet.torch, and get similar performance.
-"""
+from tensorpack.network_models import anytime_resnet
+from tensorpack.network_models.anytime_resnet import AnytimeResnet
 
-TOTAL_BATCH_SIZE = 256
-BATCH_SIZE=None
-NR_GPU=None
-INPUT_SHAPE = 224
-DEPTH = None
-
-MODEL_DIR=None
-
-# For other loss weight assignments
-FUNC_TYPE=5
-OPTIMAL_AT=-1
-EXP_BASE=2.0
-
-# anytime loss skip (num units per stack/prediction)
-NUM_UNITS_PER_STACK=2
-
-# Random loss sample params
-##0: nothing; 1: rand; 2:exp3; 3:HEHE3
-SAMLOSS=0  
-EXP3_GAMMA=0.5
-SUM_RAND_RATIO=2.0
-
-TRACK_GRADIENTS=False
-
-IS_TOY=False
-
-def loss_weights(N):
-    if FUNC_TYPE == 0: # exponential spacing
-        return anytime_loss.at_func(N, func=lambda x:2**x)
-    elif FUNC_TYPE == 1: # square spacing
-        return anytime_loss.at_func(N, func=lambda x:x**2)
-    elif FUNC_TYPE == 2: #optimal at ?
-        return anytime_loss.optimal_at(N, OPTIMAL_AT)
-    elif FUNC_TYPE == 3: #exponential weights
-        return anytime_loss.exponential_weights(N, base=EXP_BASE)
-    elif FUNC_TYPE == 4: #constant weights
-        return anytime_loss.constant_weights(N) 
-    elif FUNC_TYPE == 5: # sieve with stack
-        return anytime_loss.stack_loss_weights(N, NUM_UNITS_PER_STACK)
-    elif FUNC_TYPE == 6: # linear
-        return anytime_loss.linear(N, a=0.25, b=1.0)
-    elif FUNC_TYPE == 7: # half constant, half optimal at -1
-        return anytime_loss.half_constant_half_optimal(N, -1)
-    elif FUNC_TYPE == 8: # quater constant, half optimal
-        return anytime_loss.quater_constant_half_optimal(N)
-    else:
-        raise NameError('func type must be either 0: exponential or 1: square\
-            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
-
-class Model(ModelDesc):
-    def _get_inputs(self):
-        return [InputVar(tf.float32, [None, INPUT_SHAPE, INPUT_SHAPE, 3], 'input'),
-                InputVar(tf.int32, [None], 'label')]
-
-    def _build_graph(self, inputs):
-        image, label = inputs
-
-        def shortcut(l, n_in, n_out, stride):
-            if n_in != n_out:
-                return Conv2D('convshortcut', l, n_out, 1, stride=stride)
-            else:
-                return l
-
-        def basicblock(l, ch_out, stride, preact):
-            ch_in = l.get_shape().as_list()[-1]
-            if preact == 'both_preact':
-                l = BNReLU('preact', l)
-                input = l
-            elif preact != 'no_preact':
-                input = l
-                l = BNReLU('preact', l)
-            else:
-                input = l
-            l = Conv2D('conv1', l, ch_out, 3, stride=stride, nl=BNReLU)
-            l = Conv2D('conv2', l, ch_out, 3)
-            return l + shortcut(input, ch_in, ch_out, stride)
-
-        def bottleneck(l, ch_out, stride, preact):
-            ch_in = l.get_shape().as_list()[-1]
-            if preact == 'both_preact':
-                l = BNReLU('preact', l)
-                input = l
-            elif preact != 'no_preact':
-                input = l
-                l = BNReLU('preact', l)
-            else:
-                input = l
-            l = Conv2D('conv1', l, ch_out, 1, nl=BNReLU)
-            l = Conv2D('conv2', l, ch_out, 3, stride=stride, nl=BNReLU)
-            l = Conv2D('conv3', l, ch_out * 4, 1)
-            return l + shortcut(input, ch_in, ch_out * 4, stride)
-
-        def layers(l, layername, block_func, features, count, stride, first=False):
-            with tf.variable_scope(layername):
-                ls = []
-                with tf.variable_scope('block0'):
-                    l = block_func(l, features, stride,
-                                   'no_preact' if first else 'both_preact')
-                    ls.append(l)
-                for i in range(1, count):
-                    with tf.variable_scope('block{}'.format(i)):
-                        l = block_func(l, features, 1, 'default')
-                        ls.append(l)
-                return ls
-
-        def compute_logits(l, layername):
-            with tf.variable_scope(layername):
-                logits = (LinearWrap(l)
-                      .BNReLU('bnlast')
-                      .GlobalAvgPooling('gap')
-                      .FullyConnected('linear', 1000, nl=tf.identity)())
-            return logits
-
-        cfg = {
-            18: ([2, 2, 2, 2], basicblock),
-            34: ([3, 4, 6, 3], basicblock),
-            50: ([3, 4, 6, 3], bottleneck),
-            101: ([3, 4, 23, 3], bottleneck)
-        }
-        defs, block_func = cfg[DEPTH]
-        cfg_N = {18:8, 34:16, 50:16, 101:33}
-        N = cfg_N[DEPTH]
-
-        with argscope(Conv2D, nl=tf.identity, use_bias=False,
-                      W_init=variance_scaling_initializer(mode='FAN_OUT')):
-            
-            l_preprocess = (LinearWrap(image)
-                      .Conv2D('conv0', 64, 7, stride=2, nl=BNReLU)
-                      .MaxPooling('pool0', shape=3, stride=2, padding='SAME')())
-            ls_grp0 = layers(l_preprocess, 'group0', block_func, 64, defs[0], 1, first=True)
-            ls_grp1 = layers(ls_grp0[-1], 'group1', block_func, 128, defs[1], 2)
-            ls_grp2 = layers(ls_grp1[-1], 'group2', block_func, 256, defs[2], 2)
-            ls_grp3 = layers(ls_grp2[-1], 'group3', block_func, 512, defs[3], 2)
-
-        ls = ls_grp0 + ls_grp1 + ls_grp2 + ls_grp3 
-        assert N == len(ls), N
-        
-        weights = loss_weights(N)
-        logger.info("sampling loss with method {}".format(SAMLOSS))
-        if SAMLOSS > 0:
-            ls_K = np.sum(np.asarray(weights) > 0)
-            if SAMLOSS == 1:
-                loss_selector = RandSelect('rand', ls_K)
-            elif SAMLOSS == 2:
-                loss_selector = Exp3('exp3', ls_K, EXP3_GAMMA) 
-            elif SAMLOSS == 3:
-                loss_selector = HalfEndHalfExp3('hehe3', ls_K, EXP3_GAMMA)
-            elif SAMLOSS == 4:
-                loss_selector = RWM('rwm', ls_K, EXP3_GAMMA)
-            else:
-                raise Exception("Undefined loss selector")
-            ls_i, ls_p = loss_selector.sample()
-            for i in range(ls_K):
-                weight_i = tf.cast(tf.equal(ls_i, i), tf.float32, name='weight_{}'.format(i))
-                add_moving_summary(weight_i)
-
-        loss = 0
-        anytime_idx = 0
-        for i in range(N):
-            if weights[i] > 0:
-                anytime_idx += 1
-                with tf.variable_scope('pred_{:02d}'.format(i)) as scope:
-                    logits = compute_logits(ls[i], 'logits')
-                    lossi = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
-                    lossi = tf.reduce_mean(lossi, name='xentropy-loss')
-
-                    wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
-                    add_moving_summary(tf.reduce_mean(wrong, name='train-error-top1'))
-
-                    wrong = prediction_incorrect(logits, label, 5, name='wrong-top5')
-                    add_moving_summary(tf.reduce_mean(wrong, name='train-error-top5'))
-
-                add_weight = 0
-                if SAMLOSS in [1,2,3]:
-                    def rand_weight_and_update_ls(loss=lossi):
-                        gs = tf.gradients(loss, tf.trainable_variables()) 
-                        reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
-                        #reward /= np.float32(ls_K - anytime_idx + 1)
-                        #reward = loss / np.float32(ls_K - anytime_idx + 2)
-                        #reward = tf.Print(reward, [reward], "reward")
-                        update_ret = loss_selector.update(ls_i, ls_p, reward)
-                        with tf.control_dependencies([update_ret]):
-                            add_weight = tf.constant(self.weights[-1] * 2.0, dtype=tf.float32)
-                        return add_weight
-                    add_weight = tf.cond(tf.equal(anytime_idx-1, ls_i), 
-                        lambda: rand_weight_and_update_ls(), lambda: tf.zeros(()))
-                if TRACK_GRADIENTS or SAMLOSS == 4:
-                    gs = tf.gradients(lossi, tf.trainable_variables())
-                    reward =  tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None], 
-                                       name='l2_grad_{}'.format(anytime_idx-1))
-                    reward /= np.float32(ls_K - anytime_idx + 1)
-                    if SAMLOSS == 4: # RWM
-                        #reward = tf.Print(reward, [reward], "reward")
-                        update_ret = loss_selector.update(ls_i, reward)
-                        with tf.control_dependencies([update_ret]):
-                            add_weight = tf.zeros(())
-                    add_moving_summary(reward)
-                loss += (weights[i] + add_weight / SUM_RAND_RATIO)* lossi
-
-        wd_cost = regularize_cost('.*/W', l2_regularizer(1e-4), name='l2_regularize_loss')
-        loss = tf.identity(loss, name='sum_loss')
-        add_moving_summary(loss, wd_cost)
-        self.cost = tf.add_n([loss, wd_cost], name='cost')
-
+args = None
+INPUT_SIZE = 224
 
 def get_data(train_or_test):
     isTrain = train_or_test == 'train'
     ds = dataset.ILSVRC12TFRecord(args.data_dir, 
                                   train_or_test, 
-                                  BATCH_SIZE, 
-                                  height=INPUT_SHAPE, 
-                                  width=INPUT_SHAPE)
+                                  args.batch_size // args.nr_gpu, 
+                                  height=INPUT_SIZE, 
+                                  width=INPUT_SIZE)
     #image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
     #image_std = np.array([0.229, 0.224, 0.225], dtype='float32')
     #imgaug.Saturation(0.4)
@@ -250,49 +45,36 @@ def get_data(train_or_test):
 
 def get_config():
     # prepare dataset
-    if IS_TOY:
+    if args.is_toy:
         dataset_train = get_data('toy_train')
         dataset_val = get_data('toy_validation')
     else:
         dataset_train = get_data('train')
         dataset_val = get_data('validation')
-    steps_per_epoch = dataset_train.size() // NR_GPU
+    steps_per_epoch = dataset_train.size() // args.nr_gpu
 
-    vcs = []
-    cfg_N = { 18:8, 34:16, 50:16, 101:33 }
-    N = cfg_N[DEPTH]
-    weights = loss_weights(N)
-    logger.info("weights: {}".format(weights))
-    unit_idx = 0
-    for i in range(N):
-        if weights[i] > 0:
-            scope_name = 'pred_{:02d}/'.format(i)
-            vcs.extend([
-                ClassificationError(scope_name+'wrong-top1', 
-                                    scope_name+'val-error-top1'),
-                ClassificationError(scope_name+'wrong-top5', 
-                                    scope_name+'val-error-top5')])
-
-    lr = get_scalar_var('learning_rate', 0.1, summary=True)
+    model=AnytimeResnet(INPUT_SIZE, args)
+    classification_cbs = model.compute_classification_callbacks()
+    loss_select_cbs = model.compute_loss_select_callbacks()
     return TrainConfig(
         dataflow=dataset_train,
-        optimizer=tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True),
         callbacks=[
-            ModelSaver(checkpoint_dir=MODEL_DIR),
-            InferenceRunner(dataset_val, vcs),
+            ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
+            InferenceRunner(dataset_val, classification_cbs),
             ScheduledHyperParamSetter('learning_rate',
-                                      [(30, 1e-2), (60, 1e-3), (85, 1e-4), (95, 1e-5)]),
+                [(1, 0.05), (10, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]),
             HumanHyperParamSetter('learning_rate'),
-        ],
-        model=Model(),
+        ] + loss_select_cbs,
+        model=model,
         steps_per_epoch=steps_per_epoch,
-        max_epoch=110,
+        max_epoch=128,
     )
 
 def eval_on_ILSVRC12(model_file, data_dir):
     ds = get_data('val')
+    model = AnytimeResnet(INPUT_SIZE, args)
     pred_config = PredictConfig(
-        model=Model(),
+        model=model,
         session_init=get_model_loader(model_file),
         input_names=['input', 'label'],
         output_names=['wrong-top1', 'wrong-top5']
@@ -308,68 +90,31 @@ def eval_on_ILSVRC12(model_file, data_dir):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    #parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
-    parser.add_argument('--data_dir', help='ILSVRC dataset dir')
+    parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly')
     parser.add_argument('--log_dir', help='log_dir for stdout')
     parser.add_argument('--model_dir', help='dir for saving models')
     parser.add_argument('--load', help='load model')
-    parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=-1)
-    parser.add_argument('--batch_size', help='batch_size', type=int, default=TOTAL_BATCH_SIZE)
-    parser.add_argument('-f', '--func_type', help='type of loss weight', 
-                        type=int, default=FUNC_TYPE)
-    parser.add_argument('-s', '--stack', 
-                        help='number of units per stack, \
-                              i.e., number of units per prediction',
-                        type=int, default=NUM_UNITS_PER_STACK)
-    parser.add_argument('-d', '--depth', help='resnet depth',
-                        type=int, default=18, choices=[18, 34, 50, 101])
-    parser.add_argument('--opt_at', help='Optimal at', 
-                        type=int, default=OPTIMAL_AT)
+    parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--samloss', help='Method to Sample losses to update',
-                        type=int, default=SAMLOSS)
-    parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
-                        type=np.float32, default=EXP3_GAMMA)
-    parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
-                        type=np.float32, default=SUM_RAND_RATIO)
-    parser.add_argument('--track_grads', help='Whether to track gradient l2 of each loss',
-                        type=bool, default=TRACK_GRADIENTS)
-    parser.add_argument('--is_toy', help='Whether to have data size of 1024',
-                        type=bool, default=IS_TOY)
-
+    parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
+                        type=bool, default=False)
+    anytime_resnet.parser_add_arguments(parser)
     args = parser.parse_args()
-    # directory setup
-    MODEL_DIR = args.model_dir
-    logger.auto_set_dir(log_root=args.log_dir)
-
-    TOTAL_BATCH_SIZE = args.batch_size
-    FUNC_TYPE = args.func_type
-    NUM_UNITS_PER_STACK = args.stack
-    DEPTH = args.depth
-    OPTIMAL_AT = args.opt_at
-
-    SAMLOSS = args.samloss
-    EXP3_GAMMA = args.exp_gamma
-    SUM_RAND_RATIO = args.sum_rand_ratio
     
-    TRACK_GRADIENTS = args.track_grads
-    IS_TOY = args.is_toy
+    assert args.init_channel == 64
+    assert args.num_classes == 1000
+
+    # directory setup
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
 
     #if args.eval:
     #    BATCH_SIZE = 128    # something that can run on one gpu
     #    eval_on_ILSVRC12(args.load, args.data_dir)
     #    sys.exit()
 
-    NR_GPU = 1
-    if os.environ.get('CUDA_VISIBLE_DEVICES') is not None:
-        gpus = os.environ['CUDA_VISIBLE_DEVICES']
-        NR_GPU = len(gpus.split(','))
-    if args.nr_gpu > 0:
-        NR_GPU = args.nr_gpu
-    BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
-
     config = get_config()
-    if args.load:
+    if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
-    config.nr_tower = NR_GPU
+    config.nr_tower = args.nr_gpu
     SyncMultiGPUTrainer(config).train()
