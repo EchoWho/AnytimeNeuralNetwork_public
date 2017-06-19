@@ -131,6 +131,8 @@ class AnytimeResnet(ModelDesc):
         # special names
         self.select_idx_name = "select_idx"
         self.options.ls_method = self.options.samloss
+        self.options.require_rewards = self.options.samloss < 6 and \
+            self.options.samloss > 0
 
     def _get_inputs(self):
         return [InputDesc(tf.float32, \
@@ -172,6 +174,11 @@ class AnytimeResnet(ModelDesc):
             elif self.options.ls_method == 6:
                 online_learn_cb = FixedDistributionCPU(ls_K, select_idx_name, 
                     self.weights[self.weights>0])
+            elif self.options.ls_method == 1000:
+                # custom schedule. ls_K will be initiated for use.
+                # set the cb to be None to force use to give 
+                # a custom schedule/selector cb
+                online_learn_cb = None
             else:    
                 gamma = self.options.exp3_gamma
                 if self.options.ls_method == 1:
@@ -316,50 +323,6 @@ class AnytimeResnet(ModelDesc):
         image, label = inputs
         image = tf.transpose(image, [0,3,1,2])
 
-        def predictions_and_losses(name, l_feats, out_dim, label):
-            l_logits = []
-            var_list = []
-            l_costs = []
-            l_wrong = []
-            l_wrong5 = []
-            for w in range(self.width):
-                with tf.variable_scope(name+'.'+str(w)+'.pred') as scope:
-                    l = tf.nn.relu(l_feats[w])
-                    if w == 0:
-                        merged_feats = l
-                    else:
-                        merged_feats = tf.concat([merged_feats, l], 1, name='concat')
-                    l = merged_feats
-                    if self.options.prediction_1x1_conv:
-                        ch_in = l.get_shape().as_list()[1]
-                        l = Conv2D('conv1x1', l, ch_in, 1)
-                        l = BNReLU('bnrelu1x1', l)
-                    l = GlobalAvgPooling('gap', l)
-
-                    logits = FullyConnected('linear', l, out_dim, nl=tf.identity)
-                    var_list.append(logits.variables.W)
-                    var_list.append(logits.variables.b)
-                    #if w != 0:
-                    #    logits += l_logits[-1]
-                    l_logits.append(logits)
-
-                    cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
-                        logits=logits, labels=label)
-                    cost = tf.reduce_mean(cost, name='cross_entropy_loss')
-                    add_moving_summary(cost)
-
-                    wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
-                    add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
-                    
-                    wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
-                    add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
-
-                    l_costs.append(cost)
-                    l_wrong.append(wrong)
-                    l_wrong5.append(wrong5)
-
-            return l_logits, var_list, l_costs, l_wrong, l_wrong5
-
         logger.info("sampling loss with method {}".format(self.options.ls_method))
         ls_K = np.sum(np.asarray(self.weights) > 0)
         if self.options.ls_method > 0:
@@ -390,22 +353,19 @@ class AnytimeResnet(ModelDesc):
                         l = MaxPooling('pool0', l, shape=3, stride=2, padding='SAME')
                     l_feats.append(l)
 
-            wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
-                                              480000, 0.2, True)
-
-            # Do not regularize for stop-gradient case, because
-            # stop-grad requires cycling lr, and switching training targets
-            if self.options.stop_gradient:
+            if self.resnet_config.s_type == 'imagenet':
+                wd_w = 1e-6
+            elif self.options.stop_gradient:
+                # Do not regularize for stop-gradient case, because
+                # stop-grad requires cycling lr, and switching training targets
                 wd_w = 0
+            else:
+                wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
+                                                  480000, 0.2, True)
+                
 
-            wd_cost = 0
-            cost = 0
             unit_idx = -1
             layer_idx = -1
-            anytime_idx = -1
-            online_learn_rewards = []
-            last_cost = None
-            max_reward = 0.0
             for res_block_i, n_block in \
                 enumerate(self.resnet_config.n_units_per_block):
                 for k in range(n_block):
@@ -435,24 +395,54 @@ class AnytimeResnet(ModelDesc):
                             if self.weights[unit_idx] > 0:
                                 f = (1-self.options.sg_gamma)*tf.stop_gradient(f) \
                                    + self.options.sg_gamma*f
+                                logger.info("stop gradient after unit {}".format(unit_idx))
                             l_new_feats.append(f)
                         l_feats = l_new_feats
                 # end for each k in n_block
             #end for each block
-            
+
+            wd_cost = 0
+            total_cost = 0
             unit_idx = -1
+            anytime_idx = -1
+            last_cost = None
+            max_reward = 0.0
+            online_learn_rewards = []
             for layer_idx, l_feats in enumerate(ll_feats):
                 scope_name = self.compute_scope_basename(layer_idx)
-                l_logits, var_list, l_costs, l_wrong, l_wrong5 = \
-                    predictions_and_losses(scope_name, l_feats, 
-                                           self.num_classes, label)
-                    
-                for ci, c in enumerate(l_costs):
+                for w in range(self.width):
                     unit_idx += 1
                     cost_weight = self.weights[unit_idx]
-                    if cost_weight > 0:
-                        anytime_idx += 1
+                    if cost_weight == 0:
+                        continue
+                    anytime_idx += 1
+                    with tf.variable_scope(scope_name+'.'+str(w)+'.pred') as scope:
+                        l = tf.nn.relu(l_feats[w])
+                        if w == 0:
+                            merged_feats = l
+                        else:
+                            merged_feats = tf.concat([merged_feats, l], 1, name='concat')
+                        l = merged_feats
+                        if self.options.prediction_1x1_conv:
+                            ch_in = l.get_shape().as_list()[1]
+                            l = Conv2D('conv1x1', l, ch_in, 1)
+                            l = BNReLU('bnrelu1x1', l)
+                        l = GlobalAvgPooling('gap', l)
 
+                        logits = FullyConnected('linear', l, self.num_classes, nl=tf.identity)
+                            
+                        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
+                            logits=logits, labels=label)
+                        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+                        add_moving_summary(cost)
+
+                        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
+                        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
+                        
+                        wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
+                        add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
+
+                        # Compute the contribution of the cost to total cost
                         # Additional weight for unit_idx. 
                         add_weight = 0
                         if self.options.ls_method > 0:
@@ -462,14 +452,14 @@ class AnytimeResnet(ModelDesc):
                                                     dtype=tf.float32),
                                 lambda: tf.constant(0, dtype=tf.float32))
                         if self.options.sum_rand_ratio > 0:
-                            cost += (cost_weight + add_weight / \
-                                self.options.sum_rand_ratio) * c
+                            total_cost += (cost_weight + add_weight / \
+                                self.options.sum_rand_ratio) * cost
                         else:
-                            cost += add_weight * c
+                            total_cost += add_weight * cost
 
                         # Regularize weights from FC layers.
-                        wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var_list[2*ci])
-                        
+                        wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W)
+
                         ###############
                         # Compute reward for loss selecters. 
 
@@ -477,18 +467,18 @@ class AnytimeResnet(ModelDesc):
                         #gs = tf.gradients(c, tf.trainable_variables()) 
                         #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
                         # Compute relative loss improvement as rewards
-                        if not last_cost is None:
-                            reward = 1.0 - c / last_cost
-                            max_reward = tf.maximum(reward, max_reward)
-                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                                name='reward_{:02d}'.format(anytime_idx-1)))
-                        if ci == len(l_costs)-1 and is_last_row:
-                            reward = max_reward * self.options.last_reward_rate
-                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                                name='reward_{:02d}'.format(anytime_idx)))
-                            #cost = tf.Print(cost, online_learn_rewards)
-                        last_cost = c
-
+                        if self.options.require_rewards:
+                            if not last_cost is None:
+                                reward = 1.0 - cost / last_cost
+                                max_reward = tf.maximum(reward, max_reward)
+                                online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                                    name='reward_{:02d}'.format(anytime_idx-1)))
+                            if w == self.width - 1 and is_last_row:
+                                reward = max_reward * self.options.last_reward_rate
+                                online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                                    name='reward_{:02d}'.format(anytime_idx)))
+                                #cost = tf.Print(cost, online_learn_rewards)
+                            last_cost = cost
                     #endif cost_weight > 0
                 #endfor each width
             #endfor each layer
@@ -497,10 +487,10 @@ class AnytimeResnet(ModelDesc):
         # weight decay on all W on conv layers for regularization
         wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
                          name='wd_cost')
-        cost = tf.identity(cost, name='sum_losses')
-        add_moving_summary(cost, wd_cost)
+        total_cost = tf.identity(total_cost, name='sum_losses')
+        add_moving_summary(total_cost, wd_cost)
         add_param_summary(('.*/W', ['histogram']))   # monitor W
-        self.cost = tf.add_n([cost, wd_cost], name='cost')
+        self.cost = tf.add_n([total_cost, wd_cost], name='cost') # specify training loss
 
     def _get_optimizer(self):
         lr = get_scalar_var('learning_rate', 0.01, summary=True)
