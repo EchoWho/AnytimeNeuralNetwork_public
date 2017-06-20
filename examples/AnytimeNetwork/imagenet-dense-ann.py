@@ -17,7 +17,7 @@ from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeResnet
+from tensorpack.network_models.anytime_network import AnytimeDensenet
 
 args = None
 INPUT_SIZE = 224
@@ -51,7 +51,7 @@ def get_config():
         dataset_val = get_data('validation')
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
-    model=AnytimeResnet(INPUT_SIZE, args)
+    model=AnytimeDensenet(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
     return TrainConfig(
@@ -60,17 +60,16 @@ def get_config():
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(dataset_val, classification_cbs),
             ScheduledHyperParamSetter('learning_rate',
-                [(1, 0.05), (10, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]),
-            HumanHyperParamSetter('learning_rate'),
+                [(1, 0.1), (30, 0.01), (60, 1e-3), (85, 1e-4), (95, 1e-5)])
         ] + loss_select_cbs,
         model=model,
         steps_per_epoch=steps_per_epoch,
-        max_epoch=128,
+        max_epoch=110,
     )
 
 def eval_on_ILSVRC12(model_file, data_dir):
     ds = get_data('val')
-    model = AnytimeResnet(INPUT_SIZE, args)
+    model = AnytimeDensenet(INPUT_SIZE, args)
     pred_config = PredictConfig(
         model=model,
         session_init=get_model_loader(model_file),
@@ -96,11 +95,12 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
-    anytime_network.parser_add_resnet_arguments(parser)
+    anytime_network.parser_add_densenet_arguments(parser)
     args = parser.parse_args()
     
-    assert args.init_channel == 64
     assert args.num_classes == 1000
+    assert args.densenet_depth in [121, 169, 201, 161]
+    assert args.func_type == 2 or (args.func_type==5 and args.samloss==6)
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)

@@ -32,7 +32,7 @@ CHANNEL_DIM=1
 NetworkConfig = namedtuple('Config', ['n_units_per_block', 'b_type', 's_type'])
 
 def compute_cfg(options):
-    if options.depth is not None:
+    if hasattr(options, 'depth') and options.depth is not None:
         if options.depth == 18:
             n_units_per_block = [2,2,2,2]
             b_type = 'basic'
@@ -54,7 +54,7 @@ def compute_cfg(options):
         s_type = 'imagenet' 
         return NetworkConfig(n_units_per_block, b_type, s_type)
 
-    elif options.densenet_depth is not None:
+    elif hasattr(options, 'densenet_depth') and options.densenet_depth is not None:
         if options.densenet_depth == 121:
             n_units_per_block = [6, 12, 24, 16]
             #default_growth_rate = 32
@@ -74,7 +74,8 @@ def compute_cfg(options):
         s_type = 'imagenet'
         return NetworkConfig(n_units_per_block, b_type, s_type)#, default_growth_rate)
 
-    elif options.num_units is not None: #option.n is set
+    elif options.num_units is not None: 
+        #option.n is set
         return NetworkConfig([options.num_units]*options.n_blocks, 'basic', 'basic')
 
 def compute_total_units(options, config=None):
@@ -585,20 +586,25 @@ def parser_add_densenet_arguments(parser):
     depth_group.add_argument('--densenet_depth',
                              help='depth of densenet for predefined networks',
                              type=int)
-    parser.add_argument('--growth_rate', help='growth rate k for log dense',
+    parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
     parser.add_argument('--dense_select_method', help='densenet previous feature selection choice',
                         type=int, default=0)
+    parser.add_argument('--log_dense_coef', help='The constant multiplier of log(depth) to connect',
+                        type=np.float32, default=1)
     parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
                         type=np.float32, default=1)
     return parser
 
-class AnytimeDenseNetwork(AnytimeNetwork):
-    def __init__(self, input_size, args):
-        super(AnytimeDenseNetwork, self).__init__(input_size, args)
-        self.dense_select_method = self.options.dense_select_method
 
+class AnytimeDensenet(AnytimeNetwork):
+    def __init__(self, input_size, args):
+        super(AnytimeDensenet, self).__init__(input_size, args)
+        self.dense_select_method = self.options.dense_select_method
+        self.log_dense_coef = self.options.log_dense_coef
+        self.reduction_ratio = self.options.reduction_ratio
         self.growth_rate = self.options.growth_rate
+
         if self.init_channel != self.growth_rate * 2:
             self.init_channel = self.growth_rate * 2
             logger.info("Densenet expects init_channel to be 2*growth_rate."
@@ -607,17 +613,16 @@ class AnytimeDenseNetwork(AnytimeNetwork):
         # width > 1 is not implemented for densenet
         assert self.width == 1,self.width
 
-        self.reduction_ratio = self.options.reduction_ratio
-
     def _compute_ll_feats(self, image):
-        
         df = 1
         exponential_diffs = [0]
         while True:
             df = df * 2
-            if df > self.total_units:
+            if df > self.total_units * self.log_dense_coef:
                 break
-            exponential_diffs.append(df - 1)
+            int_df = int((df-1) / self.log_dense_coef)
+            if int_df != exponential_diffs[-1]
+                exponential_diffs.append(int_df)
             
         def dense_select_indices(ui):
             """
@@ -632,12 +637,13 @@ class AnytimeDenseNetwork(AnytimeNetwork):
             elif self.dense_select_method == 1:
                 diffs = list(range(int(np.log2(ui + 1)) + 1))
             elif self.dense_select_method == 2:
+                n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
                 diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
             elif self.dense_select_method == 3:
-                delta = (ui+1.0) / (np.log2(ui+1) + 1)
+                delta = (ui+1.0) / n_select
                 df = 0
                 diffs = []
-                for i in range(int(np.log2(ui+1)) + 1):
+                for i in range(n_select):
                     int_df = int(df)
                     if len(diffs) == 0 or int_df != diffs[-1]:
                         diffs.append(int_df)
