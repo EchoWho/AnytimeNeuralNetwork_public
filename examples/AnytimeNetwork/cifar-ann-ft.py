@@ -9,8 +9,8 @@ from tensorpack.tfutils.summary import *
 from tensorpack.utils import logger
 from tensorpack.utils import utils
 
-from tensorpack.network_models import anytime_resnet
-from tensorpack.network_models.anytime_resnet import AnytimeResnet
+from tensorpack.network_models import anytime_network
+from tensorpack.network_models.anytime_network import AnytimeResnet
 
 """
 """
@@ -57,7 +57,30 @@ def get_config():
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
 
-    lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
+    #lr_schedule = [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
+
+    ls_K = np.sum(np.asarray(model.weights) > 0)
+    base_schedule = [(1, 0.1), (21, 0.01), (31, 0.001), (62, 0.0002)]
+    base_max_epoch = 75
+    max_epoch = base_max_epoch * ls_K
+
+    base_schedule_idx, lr_val = zip(*base_schedule)
+    lr_schedule = base_schedule
+    for i in range(1, ls_K):
+        schedule_i = [ bsi + i * base_max_epoch for bsi in list(base_schedule_idx)]
+        lr_schedule.extend(zip(schedule_i, lr_val))
+
+    ls_ft_schedule = [(1,0)]
+    for i in range(1,ls_K):
+        ls_ft_schedule.append((i * base_max_epoch, i))
+
+    logger.info('lr_schedule: {}'.format(lr_schedule))
+    logger.info('ls_ft_schedule: {}'.format(ls_ft_schedule))
+
+    # Fixed schedule for choosing which loss to optimize. 
+    loss_select_cbs = [ScheduledHyperParamSetter(model.select_idx_name, \
+                                                 ls_ft_schedule)]
+
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
@@ -68,7 +91,7 @@ def get_config():
         ] + loss_select_cbs,
         model=model,
         steps_per_epoch=steps_per_epoch,
-        max_epoch=300,
+        max_epoch=max_epoch,
     )
 
 if __name__ == '__main__':
@@ -83,8 +106,15 @@ if __name__ == '__main__':
                         type=bool, default=False)
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
     parser.add_argument('--load', help='load model')
-    anytime_resnet.parser_add_arguments(parser)
+    anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
+
+    assert args.func_type == 4, args.func_type
+    assert args.samloss == 1000, args.samloss
+    assert args.stop_gradient, args.stop_gradient
+    assert args.sg_gamma == 0, args.sg_gamma
+    assert args.prediction_1x1_conv, args.prediction_1x1_conv
+    assert args.sum_rand_ratio == 0, args.sum_rand_ratio
 
     logger.info("Arguments: {}".format(args))
     logger.info("TF version: {}".format(tf.__version__))
