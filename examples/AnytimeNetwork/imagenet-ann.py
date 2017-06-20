@@ -18,8 +18,8 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
-from tensorpack.network_models import anytime_resnet
-from tensorpack.network_models.anytime_resnet import AnytimeResnet
+from tensorpack.network_models import anytime_network
+from tensorpack.network_models.anytime_network import AnytimeResnet
 
 args = None
 INPUT_SIZE = 224
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
-    anytime_resnet.parser_add_arguments(parser)
+    anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
     
     assert args.init_channel == 64

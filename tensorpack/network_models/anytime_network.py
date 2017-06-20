@@ -77,9 +77,8 @@ def compute_cfg(options):
     elif options.num_units is not None: #option.n is set
         return NetworkConfig([options.num_units]*options.n_blocks, 'basic', 'basic')
 
-def compute_total_units(config=None, options=None):
+def compute_total_units(options, config=None):
     if config is None:
-        assert options is not None, options
         config = compute_cfg(options)
     return sum(config.n_units_per_block) * options.width
 
@@ -165,7 +164,7 @@ class AnytimeNetwork(ModelDesc):
         self.options = args
         self.input_size = input_size
         self.network_config = compute_cfg(self.options)
-        self.total_units = compute_total_units(self.network_config)
+        self.total_units = compute_total_units(self.options, self.network_config)
 
         # Warn user if they are using imagenet but doesn't have the right channel
         self.init_channel = args.init_channel
@@ -185,17 +184,14 @@ class AnytimeNetwork(ModelDesc):
         self.options.ls_method = self.options.samloss
         self.options.require_rewards = self.options.samloss < 6 and \
             self.options.samloss > 0
-
     
     def _get_inputs(self):
         return [InputDesc(tf.float32, \
                     [None, self.input_size, self.input_size, 3], 'input'),
                 InputDesc(tf.int32, [None], 'label')]
 
-
     def compute_scope_basename(self, layer_idx):
         return "layer{:03d}".format(layer_idx)
-
 
     def compute_classification_callbacks(self):
         vcs = []
@@ -218,7 +214,6 @@ class AnytimeNetwork(ModelDesc):
                             wrong_tensor_name=scope_name+'wrong-top5:0', 
                             summary_name=scope_name+'val-err5'))
         return vcs
-
 
     def compute_loss_select_callbacks(self):
         if self.options.ls_method > 0:
@@ -644,7 +639,7 @@ class AnytimeDenseNetwork(AnytimeNetwork):
                 diffs = []
                 for i in range(int(np.log2(ui+1)) + 1):
                     int_df = int(df)
-                    if len(diffs) == 0 or int_df != diffs[-1]
+                    if len(diffs) == 0 or int_df != diffs[-1]:
                         diffs.append(int_df)
                     df += delta
             elif self.dense_select_method == 4:
