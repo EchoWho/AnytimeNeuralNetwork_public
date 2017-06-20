@@ -94,8 +94,6 @@ def parser_add_common_arguments(parser):
                             help='number of units in each stage',
                             type=int)
     # network complexity
-    parser.add_argument('--batch_size', help='Batch size for train/testing', 
-                        type=int, default=128)
     parser.add_argument('--n_blocks', help='Number of residual blocks, don\'t change usually.'
                         +' Only used if num_units is set',
                         type=int, default=3)
