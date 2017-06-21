@@ -160,8 +160,8 @@ if __name__ == '__main__':
                         type=bool, default=False)
     parser = anytime_network.parser_add_densenet_arguments(parser)
     model_cls = AnytimeDensenet
-    assert args.batch_size <= 64
     args = parser.parse_args()
+    assert args.batch_size <= 64
 
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':
