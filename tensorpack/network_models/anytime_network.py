@@ -619,7 +619,7 @@ class AnytimeDensenet(AnytimeNetwork):
             if df > self.total_units * self.log_dense_coef:
                 break
             int_df = int((df-1) / self.log_dense_coef)
-            if int_df != exponential_diffs[-1]
+            if int_df != exponential_diffs[-1]:
                 exponential_diffs.append(int_df)
             
         def dense_select_indices(ui):
