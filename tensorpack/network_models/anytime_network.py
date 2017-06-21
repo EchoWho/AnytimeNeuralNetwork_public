@@ -21,6 +21,17 @@ DATA_FORMAT='NCHW'
 CHANNEL_DIM=1
 
 
+# Best choice for samloss for AANN if running anytime networks.
+BEST_AANN_METHOD=6
+# method id for not using AANN
+NO_AANN_METHOD=0
+
+# func type for computing optimal at options.opt_at see anytime_loss.loss_weights
+FUNC_TYPE_OPT = 2
+# func type for computing ANN/AANN
+FUNC_TYPE_ANN = 5
+
+
 """
     cfg is a tuple that contains
     ([ <list of n_units per block], <b_type>, <start_type>)
@@ -133,7 +144,7 @@ def parser_add_common_arguments(parser):
     # loss_weight computation
     parser.add_argument('-f', '--func_type', 
                         help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
-                        type=int, default=5)
+                        type=int, default=FUNC_TYPE_ANN)
     parser.add_argument('--exponential_base', help='Exponential base',
                         type=np.float32)
     parser.add_argument('--opt_at', help='Optimal at', 
@@ -181,8 +192,18 @@ class AnytimeNetwork(ModelDesc):
         # special names and conditions
         self.select_idx_name = "select_idx"
         self.options.ls_method = self.options.samloss
+        # (UGLY) due to the history of development. 1,...,5 requires rewards
         self.options.require_rewards = self.options.samloss < 6 and \
             self.options.samloss > 0
+
+        if self.options.func_type == FUNC_TYPE_OPT \
+            and self.options.ls_method != NO_AANN_METHOD:
+            # special case: if we are computing optimal, don't do AANN
+            logger.warn("Computing optimal requires not running AANN."\
+                +" Setting samloss to be {}".format(NO_AANN_METHOD))
+            self.options.ls_method = NO_AANN_METHOD
+            self.options.samloss = NO_AANN_METHOD
+
     
     def _get_inputs(self):
         return [InputDesc(tf.float32, \
@@ -611,6 +632,15 @@ class AnytimeDensenet(AnytimeNetwork):
         # width > 1 is not implemented for densenet
         assert self.width == 1,self.width
 
+        if self.options.func_type == FUNC_TYPE_ANN \
+            and self.options.ls_method != BEST_AANN_METHOD:
+            logger.warn("Densenet prefers using AANN instead of other methods."\
+                +"Changing samloss to be {}".format(BEST_AANN_METHOD))
+            self.options.ls_method = BEST_AANN_METHOD
+            self.options.samloss = BEST_AANN_METHOD
+
+
+
     def _compute_ll_feats(self, image):
         df = 1
         exponential_diffs = [0]
@@ -638,6 +668,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
                 diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
             elif self.dense_select_method == 3:
+                n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
                 delta = (ui+1.0) / n_select
                 df = 0
                 diffs = []

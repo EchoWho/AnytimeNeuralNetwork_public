@@ -61,16 +61,17 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/cifar-logdense.py \
+python $CONFIG_DIR/examples/AnytimeNetwork/dense-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
+--ds_name=cfiar10 \
 -f=2 \
---opt_at=23 \
+--opt_at=38 \
 -n=32 \
--g=24 \
+-g=16 \
 -s=3 \
---num_classes=100 \
---log_method=0 \
---log_ann_method=0 \
+--dense_select_method=3 \
 --batch_size=64 \
+--samloss=0
+    

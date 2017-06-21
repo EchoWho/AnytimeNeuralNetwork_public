@@ -61,16 +61,17 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/ResNet/svhn-logdense.py \
+python $CONFIG_DIR/examples/AnytimeNetwork/dense-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
+--ds_name=cifar100 \
 -f=2 \
 --opt_at=77 \
--n=52 \
--g=16 \
--s=6 \
---num_classes=10 \
---log_method=3 \
---log_ann_method=0 \
---batch_size=32 \
+-n=12 \
+-g=32 \
+-s=2 \
+--dense_select_method=0 \
+--batch_size=64 \
+--samloss=0
+    
