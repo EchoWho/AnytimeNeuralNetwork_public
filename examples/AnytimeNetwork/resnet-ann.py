@@ -10,7 +10,7 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeResnet, AnytimeDensenet
+from tensorpack.network_models.anytime_network import AnytimeResnet
 
 """
 """
@@ -139,13 +139,10 @@ def get_config(ds_trian, ds_val, model_cls):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    # Dataset choice and network choice
+    # Dataset choice 
     parser.add_argument('--ds_name', help='name of dataset',
                         type=str, 
                         choices=['cifar10', 'cifar100', 'svhn', 'imagenet'])
-    parser.add_argument('--net_name', help='name of base network type',
-                        type=strr, 
-                        choices=['resnet', 'densenet'])
     # other common args
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=128)
@@ -161,16 +158,8 @@ if __name__ == '__main__':
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
-    #bootstrap parser:
-    args = parser.parse_args()
-    if args.net_name == 'resnet':
-        parser = anytime_network.parser_add_resnet_arguments(parser)
-        model_cls = AnytimeResnet
-    
-    elif args.net_name == 'densenet':
-        parser = anytime_network.parser_add_densenet_arguments(parser)
-        model_cls = AnytimeDensenet
-        assert args.batch_size <= 64
+    parser = anytime_network.parser_add_resnet_arguments(parser)
+    model_cls = AnytimeResnet
     args = parser.parse_args()
 
     ## Set dataset-network specific assert/info
@@ -185,14 +174,9 @@ if __name__ == '__main__':
         ds_val = get_data('test')
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
 
-        if args.net_name == 'resnet':
-            lr_schedule = \
-                [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
-            max_epoch = 300
-        elif args.net_name == 'densenet':
-            lr_schedule = \
-                [(1, 0.1), (150, 0.01), (225, 0.001)]
-            max_epoch=300
+        lr_schedule = \
+            [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
+        max_epoch = 300
 
 
     elif args.ds_name == 'svhn':
@@ -203,17 +187,12 @@ if __name__ == '__main__':
         ds_val = get_data('test')
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
 
-        if args.net_name == 'resnet':
-            lr_schedule = \
-                [(1, 0.1), (15, 0.01), (30, 0.001), (45, 0.0002)]
-            max_epoch = 60
-        elif args.net_name == 'densenet':
-            lr_schedule = \
-                [(1, 0.1), (20, 0.01), (30, 0.001), (45, 0.0001)]
-            max_epoch = 60
+        lr_schedule = \
+            [(1, 0.1), (15, 0.01), (30, 0.001), (45, 0.0002)]
+        max_epoch = 60
 
 
-    elif args.ds_name = 'imagenet':
+    elif args.ds_name == 'imagenet':
         args.num_classes = 1000
         INPUT_SIZE = 224
         get_data = get_ilsvrc12_tfrecord_data
@@ -224,16 +203,12 @@ if __name__ == '__main__':
             ds_train = get_data('train')
             ds_val = get_data('validation')
 
-        if args.net_name == 'resnet':
-            assert args.init_channel == 64
-            lr_schedule = \
-                [(1, 0.05), (10, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]
-            max_epoch = 128
-        elif args.net_name == 'densenet':
-            lr_schedule = \
-                [(1, 0.05), (30, 0.01), (60, 1e-3), (85, 1e-4), (100, 1e-5)]
-            max_epoch=115
+        assert args.init_channel == 64
+        lr_schedule = \
+            [(1, 0.05), (10, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]
+        max_epoch = 128
          
+
     logger.info("Arguments: {}".format(args))
     logger.info("TF version: {}".format(tf.__version__))
 
