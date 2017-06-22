@@ -18,7 +18,9 @@ Data format, and the resulting dimension for the channels.
 ('NCHW',1) or ('NHWC', 3)
 """
 DATA_FORMAT='NCHW'
-CHANNEL_DIM=1
+CHANNEL_DIM=1 if DATA_FORMAT == 'NCHW' else 3
+HEIGHT_DIM=1 + int(DATA_FORMAT == 'NCHW')
+WIDTH_DIM=2 + int(DATA_FORMAT == 'NCHW')
 
 
 # Best choice for samloss for AANN if running anytime networks.
@@ -282,22 +284,46 @@ class AnytimeNetwork(ModelDesc):
         return l_feats
     
     def _compute_ll_feats(self, image):
-        logger.warn("Invoked generic AnytimeNetwork. Use a specific one instead")
-        return [[]]
+        raise Exception("Invoked abstract AnytimeNetwork. Use a specific one instead")
 
-    def _build_graph(self, inputs):
+    def _compute_prediction_and_loss(self, l, label, unit_idx):
+        """
+            l: feat_map of DATA_FORMAT 
+            label: target to determine the loss
+            unit_idx : the feature computation unit index.
+        """
+        l = GlobalAvgPooling('gap', l)
+        logits = FullyConnected('linear', l, self.num_classes, nl=tf.identity)
+            
+        ## local cost/error_rate
+        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
+            logits=logits, labels=label)
+        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+        add_moving_summary(cost)
+
+        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
+        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
+        
+        wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
+        add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
+        return logits, cost
+
+    def _preprocess_inputs(self, inputs):
         image, label = inputs
         if DATA_FORMAT == 'NCHW':
             image = tf.transpose(image, [0,3,1,2])
+        return image, label
 
+    def _build_graph(self, inputs):
         logger.info("sampling loss with method {}".format(self.options.ls_method))
         select_idx = self._get_select_idx()
         
-        with argscope([Conv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
+        with argscope([Conv2D, Deconv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format=DATA_FORMAT), \
-            argscope(Conv2D, nl=tf.identity, use_bias=False, 
+            argscope([Conv2D, Deconv2D], nl=tf.identity, use_bias=False, 
                      W_init=variance_scaling_initializer(mode='FAN_OUT')):
 
+            image, label = self._preprocess_inputs(inputs)
             ll_feats = self._compute_ll_feats(image)
             
             if self.network_config.s_type == 'imagenet':
@@ -324,6 +350,7 @@ class AnytimeNetwork(ModelDesc):
                     cost_weight = self.weights[unit_idx]
                     if cost_weight == 0:
                         continue
+                    ## cost_weight is implied to be >0
                     anytime_idx += 1
                     with tf.variable_scope(scope_name+'.'+str(w)+'.pred') as scope:
                         ## compute logit using features from layer layer_idx
@@ -337,20 +364,8 @@ class AnytimeNetwork(ModelDesc):
                             ch_in = l.get_shape().as_list()[CHANNEL_DIM]
                             l = Conv2D('conv1x1', l, ch_in, 1)
                             l = BNReLU('bnrelu1x1', l)
-                        l = GlobalAvgPooling('gap', l)
-                        logits = FullyConnected('linear', l, self.num_classes, nl=tf.identity)
-                            
-                        ## local cost/error_rate
-                        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
-                            logits=logits, labels=label)
-                        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
-                        add_moving_summary(cost)
-
-                        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
-                        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
                         
-                        wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
-                        add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
+                        logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
                     #end scope of layer.w.pred
 
                     ## Compute the contribution of the cost to total cost
@@ -640,107 +655,269 @@ class AnytimeDensenet(AnytimeNetwork):
             self.options.samloss = BEST_AANN_METHOD
 
 
+    def dense_select_indices(self, ui):
+                """
+            ui : unit_idx
+        """
+        if ui == self.total_units - 1:
+            # special cast for the last, which selects all
+            return list(range(self.total_units))
+
+        if self.dense_select_method == 0:
+            if not hasattr(self, 'exponential_diffs'):
+                df = 1
+                exponential_diffs = [0]
+                while True:
+                    df = df * 2
+                    if df > self.total_units * self.log_dense_coef:
+                        break
+                    int_df = int((df-1) / self.log_dense_coef)
+                    if int_df != exponential_diffs[-1]:
+                        exponential_diffs.append(int_df)
+                self.exponential_diffs = exponential_diffs
+            diffs = self.exponential_diffs 
+        elif self.dense_select_method == 1:
+            diffs = list(range(int(np.log2(ui + 1)) + 1))
+        elif self.dense_select_method == 2:
+            n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
+            diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
+        elif self.dense_select_method == 3:
+            n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
+            delta = (ui+1.0) / n_select
+            df = 0
+            diffs = []
+            for i in range(n_select):
+                int_df = int(df)
+                if len(diffs) == 0 or int_df != diffs[-1]:
+                    diffs.append(int_df)
+                df += delta
+        elif self.dense_select_method == 4:
+            diffs = list(range(ui+1))
+        indices = [ui - df  for df in diffs if ui - df >= 0 ]
+        return indices
+
+    def compute_block(self, pls, pmls, n_units):
+        """
+            pls : previous layers. including the init_feat. Hence pls[i] is from 
+                layer i-1 for i > 0
+            pmls : previous merged layers. (used for generate ll_feats) 
+            n_units : num units in a block
+
+            return pls, pmpls (updated version of these)
+        """
+        unit_idx = len(pls) - 2 # unit idx of the last completed unit
+        for _ in range(n_units):
+            unit_idx += 1
+            scope_name = self.compute_scope_basename(unit_idx)
+            with tf.variable_scope(scope_name+'.feat'):
+                sl_indices = self.dense_select_indices(unit_idx)
+                logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
+                    unit_idx, len(pls), sl_indices))
+                
+                ## Question: TODO whether save the pre-bnrelu feat or after-bnrelu feat
+                # The current version saves the after-bnrelue to save mem/computation
+                ml = tf.concat([pls[sli] for sli in sl_indices], \
+                               CHANNEL_DIM, name='concat_feat')
+                if self.network_config.b_type == 'bottleneck':
+                    l = (LinearWrap(ml)
+                        .Conv2D('conv1x1', 4*self.growth_rate, 1, nl=BNReLU)
+                        .Conv2D('conv3x3', self.growth_rate, 3, nl=BNReLU)())
+                else:
+                    assert self.network_config.b_type == 'basic'
+                    l = Conv2D('conv3x3', ml, self.growth_rate, 3, nl=BNReLU)
+                pls.append(l)
+
+                # If the feature is used for prediction, store it.
+                if self.weights[unit_idx] > 0:
+                    pmls.append(tf.concat([ml, l], CHANNEL_DIM, name='concat_pred'))
+                else:
+                    pmls.append(None)
+        return pls, pmls
+
+    def compute_transition(self, pls, trans_idx):
+        """
+            Note that this is not the same as the original densenet, 
+            which 1x1 conv the whole merged feats. Here we 1x1 each 
+            layer individually to prevent the mix.
+        """
+        new_pls = []
+        for pli, pl in enumerate(pls):
+            with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
+                ch_in = pl.get_shape().as_list[CHANNEL_DIM]
+                new_pls.append((LinearWrap(pl)
+                    .Conv2D('conv', int(ch_in * self.reduction_ratio), 1, nl=BNReLU)
+                    .AvgPooling('pool', 2, padding='SAME')()))
+        return new_pls
 
     def _compute_ll_feats(self, image):
-        df = 1
-        exponential_diffs = [0]
-        while True:
-            df = df * 2
-            if df > self.total_units * self.log_dense_coef:
-                break
-            int_df = int((df-1) / self.log_dense_coef)
-            if int_df != exponential_diffs[-1]:
-                exponential_diffs.append(int_df)
-            
-        def dense_select_indices(ui):
-            """
-                ui : unit_idx
-            """
-            if ui == self.total_units - 1:
-                # special cast for the last, which selects all
-                return list(range(self.total_units))
-
-            if self.dense_select_method == 0:
-                diffs = exponential_diffs 
-            elif self.dense_select_method == 1:
-                diffs = list(range(int(np.log2(ui + 1)) + 1))
-            elif self.dense_select_method == 2:
-                n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
-                diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
-            elif self.dense_select_method == 3:
-                n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
-                delta = (ui+1.0) / n_select
-                df = 0
-                diffs = []
-                for i in range(n_select):
-                    int_df = int(df)
-                    if len(diffs) == 0 or int_df != diffs[-1]:
-                        diffs.append(int_df)
-                    df += delta
-            elif self.dense_select_method == 4:
-                diffs = list(range(ui+1))
-            indices = [ui - df  for df in diffs if ui - df >= 0 ]
-            return indices
-
-        def compute_block(pls, pmls, n_units):
-            """
-                pls : previous layers. including the init_feat. Hence pls[i] is from 
-                    layer i-1 for i > 0
-                pmls : previous merged layers. (used for generate ll_feats) 
-                n_units : num units in a block
-
-                return pls, pmpls (updated version of these)
-            """
-            unit_idx = len(pls) - 2 # unit idx of the last completed unit
-            for _ in range(n_units):
-                unit_idx += 1
-                scope_name = self.compute_scope_basename(unit_idx)
-                with tf.variable_scope(scope_name+'.feat'):
-                    sl_indices = dense_select_indices(unit_idx)
-                    logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
-                        unit_idx, len(pls), sl_indices))
-                    
-                    ## Question: TODO whether save the pre-bnrelu feat or after-bnrelu feat
-                    # The current version saves the after-bnrelue to save mem/computation
-                    ml = tf.concat([pls[sli] for sli in sl_indices], \
-                                   CHANNEL_DIM, name='concat_feat')
-                    if self.network_config.b_type == 'bottleneck':
-                        l = (LinearWrap(ml)
-                            .Conv2D('conv1x1', 4*self.growth_rate, 1, nl=BNReLU)
-                            .Conv2D('conv3x3', self.growth_rate, 3, nl=BNReLU)())
-                    else:
-                        assert self.network_config.b_type == 'basic'
-                        l = Conv2D('conv3x3', ml, self.growth_rate, 3, nl=BNReLU)
-                    pls.append(l)
-
-                    # If the feature is used for prediction, store it.
-                    if self.weights[unit_idx] > 0:
-                        pmls.append(tf.concat([ml, l], CHANNEL_DIM, name='concat_pred'))
-                    else:
-                        pmls.append(None)
-            return pls, pmls
-
-        def compute_transition(pls, trans_idx):
-            """
-                Note that this is not the same as the original densenet, 
-                which 1x1 conv the whole merged feats. Here we 1x1 each 
-                layer individually to prevent the mix.
-            """
-            new_pls = []
-            for pli, pl in enumerate(pls):
-                with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
-                    new_pls.append((LinearWrap(pl)
-                        .Conv2D('conv', int(self.growth_rate * self.reduction_ratio), 1)
-                        .AvgPooling('pool', 2, padding='SAME')()))
-            return new_pls
-
         l_feats = self._compute_init_l_feats(image)
         pls = [l_feats[0]]
         pmls = []
         for bi, n_units in enumerate(self.network_config.n_units_per_block):  
-            pls, pmls = compute_block(pls, pmls, n_units)
+            pls, pmls = self.compute_block(pls, pmls, n_units)
             if bi != self.n_blocks - 1: 
-                pls = compute_transition(pls, bi)
+                pls = self.compute_transition(pls, bi)
+        
+        ll_feats = [ [ feat ] for feat in pmls ]
+        assert len(ll_feats) == self.total_units
+        return ll_feats
+
+
+
+################################################
+# FCN for semantic labeling
+################################################
+class AnytimeFCN(AnytimeNetwork):
+    """
+        Overload AnytimeNetwork from classification set-up to semantic labeling.
+    """
+    def __init__(self, args):
+        super(AnytimeFCN, self).__init__(None, args)
+
+    def _get_inputs(self):
+        return [InputDesc(tf.float32, [None, None, None, 3], 'input'),
+                InputDesc(tf.int32, [None, None, None], 'label')]
+
+    def _preprocess_inputs(self, inputs):
+        image, label_img = inputs
+        if DATA_FORMAT == 'NCHW':
+            image = tf.transpose(image, [0,3,1,2])
+        # default dtype is tf.float32
+        label_img = tf.one_hot(label_img, self.num_classes, axis=-1)
+
+        # pre-compute label_img at various scales that the algorithm may need.
+        l_label = [tf.reshape(label_img, [-1, self.num_classes], name='label_init')]
+        #if self.network_config.s_type == 'imagenet'
+        #    label_img = AvgPooling('label_init_pool', label_img, 4, \
+        #                           padding='SAME', data_format='NHWC')
+
+        for pi in range(self.n_pools):
+            label_img = AvgPooling('label_pool{}'.format(pi), label_img, 2, \
+                                   padding='SAME', data_format='NHWC')
+            label = tf.reshape(label_img, [-1, self.num_classes], \
+                               name='label_{}'.format(pi))
+            l_label.append(label)
+        return image, l_label
+
+    def _compute_label_idx(self, unit_idx):
+        """ Given unit_idx, determine which flattened label to use 
+        in order to compute the loss 
+        """
+        layer_idx = unit_idx // self.width
+        csum = np.cumsum(self.network_config.n_units_per_block)
+        bi = bisect.bisect_right(csum, layer_idx)
+
+        # Pooling/upsampling happens every block
+        # to check: 0 uses 0, n_pool uses n_pool
+        if bi <= self.n_pools:
+            # during downsampling
+            return bi
+        # to check: bi == n_pools uses n_pools. 
+        # the final bi == n_pools * 2 uses 0
+        return 2 * self.n_pools - bi
+
+    def _compute_prediction_and_loss(self, l, l_label, unit_idx):
+        l = Conv2D('linear', l, self.num_classes, 1)
+        if DATA_FORMAT == 'NCHW':
+            l = tf.transpose(l, [0,2,3,1]) 
+        logits = tf.reshape(l, [-1, self.num_classes])
+        label = l_label[self._compute_label_idx(unit_idx)]
+            
+        ## local cost/error_rate
+        cost = tf.nn.softmax_cross_entropy_with_logits(\
+            logits=logits, labels=label)
+        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+        add_moving_summary(cost)
+
+        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
+        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
+
+        # TODO compute IOU
+        return logits, cost
+
+
+###########
+## FCDense
+def parser_add_fcdense_arguments(parser):
+    parser, depth_group = parser_add_common_arguments(parser)
+    depth_group.add_argument('--fcdense_depth',
+                            help='depth of the network in number of conv',
+                            type=int)
+    parser.add_argument('--n_pools',
+                        help='number of pooling blocks on the cfg.n_units_per_block',
+                        type=int)
+    return parser
+
+
+class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
+    """
+        Anytime FC-densenet. Use AnytimeFCN to have FC input, logits, costs. 
+
+        Use AnytimeDensenet to have dense_select_indices, compute_transition, 
+        compute_block
+
+        Implement compute_ll_feats here to organize the feats
+    """
+
+    def __init__(self, args):
+        # set up params from regular densenet.
+        AnytimeDensenet.__init__(self, None, args)
+        # FC-dense specific
+        self.n_pools = args.n_pools
+        # FC-dense doesn't support width > 1 yet
+        assert self.width == 1
+        # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
+        assert self.network_config.s_type == 'basic'
+
+
+    def compute_transition_up(self, pls, skip_pls, trans_idx):
+        """ for each previous layer, transition it up with deconv2d i.e., 
+            conv2d_transpose
+        """
+        new_pls = []
+        for pli, pl in enumerate(pls):
+            if pli < len(skip_pls):
+                new_pls.append(skip_pls[pli])
+                continue 
+            # implied that skip_pls is exhausted
+            with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
+                ch_in = pl.get_shape().as_list[CHANNEL_DIM]
+                ch_out = int(ch_in * self.reduction_ratio)
+                #kernel_shape=3, stride=2
+                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2, nl=BNReLU))
+        return new_pls
+
+
+    def _compute_ll_feats(self, image):
+        """
+            This section transcribe SimJeg's FCdensnet construction to the 
+            tensorflow framework. https://github.com/SimJeg/FC-DenseNet
+
+            It also changes how TD/TU layers work, since
+            log-dense computes TD/TU for each individual layer instead of all 
+            previous layers.
+
+            BNReLUConv in the original. ConvBNReLU here. 
+
+            DropOut is removed
+        """
+        l_feats = self._compute_init_l_feats(image)
+        pls = [l_feats[0]]
+        l_pls = []
+        pmls = []
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
+            pls, pmls = self.compute_block(pls, pmls, n_units)
+            if bi < self.n_pools: 
+                # downsampling
+                l_pls.append(pls)
+                pls = self.compute_transition(pls, bi)
+            elif bi < self.n_blocks - 1:
+                # To check: first deconv at self.n_pools, every layer except the last block
+                # has pl of featmap-size of n_pools-1. 
+                # The second to the last block has the final upsampling. Only the first 
+                # l_pls[0] can be directly used. the 2nd to last bi == 2*n_poolsi -1
+                skip_pls = l_pls[2*self.n_pools - bi - 1]
+                pls = self.compute_transition_up(pls, skip_pls, bi)
         
         ll_feats = [ [ feat ] for feat in pmls ]
         assert len(ll_feats) == self.total_units
