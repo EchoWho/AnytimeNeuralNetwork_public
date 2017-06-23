@@ -91,6 +91,8 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly')
     parser.add_argument('--log_dir', help='log_dir for stdout')
     parser.add_argument('--model_dir', help='dir for saving models')
+    parser.add_argument('--batch_size', help='Batch size for train/testing', 
+                        type=int, default=128)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--eval', action='store_true')
