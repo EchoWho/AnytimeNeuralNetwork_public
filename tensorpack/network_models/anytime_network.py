@@ -87,6 +87,15 @@ def compute_cfg(options):
         s_type = 'imagenet'
         return NetworkConfig(n_units_per_block, b_type, s_type)#, default_growth_rate)
 
+    elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
+        if options.fcdense_depth == 103:
+            n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
+        else:
+            raise ValueError('FC dense net depth {} is undefined'\
+                .format(options.fcdense_depth))
+        b_type = 'basic'
+        s_type = 'basic'
+
     elif options.num_units is not None: 
         #option.n is set
         return NetworkConfig([options.num_units]*options.n_blocks, 'basic', 'basic')
@@ -622,6 +631,8 @@ def parser_add_densenet_arguments(parser):
                              type=int)
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
+    parser.add_argument('--use_dense_init_ch', help='whether to use the default init_c of densenet',
+                        type=bool, default=True)
     parser.add_argument('--dense_select_method', help='densenet previous feature selection choice',
                         type=int, default=0)
     parser.add_argument('--log_dense_coef', help='The constant multiplier of log(depth) to connect',
@@ -639,10 +650,13 @@ class AnytimeDensenet(AnytimeNetwork):
         self.reduction_ratio = self.options.reduction_ratio
         self.growth_rate = self.options.growth_rate
 
-        if self.init_channel != self.growth_rate * 2:
-            self.init_channel = self.growth_rate * 2
-            logger.info("Densenet expects init_channel to be 2*growth_rate."
-                +" I'm setting this automatically!")
+        if self.options.use_dense_init_ch:
+            default_ch = self.growth_rate * 2
+            if self.init_channel != default_ch:
+                self.init_channel = default_ch
+                logger.info("Densenet sets the init_channel to be "
+                    + "2*growth_rate by default. "
+                    + "I'm setting this automatically!")
         
         # width > 1 is not implemented for densenet
         assert self.width == 1,self.width
@@ -656,7 +670,7 @@ class AnytimeDensenet(AnytimeNetwork):
 
 
     def dense_select_indices(self, ui):
-                """
+        """
             ui : unit_idx
         """
         if ui == self.total_units - 1:
