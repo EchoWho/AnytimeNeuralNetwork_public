@@ -105,7 +105,8 @@ def get_config(ds_trian, ds_val, model_cls):
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
-            ScheduledHyperParamSetter('learning_rate', lr_schedule)
+            ScheduledHyperParamSetter('learning_rate', lr_schedule),
+            HumanHyperParamSetter('learning_rate')
         ] + loss_select_cbs,
         model=model,
         steps_per_epoch=steps_per_epoch,
