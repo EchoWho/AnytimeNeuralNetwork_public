@@ -65,7 +65,7 @@ python $CONFIG_DIR/examples/AnytimeNetwork/dense-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
---ds_name=cfiar10 \
+--ds_name=cifar10 \
 -f=2 \
 --opt_at=38 \
 -n=32 \
