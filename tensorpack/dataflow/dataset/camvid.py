@@ -33,20 +33,37 @@ class Camvid(ProxyDataFlow):
     
     def __init__(self, which_set, shuffle=True, load_all=False):
         assert which_set in ['train', 'val', 'test', 'trainval'],which_set
+
+        if load_all:
+            raise NotImplementedError("Preload data processing in tfpack is not implemented yet")
+
+        is_train = which_set in ['train', 'trainval']
+        if is_train:
+            augm_kwargs = {
+                'crop_size' : (224, 224),
+                'horizontal_flip' : 1,
+                'channel_shift_range' : 0.04, 
+            }
+        else:
+            augm_kwargs = {
+                'crop_size' : (320, 480)
+            }
         
         self.ds_loader = CamvidDataset(
                 which_set=which_set,
-                batch_size=1,
+                batch_size=3,
                 seq_per_subset=0,
                 seq_length=0,
-                data_augm_kwargs={},
+                data_augm_kwargs=augm_kwargs,
                 return_one_hot=False,
                 return_01c=True,
                 return_0_255=False,
                 return_list=True,
                 use_threads=False,
                 fill_last_batch=False,
-                shuffle_at_each_epoch=shuffle)
+                shuffle_at_each_epoch=shuffle,
+                remove_mean=True,
+                divide_by_std=True)
         
         if load_all:
             self.ds = DatasetLoaderDataFlowLoadAll(self.ds_loader, shuffle)

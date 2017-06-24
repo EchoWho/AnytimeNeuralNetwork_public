@@ -7,6 +7,20 @@ from contextlib import contextmanager
 import numpy as np
 
 
+def sum_absolute_difference(pred, label, name='sum_abs_diff_by_dp'):
+    """
+    Args:
+        pred: shape [B, C]
+        label: shape [B, C]
+
+        both pred and label need to be in the same space, 
+        e.g., logit space, prob space, and etc.
+    Return:
+        sum of the absolute value of the difference of pred and label
+        for each sample
+    """
+    return tf.reduce_sum(tf.abs(pred - label), axis=1)
+
 # this function exists for backwards-compatibilty
 def prediction_incorrect(logits, label, topk=1, name='incorrect_vector'):
     """

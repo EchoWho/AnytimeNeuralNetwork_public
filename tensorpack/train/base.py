@@ -124,7 +124,7 @@ class Trainer(object):
             session_creator=ReuseSessionCreator(self.sess), hooks=None)
 
         # init session
-        init_op = tf.global_variables_initializer()
+        init_op = [tf.global_variables_initializer(), tf.local_variables_initializer()]
         self.sess.run(init_op)
         logger.info("Graph variables initialized.")
         self.config.session_init.init(self.sess)
