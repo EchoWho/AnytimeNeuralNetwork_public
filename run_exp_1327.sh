@@ -61,7 +61,7 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/AnytimeNetwork/dense-ann.py \
+python $CONFIG_DIR/examples/AnytimeNetwork/densenet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
