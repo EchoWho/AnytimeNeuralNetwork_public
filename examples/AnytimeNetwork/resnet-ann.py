@@ -159,7 +159,7 @@ if __name__ == '__main__':
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
-    parser = anytime_network.parser_add_resnet_arguments(parser)
+    anytime_network.parser_add_resnet_arguments(parser)
     model_cls = AnytimeResnet
     args = parser.parse_args()
 

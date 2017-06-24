@@ -30,6 +30,8 @@ class DatasetLoaderDataFlowLoadAll(RNGDataFlow):
         for k in idxs: 
             yield self.data[k]
 
+    def size(self):
+        return len(self.data)
 
 class DatasetLoaderDataFlow(DataFlow):
     
@@ -42,7 +44,8 @@ class DatasetLoaderDataFlow(DataFlow):
     def get_data(self):
         for _ in range(self.ds.nbatches):
             X, Y = self.ds.next()
-            yield [ X, Y ] 
+            for k in range(X.shape[0]):
+                yield [ X[k], Y[k] ] 
 
     def size(self):
-        return self.ds.nbatches
+        return self.ds.nsamples

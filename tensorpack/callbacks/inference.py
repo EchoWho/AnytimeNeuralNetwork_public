@@ -10,7 +10,8 @@ from six.moves import zip
 from ..utils.stats import RatioCounter, BinaryStatistics
 from ..tfutils import get_op_tensor_name
 
-__all__ = ['ScalarStats', 'Inferencer',
+__all__ = ['ScalarStats', 'WeightedTensorStats', 'MeanIoUFromConfusionMatrix',
+            'Inferencer',
            'ClassificationError', 'BinaryClassificationStats', 'StorePrediction']
 
 # TODO rename get_output_tensors to get_output_names
@@ -100,7 +101,110 @@ class ScalarStats(Inferencer):
         for stat, name in zip(self.stats, self.names):
             opname, _ = get_op_tensor_name(name)
             name = '{}_{}'.format(self.prefix, opname) if self.prefix else opname
-            ret[name] = stat
+            if len(np.shape(stat)) == 0:
+                ret[name] = stat
+            else:
+                stat = stat.reshape([-1])
+                for si, s_val in enumerate(stat):
+                    ret[name + '[{:02d}]'.format(si)] = s_val
+        return ret
+
+class WeightedTensorStats(Inferencer): 
+    """
+    """
+
+    def __init__(self, names, weight_name=None, prefix='val_'):
+        """
+        Args:
+            names(list or str): list of names or just one name. The
+                corresponding tensors have to be scalar.
+            prefix(str): a prefix for logging
+        """
+        if not isinstance(names, list):
+            self.names = [names]
+        else:
+            self.names = names
+        self.weight_name = weight_name
+        self.prefix = prefix
+
+    def _get_output_tensors(self):
+        if self.weight_name is not None:
+            return self.names + [self.weight_name]
+        return self.names
+
+    def _before_inference(self):
+        self.stats = None
+        self.total_weight = None
+
+    def _datapoint(self, output):
+        weight = 1.0
+        if self.weight_name is not None:
+            weight = output[-1]
+            output = output[:-1]
+        if self.stats is None:
+            self.stats = [ o * weight for o in output ] 
+            self.total_weight = weight
+        else:
+            self.total_weight += weight
+            for si, stat in enumerate(self.stats):
+                self.stats[si] = stat + output[si] * weight
+                
+    def _after_inference(self):
+        assert len(self.stats) == len(self.names)
+
+        ret = {}
+        for stat, name in zip(self.stats, self.names):
+            opname, _ = get_op_tensor_name(name)
+            name = opname
+            if self.prefix:
+                base_name_idx = name.rfind('/') + 1
+                base_name = name[base_name_idx:]
+                scope_name = name[:base_name_idx]
+                name = '{}{}{}'.format(scope_name, self.prefix, base_name) 
+            stat = stat / self.total_weight
+            if len(np.shape(stat)) == 0:
+                ret[name] = stat 
+            else:
+                stat = stat.reshape([-1])
+                for si, s_val in enumerate(stat):
+                    ret[name + '[{:02d}]'.format(si)] = s_val
+        return ret
+
+class MeanIoUFromConfusionMatrix(Inferencer):
+    
+    def __init__(self, cm_name='confusion_matrix', scope_name_prefix='val_'):
+        self.cm_name = cm_name
+        self.prefix = scope_name_prefix
+    
+    def _get_output_tensors(self):
+        return [self.cm_name]
+
+    def _before_inference(self):
+        self.total_cm = None 
+
+    def _datapoint(self, output):
+        cm = output[0]
+        if self.total_cm is None:
+            self.total_cm = cm
+        else:
+            self.total_cm += cm
+
+    def _after_inference(self):
+        n_classes = self.total_cm.shape[0]
+        assert len(self.total_cm.shape) == 2 and self.total_cm.shape[1] == n_classes
+        n_samples = np.sum(self.total_cm)
+
+        inter = np.diag(self.total_cm)
+        union = np.sum(self.total_cm, axis=0) + np.sum(self.total_cm, axis=1) - inter 
+
+        inter = np.asarray(inter, dtype=np.float32)
+        union = np.asarray(union + (union==0), dtype=np.float32)
+        l_iou = inter / union 
+        mean_iou = np.mean(l_iou)
+
+        ret = {self.prefix + 'mean_iou' : mean_iou}
+        for ci, iou in enumerate(l_iou):
+            ret[self.prefix + 'iou[{:02d}]'.format(ci)] = iou
         return ret
 
 
