@@ -729,8 +729,9 @@ class AnytimeDensenet(AnytimeNetwork):
             new_pls = []
             for pli, pl in enumerate(pls):
                 with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
+                    ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
                     new_pls.append((LinearWrap(pl)
-                        .Conv2D('conv', int(self.growth_rate * self.reduction_ratio), 1)
+                        .Conv2D('conv', int(ch_in * self.reduction_ratio), 1, nl=BNReLU)
                         .AvgPooling('pool', 2, padding='SAME')()))
             return new_pls
 
