@@ -851,6 +851,8 @@ class AnytimeFCN(AnytimeNetwork):
 
         # pre-compute label_img at various scales that the algorithm may need.
         l_label = [tf.reshape(label_img, [-1, self.num_classes], name='label_init')]
+        # TODO not supported yet because it messes up the label_img_idx. 
+        # Is there any FCN that uses imagenet start with double pooling?
         #if self.network_config.s_type == 'imagenet'
         #    label_img = AvgPooling('label_init_pool', label_img, 4, \
         #                           padding='SAME', data_format='NHWC')
@@ -874,24 +876,25 @@ class AnytimeFCN(AnytimeNetwork):
         # compute  block idx
         layer_idx = unit_idx // self.width
         csum = np.cumsum(self.network_config.n_units_per_block)
+        # first idx that is > layer_idx
         bi = bisect.bisect_right(csum, layer_idx)
 
-        # Pooling/upsampling happens every block
-        # Case downsample check: 0 uses 0, n_pool uses n_pool
-        # Case upsample check: bi == n_pools uses n_pools. 
+        # Case downsample check: n_pool uses label_idx=n_pool
+        #   0 uses 0
+        # Case upsample check: bi == n_pools uses label_idx=n_pools. 
         #   the final bi == n_pools * 2 uses 0
         label_img_idx = bi
         if bi > self.n_pools:
             label_img_idx = 2 * self.n_pools - bi
 
-        label = l_label[label_img_idx] #note this is a probability of label distri
+        label = l_label[label_img_idx] # note this is a probability of label distri
             
-        ## local cost/error_rate
+        ## local cost for training
         cost = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=label)
         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
         add_moving_summary(cost)
 
-        # Other evaluation metrics 
+        ## Other evaluation metrics 
 
         # total abs diff
         prob = tf.nn.softmax(logits, name='pred_prob')
@@ -905,6 +908,7 @@ class AnytimeFCN(AnytimeNetwork):
         cm = tf.confusion_matrix(labels=int_label, predictions=int_pred,\
             num_classes=self.num_classes, name='confusion_matrix', weights=None)
 
+        # pixel level accuracy  TODO remove one of accu/err; both exist for debugging
         accu = tf.cast(tf.reduce_sum(tf.diag_part(cm)), dtype=tf.float32) \
             / tf.cast(tf.reduce_sum(cm), dtype=tf.float32)
         accu = tf.identity(accu, name='accuracy')
