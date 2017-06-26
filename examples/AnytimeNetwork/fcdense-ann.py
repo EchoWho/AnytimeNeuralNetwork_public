@@ -8,6 +8,7 @@ from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.utils import logger
 from tensorpack.utils import utils
+from tensorpack.utils import fs
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeFCDensenet
@@ -23,10 +24,19 @@ get_data=None
 def get_camvid_data(which_set, shuffle=True):
     isTrain = which_set == 'train' or which_set == 'trainval'
 
-    pp_mean = dataset.Camvid.mean
-    pp_std = dataset.Camvid.std
-    
-    ds = dataset.Camvid(which_set, shuffle)
+    pixel_z_normalize = True 
+    ds = dataset.Camvid(which_set, shuffle=shuffle, 
+        pixel_z_normalize=pixel_z_normalize)
+    if isTrain:
+        augmentors = [
+            imgaug.RandomCrop((224, 224)),
+            imgaug.Flip(horiz=True),
+        ]
+    else:
+        augmentors = [
+            imgaug.RandomCrop((224, 224))
+        ]
+    ds = AugmentImageComponents(ds, augmentors, copy=False)
     ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
     if isTrain:
         ds = PrefetchData(ds, 3, 2)
@@ -109,6 +119,8 @@ if __name__ == '__main__':
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
+
+    fs.set_dataset_path(args.data_dir)
 
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(arg.load):
