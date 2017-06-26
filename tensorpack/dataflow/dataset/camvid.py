@@ -1,9 +1,22 @@
-from ..ds_loader import DatasetLoaderDataFlow, DatasetLoaderDataFlowLoadAll
-from ..base import ProxyDataFlow
+from ..base import RNGDataFlow
+from ...utils import logger,fs
+import os
+import numpy as np
 
-from dataset_loaders import CamvidDataset
+def load_data_from_npzs(fnames):
+    if not isinstance(fnames, list):
+        fnames = [fnames]
+    Xs = []
+    Ys = []
+    for fname in fnames:
+        d = np.load(fname)
+        logger.info('Loading from {}'.format(fname))
+        X, Y = (d['X'], d['Y'])
+        Xs.append(X)
+        Ys.append(Y)
+    return np.stack(X), np.stack(Y)
 
-class Camvid(ProxyDataFlow):
+class Camvid(RNGDataFlow):
     name = 'camvid'
     non_void_nclasses = 11
     _void_labels = [11]
@@ -31,41 +44,44 @@ class Camvid(ProxyDataFlow):
            4: 'sidewalk', 5: 'tree', 6: 'sign', 7: 'fence', 8: 'car',
            9: 'pedestrian', 10: 'byciclist', 11: 'void'}
     
-    def __init__(self, which_set, shuffle=True, load_all=False):
+    def __init__(self, which_set, shuffle=True, pixel_z_normalize=True, data_dir=None):
+        """
+        which_set : one of train, val, test, trainval
+        shuffle:
+        data_dir: <data_dir> should contain train.npz, val.npz, test.npz
+        """
+        self.shuffle = shuffle
+        self.pixel_z_normalize = pixel_z_normalize
+
+        if data_dir is None:
+            data_dir = fs.get_dataset_path('camvid')
+        assert os.path.exists(data_dir)
+        for set_name in ['train', 'val', 'test']:
+            assert os.path.exists(os.path.join(data_dir, '{}.npz'.format(set_name)))
+
         assert which_set in ['train', 'val', 'test', 'trainval'],which_set
+        if which_set == 'train':
+            load_fns = ['train']
+        elif which_set == 'val':
+            load_fns = ['val']
+        elif which_set == 'test':
+            load_fns = ['test']
+        else: #if which_set == 'trainval':
+            load_fns = ['train', 'val'] 
+        load_fns = map(lambda fn : os.path.join(data_dir, '{}.npz'.format(fn)), load_fns)
 
-        if load_all:
-            raise NotImplementedError("Preload data processing in tfpack is not implemented yet")
+        self.X, self.Y = load_data_from_npzs(load_fns)
+        assert self.X.dtype == 'uint8'
 
-        is_train = which_set in ['train', 'trainval']
-        if is_train:
-            augm_kwargs = {
-                'crop_size' : (224, 224),
-                'horizontal_flip' : 1,
-                'channel_shift_range' : 0.04, 
-            }
-        else:
-            augm_kwargs = {
-                'crop_size' : (320, 480)
-            }
-        
-        self.ds_loader = CamvidDataset(
-                which_set=which_set,
-                batch_size=3,
-                seq_per_subset=0,
-                seq_length=0,
-                data_augm_kwargs=augm_kwargs,
-                return_one_hot=False,
-                return_01c=True,
-                return_0_255=False,
-                return_list=True,
-                use_threads=False,
-                fill_last_batch=False,
-                shuffle_at_each_epoch=shuffle,
-                remove_mean=True,
-                divide_by_std=True)
-        
-        if load_all:
-            self.ds = DatasetLoaderDataFlowLoadAll(self.ds_loader, shuffle)
-        else:
-            self.ds = DatasetLoaderDataFlow(self.ds_loader)
+    def get_data(self):
+        idxs = np.arange(len(self.X))
+        if self.shuffle:
+            self.rng.shuffle(idxs)
+        for k in idxs:
+            X = np.asarray(self.X[k], dtype=np.float32) / 255.0
+            if self.pixel_z_normalize:
+                X = (X - Camvid.mean) / Camvid.std
+            yield [X, self.Y[k]]
+
+    def size(self):
+        return len(self.X)
