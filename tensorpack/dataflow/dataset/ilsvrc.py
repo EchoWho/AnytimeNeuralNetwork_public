@@ -382,7 +382,7 @@ def distorted_bounding_box_crop(image,
 
 
 def preprocess_for_train(image, height, width, bbox,
-                         fast_mode=True,
+                         fast_mode=False,
                          scope=None):
   """Distort one image for training a network.
   Distorting images provides a useful technique for augmenting the data
