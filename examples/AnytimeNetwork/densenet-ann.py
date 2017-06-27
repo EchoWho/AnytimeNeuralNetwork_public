@@ -171,10 +171,10 @@ if __name__ == '__main__':
         else:
             args.num_classes = 100
         INPUT_SIZE = 32
+        fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_cifar_data
         ds_train = get_data('train')
         ds_val = get_data('test')
-        fs.set_dataset_path(path=args.data_dir, auto_download=False)
 
         lr_schedule = \
             [(1, 0.1), (150, 0.01), (225, 0.001)]
@@ -184,10 +184,10 @@ if __name__ == '__main__':
     elif args.ds_name == 'svhn':
         args.num_classes = 10
         INPUT_SIZE = 32
+        fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_svhn_data
         ds_train = get_data('train')
         ds_val = get_data('test')
-        fs.set_dataset_path(path=args.data_dir, auto_download=False)
 
         lr_schedule = \
             [(1, 0.1), (20, 0.01), (30, 0.001), (45, 0.0001)]
