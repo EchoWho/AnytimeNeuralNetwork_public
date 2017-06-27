@@ -80,6 +80,7 @@ def set_dataset_path(path, auto_download=False):
     assert os.path.isdir(path)
     TENSORPACK_DATASET = path
     DATASET_AUTO_DOWNLOAD=auto_download
+    logger.info("TENSORPACK_DATASET is set to be {}".format(path))
 
 def get_dataset_path(*args):
     """
@@ -92,6 +93,7 @@ def get_dataset_path(*args):
         str: path to the dataset.
     """
     d = os.environ.get('TENSORPACK_DATASET', None)
+    global TENSORPACK_DATASET
     if TENSORPACK_DATASET is not None:
         logger.info("the environemnt varible TENSORPACK_DATASET is not set, \
                     but the app received a directory to be set as the TENSORPACK_DATASET")
