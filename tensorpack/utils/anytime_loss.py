@@ -5,6 +5,7 @@ __all__ = ['sieve_loss_weights',  'eann_sieve',
     'exponential_weights', 'at_func', 
     'constant_weights', 'stack_loss_weights',
     'half_constant_half_optimal', 'linear',
+    'recursive_heavy_end', 
     'quater_constant_half_optimal',
     'loss_weights']
 
@@ -45,12 +46,35 @@ def half_constant_half_optimal(N, optimal_l=-1):
     return weights
 
 def quater_constant_half_optimal(N):
+    """
+    Not sure what this was doing... emphasize the end and the start
+    """
     weights = np.ones(N, dtype=np.float32)
     if N <= 2: 
         return weights
     weights[-1] = 2*N-4
     weights[0] = N-2
     weights /= np.float(4 * N - 8)
+    return weights
+
+def recursive_heavy_end(N):
+    """
+    N, N/2, N/4,... are set to have 1/3 of the total weights up to
+    its depth. 
+    N, N/2, N/4,... have weights decay exponentially
+
+    The other weights have constant weight
+    """
+    weights = np.ones(N, dtype=np.float32)
+    i = N-1
+    w = 1.0 * N
+    while True
+        weights[i] += w
+        if i == 0:
+            break
+        i = i // 2
+        w = w / 2.0 
+    weights /= N
     return weights
 
 def linear(N, a=0.25, b=1.0):
@@ -107,15 +131,17 @@ def loss_weights(N, args):
     elif FUNC_TYPE == 4: #constant weights
         return constant_weights(N) 
     elif FUNC_TYPE == 5: # sieve with stack
-        return stack_loss_weights(N, args.stack)
+        return stack_loss_weights(N, args.stack, sieve_loss_weights)
     elif FUNC_TYPE == 6: # linear
         return linear(N, a=0.25, b=1.0)
     elif FUNC_TYPE == 7: # half constant, half optimal at -1
         return half_constant_half_optimal(N, -1)
     elif FUNC_TYPE == 8: # quater constant, half optimal
         return quater_constant_half_optimal(N)
+    elif FUNC_TYPE == 9: # recursive heavy end
+        return stack_loss_weights(N, args.stack, recursive_heavy_end) 
     else:
-        raise NameError('func type must be either 0: exponential or 1: square\
-            or 2: optimal at --opt_at, or 3: exponential weight with base --base')
+        raise NameError('func type must be either 0: exponential or 1: square' \
+            + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
 
 
