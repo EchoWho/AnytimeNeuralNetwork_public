@@ -28,15 +28,19 @@ def get_camvid_data(which_set, shuffle=True):
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize)
     if isTrain:
-        augmentors = [
+        x_augmentors = []
+        xy_augmentors = [
             imgaug.RandomCrop((224, 224)),
             imgaug.Flip(horiz=True),
         ]
     else:
-        augmentors = [
+        x_augmentors = []
+        xy_augmentors = [
             imgaug.RandomCrop((224, 224))
         ]
-    ds = AugmentImageComponents(ds, augmentors, copy=False)
+    if len(x_augmentors) > 0:
+        ds = AugmentImageComponent(ds, x_augmentors, copy=True)
+    ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
     ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
     if isTrain:
         ds = PrefetchData(ds, 3, 2)
@@ -111,8 +115,8 @@ if __name__ == '__main__':
             ds_val = get_data('test')
 
         lr_schedule = \
-            [(1, 0.01), (15, 1e-3), (30, 1e-4), (45, 1e-5)]
-        max_epoch = 75
+            [(1, 0.001), (200, 1e-4), (400, 1e-5), (600, 1e-6)]
+        max_epoch = 750
 
     logger.info("Arguments: {}".format(args))
     logger.info("TF version: {}".format(tf.__version__))
