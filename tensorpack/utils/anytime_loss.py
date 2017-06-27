@@ -68,7 +68,7 @@ def recursive_heavy_end(N):
     weights = np.ones(N, dtype=np.float32)
     i = N-1
     w = 1.0 * N
-    while True
+    while True:
         weights[i] += w
         if i == 0:
             break
