@@ -172,9 +172,13 @@ class WeightedTensorStats(Inferencer):
 
 class MeanIoUFromConfusionMatrix(Inferencer):
     
-    def __init__(self, cm_name='confusion_matrix', scope_name_prefix='val_'):
+    def __init__(self, cm_name='confusion_matrix', scope_name_prefix='val_', is_last_void=True):
+        """
+            is_last_void : whether the last cls idx is for void label
+        """
         self.cm_name = cm_name
         self.prefix = scope_name_prefix
+        self.is_last_void = is_last_void
     
     def _get_output_tensors(self):
         return [self.cm_name]
@@ -191,20 +195,34 @@ class MeanIoUFromConfusionMatrix(Inferencer):
 
     def _after_inference(self):
         n_classes = self.total_cm.shape[0]
+        # make sure a tensor of the right size came in
         assert len(self.total_cm.shape) == 2 and self.total_cm.shape[1] == n_classes
+        
+        if self.is_last_void:
+            self.total_cm = self.total_cm[:-1]
+
         n_samples = np.sum(self.total_cm)
 
         inter = np.diag(self.total_cm)
-        union = np.sum(self.total_cm, axis=0) + np.sum(self.total_cm, axis=1) - inter 
+        row_sum = np.sum(self.total_cm, axis=1)
+        col_sum = np.sum(self.total_cm, axis=0)
+        if self.is_last_void:
+            col_sum = col_sum[:-1]
+        union = row_sum + col_sum - inter 
 
         inter = np.asarray(inter, dtype=np.float32)
         union = np.asarray(union + (union==0), dtype=np.float32)
         l_iou = inter / union 
         mean_iou = np.mean(l_iou)
 
-        ret = {self.prefix + 'mean_iou' : mean_iou}
+        pixel_accu = np.sum(inter) / np.sum(self.total_cm)
+
+        ret = dict()
+        ret[self.prefix + 'mean_iou'] = mean_iou
+        ret[self.prefix + 'pixel_accu'] = pixel_accu 
         for ci, iou in enumerate(l_iou):
             ret[self.prefix + 'iou[{:02d}]'.format(ci)] = iou
+            ret[self.prefix + 'cls_cnt[{:02d}]'.format(ci)] = row_sum[ci]
         return ret
 
 

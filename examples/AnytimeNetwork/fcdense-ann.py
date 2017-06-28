@@ -36,7 +36,7 @@ def get_camvid_data(which_set, shuffle=True):
     else:
         x_augmentors = []
         xy_augmentors = [
-            imgaug.RandomCrop((224, 224))
+            imgaug.RandomCrop((352, 480)),
         ]
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)
@@ -99,6 +99,12 @@ if __name__ == '__main__':
     model_cls = AnytimeFCDensenet
     args = parser.parse_args()
 
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
+    logger.info("Arguments: {}".format(args))
+    logger.info("TF version: {}".format(tf.__version__))
+    fs.set_dataset_path(args.data_dir)
+
     ## Set dataset-network specific assert/info
     #
     # Make sure the input images have H/W that are divisible by
@@ -115,17 +121,10 @@ if __name__ == '__main__':
             ds_val = get_data('test')
 
         lr_schedule = \
-            [(1, 0.001), (200, 1e-4), (400, 1e-5), (600, 1e-6)]
+            [(1, 0.001), (200, 1e-3 * 0.37), (400, 1e-3 * 0.37**2), (600, 1e-3 * 0.37**3)]
         max_epoch = 750
 
-    logger.info("Arguments: {}".format(args))
-    logger.info("TF version: {}".format(tf.__version__))
-
-    logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
-
-    fs.set_dataset_path(args.data_dir)
-
+    
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(arg.load):
         config.session_init = SaverRestore(args.load)

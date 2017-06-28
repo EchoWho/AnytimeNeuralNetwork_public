@@ -67,7 +67,7 @@ python $CONFIG_DIR/examples/AnytimeNetwork/densenet-ann.py \
 --model_dir=$MODEL_DIR \
 --ds_name=svhn \
 -f=2 \
---opt_at=77 \
+--opt_at=47 \
 -n=32 \
 -g=32 \
 -s=3 \
