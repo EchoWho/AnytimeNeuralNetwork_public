@@ -824,16 +824,13 @@ class AnytimeFCN(AnytimeNetwork):
                     if weight > 0:
                         scope_name = self.compute_scope_basename(layer_idx)
                         scope_name += '.'+str(wi)+'.pred/' 
-                        vcs.append(ClassificationError(\
-                            wrong_tensor_name=scope_name+'wrong-top1:0', 
-                            summary_name=scope_name+'val_err'))
                         vcs.append(MeanIoUFromConfusionMatrix(\
                             cm_name=scope_name+'confusion_matrix/SparseTensorDenseAdd:0', 
-                            scope_name_prefix=scope_name+'val_'))
+                            scope_name_prefix=scope_name+'val_',
+                            is_last_void=True))
                         vcs.append(WeightedTensorStats(\
                             names=[scope_name+'sum_abs_diff:0', 
-                                scope_name+'cross_entropy_loss:0',
-                                scope_name+'accuracy:0'],
+                                scope_name+'cross_entropy_loss:0'],
                             weight_name='dynamic_batch_size:0',
                             prefix='val_'))
         return vcs
