@@ -67,7 +67,7 @@ python $CONFIG_DIR/examples/AnytimeNetwork/densenet-ann.py \
 --model_dir=$MODEL_DIR \
 --ds_name=cifar100 \
 -f=2 \
---opt_at=77 \
+--opt_at=17 \
 -n=12 \
 -g=16 \
 -s=2 \
