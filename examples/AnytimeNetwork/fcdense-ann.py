@@ -28,7 +28,6 @@ def get_camvid_data(which_set, shuffle=True):
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize)
     if isTrain:
-        args.class_balance_frequency = ds.median_freq
         x_augmentors = []
         xy_augmentors = [
             imgaug.RandomCrop((224, 224)),
@@ -111,7 +110,9 @@ if __name__ == '__main__':
     # Make sure the input images have H/W that are divisible by
     # 2**n_pools; see tensorpack/network_models/anytime_network.py
     if args.ds_name == 'camvid':
-        args.num_classes = 12
+        args.num_classes = 11
+        # the last weight is for void
+        args.class_weight = dataset.Camvid.class_weight[:-1]
         INPUT_SIZE = None
         get_data = get_camvid_data
         if not args.is_test:

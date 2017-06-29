@@ -44,6 +44,13 @@ class Camvid(RNGDataFlow):
            4: 'sidewalk', 5: 'tree', 6: 'sign', 7: 'fence', 8: 'car',
            9: 'pedestrian', 10: 'byciclist', 11: 'void'}
     
+    # frequency and weight of each class (including void)
+    class_freq = np.array([ 0.16845114,  0.23258652,  0.00982927,  0.31658215,  0.0448627,
+        0.09724055, 0.01172954, 0.01126809, 0.05865686, 0.00639231, 0.00291665, 0.03948423])
+    class_weight = np.array([  0.49470329,   0.35828961,   8.47807568,   0.26322815,
+        1.8575192 ,   0.85698135,   7.10457224,   7.39551774,
+        1.42069214,  13.03649617,  28.57158304,   2.11054735])
+    
     def __init__(self, which_set, shuffle=True, pixel_z_normalize=True, data_dir=None):
         """
         which_set : one of train, val, test, trainval
@@ -72,20 +79,6 @@ class Camvid(RNGDataFlow):
 
         self.X, self.Y = load_data_from_npzs(load_fns)
         assert self.X.dtype == 'uint8'
-
-        freq_fn = os.path.join(data_dir, 'frequency_stats.npz')
-        freq_d = np.load(freq_fn)
-        self.natural_freq = freq_d['natural_freq'] 
-        self.median_freq = freq_d['median_freq']
-
-        def normalize_freq(f):
-            return f / float(np.sum(f)) * len(f)
-        self.natural_freq = normalize_freq(self.natural_freq)
-        self.median_freq = normalize_freq(self.median_freq)
-
-        min_non_zero = np.min(self.median_freq[self.median_freq != 0])
-        self.median_freq += (self.median_freq == 0) * min_non_zero * 0.5
-
 
     def get_data(self):
         idxs = np.arange(len(self.X))
