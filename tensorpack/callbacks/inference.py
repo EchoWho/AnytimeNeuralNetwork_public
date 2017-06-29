@@ -172,7 +172,7 @@ class WeightedTensorStats(Inferencer):
 
 class MeanIoUFromConfusionMatrix(Inferencer):
     
-    def __init__(self, cm_name='confusion_matrix', scope_name_prefix='val_', is_last_void=True):
+    def __init__(self, cm_name='confusion_matrix', scope_name_prefix='val_', is_last_void=False):
         """
             is_last_void : whether the last cls idx is for void label
         """
@@ -222,7 +222,7 @@ class MeanIoUFromConfusionMatrix(Inferencer):
         ret[self.prefix + 'pixel_accu'] = pixel_accu 
         for ci, iou in enumerate(l_iou):
             ret[self.prefix + 'iou[{:02d}]'.format(ci)] = iou
-            ret[self.prefix + 'cls_cnt[{:02d}]'.format(ci)] = row_sum[ci]
+            #ret[self.prefix + 'cls_cnt[{:02d}]'.format(ci)] = row_sum[ci]
         return ret
 
 
