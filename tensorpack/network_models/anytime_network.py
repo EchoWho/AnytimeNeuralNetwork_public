@@ -808,8 +808,7 @@ class AnytimeFCN(AnytimeNetwork):
     """
     def __init__(self, args):
         super(AnytimeFCN, self).__init__(None, args)
-        
-        
+                
     def compute_classification_callbacks(self):
         vcs = []
         total_units = self.total_units
@@ -887,7 +886,8 @@ class AnytimeFCN(AnytimeNetwork):
         label = l_label[label_img_idx] # note this is a probability of label distri
             
         ## local cost for training
-        cost = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=label)
+        cost = tf.nn.weighted_cross_entropy_with_logits(label, logits=logits, 
+            pos_weight=1. / self.class_balance_frequency)
         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
         add_moving_summary(cost)
 
@@ -945,6 +945,15 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
     def __init__(self, args):
         # set up params from regular densenet.
         AnytimeDensenet.__init__(self, None, args)
+
+        self.class_balance_frequency = None
+        if hasattr(args, 'class_balance_frequency'):
+            self.class_balance_frequency = args.class_balance_frequency
+        if self.class_balance_frequency is None:
+            self.class_balance_frequency = np.ones(self.num_classes, dtype=np.float32) 
+        logger.info('Class balance frequency: {}'.format(self.class_balance_frequency))
+        
+
         # FC-dense specific
         self.n_pools = args.n_pools
         

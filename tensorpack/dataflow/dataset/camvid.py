@@ -73,6 +73,20 @@ class Camvid(RNGDataFlow):
         self.X, self.Y = load_data_from_npzs(load_fns)
         assert self.X.dtype == 'uint8'
 
+        freq_fn = os.path.join(data_dir, 'frequency_stats.npz')
+        freq_d = np.load(freq_fn)
+        self.natural_freq = freq_d['natural_freq'] 
+        self.median_freq = freq_d['median_freq']
+
+        def normalize_freq(f):
+            return f / float(np.sum(f)) * len(f)
+        self.natural_freq = normalize_freq(self.natural_freq)
+        self.median_freq = normalize_freq(self.median_freq)
+
+        min_non_zero = np.min(self.median_freq[self.median_freq != 0])
+        self.median_freq += (self.median_freq == 0) * min_non_zero * 0.5
+
+
     def get_data(self):
         idxs = np.arange(len(self.X))
         if self.shuffle:
