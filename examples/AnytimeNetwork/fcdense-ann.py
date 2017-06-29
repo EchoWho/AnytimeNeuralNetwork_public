@@ -28,6 +28,7 @@ def get_camvid_data(which_set, shuffle=True):
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize)
     if isTrain:
+        args.class_balance_frequency = ds.median_freq
         x_augmentors = []
         xy_augmentors = [
             imgaug.RandomCrop((224, 224)),
