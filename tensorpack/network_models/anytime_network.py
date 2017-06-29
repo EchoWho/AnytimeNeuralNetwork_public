@@ -826,7 +826,7 @@ class AnytimeFCN(AnytimeNetwork):
                         vcs.append(MeanIoUFromConfusionMatrix(\
                             cm_name=scope_name+'confusion_matrix/SparseTensorDenseAdd:0', 
                             scope_name_prefix=scope_name+'val_',
-                            is_last_void=True))
+                            is_last_void=False))
                         vcs.append(WeightedTensorStats(\
                             names=[scope_name+'sum_abs_diff:0', 
                                 scope_name+'cross_entropy_loss:0'],
@@ -842,6 +842,13 @@ class AnytimeFCN(AnytimeNetwork):
         image, label_img = inputs
         if DATA_FORMAT == 'NCHW':
             image = tf.transpose(image, [0,3,1,2])
+
+        eval_mask = tf.reshape(tf.less(label_img, self.num_classes), [-1], name='eval_mask')
+        
+
+        # NOTE:
+        # If there are void labels, the one_hot generates the 0 distribution instead
+        #
         # default dtype is tf.float32
         label_img = tf.one_hot(label_img, self.num_classes, axis=-1)
 
@@ -859,9 +866,10 @@ class AnytimeFCN(AnytimeNetwork):
             label = tf.reshape(label_img, [-1, self.num_classes], \
                                name='label_{}'.format(pi))
             l_label.append(label)
-        return image, l_label
+        return image, (l_label, eval_mask)
 
-    def _compute_prediction_and_loss(self, l, l_label, unit_idx):
+    def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
+        l_label, eval_mask = label_inputs
         l = Conv2D('linear', l, self.num_classes, 1)
         logit_vars = l.variables
         if DATA_FORMAT == 'NCHW':
@@ -884,11 +892,25 @@ class AnytimeFCN(AnytimeNetwork):
             label_img_idx = 2 * self.n_pools - bi
 
         label = l_label[label_img_idx] # note this is a probability of label distri
+
+        # NOTE If it's not the last one, do not use eval_mask for confusion mat
+        if not(label_img_idx == 0 and bi > 0):
+            eval_mask = None
+        else:
+            float_mask = tf.cast(eval_mask, dtype=tf.float32)
             
         ## local cost for training
-        cost = tf.nn.weighted_cross_entropy_with_logits(label, logits=logits, 
-            pos_weight=1. / self.class_balance_frequency)
-        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
+        # NOTE have to implement our own weighted softmax cross entroy
+        max_logits = tf.reduce_max(logits, axis=1, keep_dims=True)
+        _logits = logits - max_logits
+        normalizers = tf.reduce_sum(tf.exp(_logits), axis=1, keep_dims=True)
+        _logits = _logits - tf.log(normalizers)
+
+        cross_entropy = -tf.reduce_sum(\
+            tf.multiply(label * _logits, self.class_weight), axis=1)
+        if eval_mask is not None:
+            cross_entropy = cross_entropy * float_mask
+        cost = tf.reduce_mean(cross_entropy, name='cross_entropy_loss')
         add_moving_summary(cost)
 
         ## Other evaluation metrics 
@@ -896,6 +918,8 @@ class AnytimeFCN(AnytimeNetwork):
         # total abs diff
         prob = tf.nn.softmax(logits, name='pred_prob')
         sum_abs_diff = sum_absolute_difference(prob, label)
+        if eval_mask is not None:
+           sum_abs_diff *= float_mask 
         sum_abs_diff = tf.reduce_mean(sum_abs_diff, name='sum_abs_diff')
         add_moving_summary(sum_abs_diff)
         
@@ -903,18 +927,13 @@ class AnytimeFCN(AnytimeNetwork):
         int_pred = tf.argmax(logits, 1, name='int_pred')
         int_label = tf.argmax(label, 1, name='int_label')
         cm = tf.confusion_matrix(labels=int_label, predictions=int_pred,\
-            num_classes=self.num_classes, name='confusion_matrix', weights=None)
+            num_classes=self.num_classes, name='confusion_matrix', weights=eval_mask)
 
-        # pixel level accuracy  TODO remove one of accu/err; both exist for debugging
+        # pixel level accuracy
         accu = tf.cast(tf.reduce_sum(tf.diag_part(cm)), dtype=tf.float32) \
             / tf.cast(tf.reduce_sum(cm), dtype=tf.float32)
         accu = tf.identity(accu, name='accuracy')
         add_moving_summary(accu)
-
-        # pixel level error rate
-        wrong = prediction_incorrect(logits, int_label, 1, name='wrong-top1')
-        wrong = tf.reduce_mean(wrong, name='train_error')
-        add_moving_summary(wrong)
 
         return logits, cost
 
@@ -946,14 +965,14 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         # set up params from regular densenet.
         AnytimeDensenet.__init__(self, None, args)
 
-        self.class_balance_frequency = None
-        if hasattr(args, 'class_balance_frequency'):
-            self.class_balance_frequency = args.class_balance_frequency
-        if self.class_balance_frequency is None:
-            self.class_balance_frequency = np.ones(self.num_classes, dtype=np.float32) 
-        logger.info('Class balance frequency: {}'.format(self.class_balance_frequency))
+        # Class weight for fully convolutional networks
+        self.class_weight = None
+        if hasattr(args, 'class_weight'):
+            self.class_weight = args.class_weight
+        if self.class_weight is None:
+            self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
+        logger.info('Class weights: {}'.format(self.class_weight))
         
-
         # FC-dense specific
         self.n_pools = args.n_pools
         
