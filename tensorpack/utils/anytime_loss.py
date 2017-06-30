@@ -74,6 +74,7 @@ def recursive_heavy_end(N):
             break
         i = i // 2
         w = w / 2.0 
+    weights[-1] += N # make sure last layer has 1/2
     weights /= N
     return weights
 
