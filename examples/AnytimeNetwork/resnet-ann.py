@@ -163,6 +163,11 @@ if __name__ == '__main__':
     model_cls = AnytimeResnet
     args = parser.parse_args()
 
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
+    logger.info("Arguments: {}".format(args))
+    logger.info("TF version: {}".format(tf.__version__))
+
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':
         if args.ds_name == 'cifar10':
@@ -210,11 +215,6 @@ if __name__ == '__main__':
         max_epoch = 128
          
 
-    logger.info("Arguments: {}".format(args))
-    logger.info("TF version: {}".format(tf.__version__))
-
-    logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
 
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(arg.load):
