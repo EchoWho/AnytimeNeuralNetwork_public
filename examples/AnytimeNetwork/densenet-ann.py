@@ -162,6 +162,12 @@ if __name__ == '__main__':
     anytime_network.parser_add_densenet_arguments(parser)
     model_cls = AnytimeDensenet
     args = parser.parse_args()
+
+    logger.set_log_root(log_root=args.log_dir)
+    logger.auto_set_dir()
+    logger.info("Arguments: {}".format(args))
+    logger.info("TF version: {}".format(tf.__version__))
+
     assert args.batch_size <= 64
 
     ## Set dataset-network specific assert/info
@@ -209,12 +215,6 @@ if __name__ == '__main__':
             [(1, 0.05), (30, 0.01), (60, 1e-3), (85, 1e-4), (100, 1e-5)]
         max_epoch=115
          
-    logger.info("Arguments: {}".format(args))
-    logger.info("TF version: {}".format(tf.__version__))
-
-    logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
-
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(arg.load):
         config.session_init = SaverRestore(args.load)
