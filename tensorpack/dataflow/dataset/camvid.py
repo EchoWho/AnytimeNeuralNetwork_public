@@ -47,11 +47,13 @@ class Camvid(RNGDataFlow):
     # frequency and weight of each class (including void)
     class_freq = np.array([ 0.16845114,  0.23258652,  0.00982927,  0.31658215,  0.0448627,
         0.09724055, 0.01172954, 0.01126809, 0.05865686, 0.00639231, 0.00291665, 0.03948423])
-    class_weight = np.array([  0.49470329,   0.35828961,   8.47807568,   0.26322815,
-        1.8575192 ,   0.85698135,   7.10457224,   7.39551774,
-        1.42069214,  13.03649617,  28.57158304,   2.11054735])
+    class_weight = sorted(class_freq)[len(class_freq)/2] / class_freq
+    #class_weight = np.array([  0.49470329,   0.35828961,   8.47807568,   0.26322815,
+    #    1.8575192 ,   0.85698135,   7.10457224,   7.39551774,
+    #    1.42069214,  13.03649617,  28.57158304,   2.11054735])
     
-    def __init__(self, which_set, shuffle=True, pixel_z_normalize=True, data_dir=None):
+    def __init__(self, which_set, shuffle=True, pixel_z_normalize=True, data_dir=None,
+        slide_all=False, slide_window_size=224, void_overlap=False):
         """
         which_set : one of train, val, test, trainval
         shuffle:
@@ -59,6 +61,7 @@ class Camvid(RNGDataFlow):
         """
         self.shuffle = shuffle
         self.pixel_z_normalize = pixel_z_normalize
+        self.void_overlap = void_overlap
 
         if data_dir is None:
             data_dir = fs.get_dataset_path('camvid')
@@ -80,15 +83,66 @@ class Camvid(RNGDataFlow):
         self.X, self.Y = load_data_from_npzs(load_fns)
         assert self.X.dtype == 'uint8'
 
+        self.slide_window_size = slide_window_size
+        self.slide_all = slide_all
+        self.slide_all_size =None 
+
     def get_data(self):
         idxs = np.arange(len(self.X))
         if self.shuffle:
             self.rng.shuffle(idxs)
         for k in idxs:
             X = np.asarray(self.X[k], dtype=np.float32) / 255.0
+            Y = self.Y[k]
             if self.pixel_z_normalize:
                 X = (X - Camvid.mean) / Camvid.std
-            yield [X, self.Y[k]]
+            if not self.slide_all:
+                # do not slide all windows
+                yield [X, Y]
+            else:
+                # slide all windows
+                side = self.slide_window_size
+                H,W = (X.shape[0], X.shape[1])
+                n_h = H // side + int(H % side != 0) 
+                n_w = W // side + int(W % side != 0)
+                for hi in range(n_h):
+                    h_overlap = 0
+                    row = hi*side
+                    row_end = row+side
+                    if row_end > H:
+                        if self.void_overlap:
+                            h_overlap = row - (H-side)
+                        row = H - side 
+                        row_end = H
+                    for wi in range(n_w):
+                        w_overlap = 0
+                        col = wi*side
+                        col_end = col+side
+                        if col_end > W:
+                            if self.void_overlap:
+                               w_overlap = col - (W-side) 
+                            col = W - side
+                            col_end = W
+                                
+                        Xrc = X[row:row_end, col:col_end]
+                        Yrc = Y[row:row_end, col:col_end]
+                        if h_overlap > 0 and w_overlap > 0:
+                            Yrc[:h_overlap, :w_overlap] = Camvid._void_labels[0]
+                        elif h_overlap > 0:
+                            Yrc[:h_overlap] = Camvid._void_labels[0]
+                        elif w_overlap > 0:
+                            Yrc[:, :w_overlap] = Camvid._void_labels[0]
+
+                        yield [Xrc, Yrc]
+                
 
     def size(self):
-        return len(self.X)
+        if not self.slide_all:
+            return len(self.X)
+        if self.slide_all_size is None:
+            H, W = self.X.shape[1], self.X.shape[2]
+            side = self.slide_window_size
+            n_h = H // side + int(H % side !=0)
+            n_w = W // side + int(W % side !=0)
+            self.slide_all_size = n_h * n_w * len(self.X)
+        return self.slide_all_size
