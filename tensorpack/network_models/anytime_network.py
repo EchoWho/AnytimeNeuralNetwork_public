@@ -133,11 +133,11 @@ def parser_add_common_arguments(parser):
                         type=int, default=1)
     parser.add_argument('--prediction_1x1_conv', 
                         help='whether use 1x1 before fc to predict',
-                        type=bool, default=False)
+                        default=False, action='store_true')
 
     # stop gradient / forward thinking
     parser.add_argument('--stop_gradient', help='Whether to stop gradients.',
-                        type=bool, default=False)
+                        default=False, action='store_true')
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
                         type=np.float32, default=0)
 
@@ -168,6 +168,8 @@ def parser_add_common_arguments(parser):
                         type=np.float32, default=0.01)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=10)
+    parser.add_argument('--regularize_coef', help='How coefficient of regularization decay',
+                        type=str, default='const', choices=['const', 'decay']) 
     return parser, depth_group
 
 
@@ -348,13 +350,14 @@ class AnytimeNetwork(ModelDesc):
             dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
             ll_feats = self._compute_ll_feats(image)
             
-            if self.network_config.s_type == 'imagenet':
-                wd_w = 1e-6
-            elif self.options.stop_gradient:
+            if self.options.stop_gradient:
+                # NOTE:
                 # Do not regularize for stop-gradient case, because
                 # stop-grad requires cycling lr, and switching training targets
                 wd_w = 0
-            else:
+            elif self.options.regularize_coef == 'const':
+                wd_w = 1e-4
+            elif self.options.regularize_coef == 'decay':
                 wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                                   480000, 0.2, True)
             
@@ -644,8 +647,11 @@ def parser_add_densenet_arguments(parser):
                              type=int)
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
-    parser.add_argument('--use_dense_init_ch', help='whether to use the default init_c of densenet',
-                        type=bool, default=True)
+    parser.add_argument('--use_init_ch', 
+        help='whether to use specified init channel argument, '\
+        +' useful for networks that has init_ch based on'\
+        +' other metrics such as densenet',
+                        default=False, action='store_true')
     parser.add_argument('--dense_select_method', help='densenet previous feature selection choice',
                         type=int, default=0)
     parser.add_argument('--log_dense_coef', help='The constant multiplier of log(depth) to connect',
@@ -663,7 +669,7 @@ class AnytimeDensenet(AnytimeNetwork):
         self.reduction_ratio = self.options.reduction_ratio
         self.growth_rate = self.options.growth_rate
 
-        if self.options.use_dense_init_ch:
+        if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
             if self.init_channel != default_ch:
                 self.init_channel = default_ch
@@ -704,7 +710,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 self.exponential_diffs = exponential_diffs
             diffs = self.exponential_diffs 
         elif self.dense_select_method == 1:
-            diffs = list(range(int(np.log2(ui + 1)) + 1))
+            diffs = list(range(int(np.log2(ui + 1) * self.log_dense_coef) + 1))
         elif self.dense_select_method == 2:
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
@@ -745,6 +751,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 # The current version saves the after-bnrelue to save mem/computation
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
+                #ml = BNReLU('bnrelu_merged', ml)
                 if self.network_config.b_type == 'bottleneck':
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', 4*self.growth_rate, 1, nl=BNReLU)
@@ -752,10 +759,12 @@ class AnytimeDensenet(AnytimeNetwork):
                 else:
                     assert self.network_config.b_type == 'basic'
                     l = Conv2D('conv3x3', ml, self.growth_rate, 3, nl=BNReLU)
+                #l = Dropout(l, keep_prob=0.2)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
                 if self.weights[unit_idx] > 0:
+                    #l = BNReLU('bnrlu_local', l)
                     pmls.append(tf.concat([ml, l], CHANNEL_DIM, name='concat_pred'))
                 else:
                     pmls.append(None)
@@ -774,6 +783,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 new_pls.append((LinearWrap(pl)
                     .Conv2D('conv', int(ch_in * self.reduction_ratio), 1, nl=BNReLU)
                     .AvgPooling('pool', 2, padding='SAME')()))
+                # Dropout(l, keep_prob=0.2)
         return new_pls
 
     def _compute_ll_feats(self, image):
@@ -825,8 +835,7 @@ class AnytimeFCN(AnytimeNetwork):
                         scope_name += '.'+str(wi)+'.pred/' 
                         vcs.append(MeanIoUFromConfusionMatrix(\
                             cm_name=scope_name+'confusion_matrix/SparseTensorDenseAdd:0', 
-                            scope_name_prefix=scope_name+'val_',
-                            is_last_void=False))
+                            scope_name_prefix=scope_name+'val_'))
                         vcs.append(WeightedTensorStats(\
                             names=[scope_name+'sum_abs_diff:0', 
                                 scope_name+'cross_entropy_loss:0'],
@@ -870,6 +879,7 @@ class AnytimeFCN(AnytimeNetwork):
 
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
         l_label, eval_mask = label_inputs
+        # All previous layers have gone through BNReLU, so conv directly
         l = Conv2D('linear', l, self.num_classes, 1)
         logit_vars = l.variables
         if DATA_FORMAT == 'NCHW':
@@ -893,24 +903,32 @@ class AnytimeFCN(AnytimeNetwork):
 
         label = l_label[label_img_idx] # note this is a probability of label distri
 
-        # NOTE If it's not the last one, do not use eval_mask for confusion mat
+        # NOTE If it's not the last one, do not use eval_mask for confusion mat,
+        # because some superpixels have partial void pixels and need to be trained.
         if not(label_img_idx == 0 and bi > 0):
             eval_mask = None
         else:
             float_mask = tf.cast(eval_mask, dtype=tf.float32)
+            n_non_void_samples = tf.reduce_sum(float_mask) + 1e-20
             
-        ## local cost for training
-        # NOTE have to implement our own weighted softmax cross entroy
+        ## Local cost/loss for training
+
+        # Have to implement our own weighted softmax cross entroy
+        # because TF doesn't provide one 
+        # Because logits and cost are returned in the end of this func, 
+        # we use _logit to represent  the shifted logits.
         max_logits = tf.reduce_max(logits, axis=1, keep_dims=True)
         _logits = logits - max_logits
         normalizers = tf.reduce_sum(tf.exp(_logits), axis=1, keep_dims=True)
         _logits = _logits - tf.log(normalizers)
-
         cross_entropy = -tf.reduce_sum(\
             tf.multiply(label * _logits, self.class_weight), axis=1)
         if eval_mask is not None:
             cross_entropy = cross_entropy * float_mask
-        cost = tf.reduce_mean(cross_entropy, name='cross_entropy_loss')
+            cost = tf.divide(tf.reduce_sum(cross_entropy), n_non_void_samples,
+                name='cross_entropy_loss')
+        else:
+            cost = tf.reduce_mean(cross_entropy, name='cross_entropy_loss')
         add_moving_summary(cost)
 
         ## Other evaluation metrics 
@@ -919,11 +937,14 @@ class AnytimeFCN(AnytimeNetwork):
         prob = tf.nn.softmax(logits, name='pred_prob')
         sum_abs_diff = sum_absolute_difference(prob, label)
         if eval_mask is not None:
-           sum_abs_diff *= float_mask 
-        sum_abs_diff = tf.reduce_mean(sum_abs_diff, name='sum_abs_diff')
+            sum_abs_diff *= float_mask 
+            sum_abs_diff = tf.divide(tf.reduce_sum(sum_abs_diff), 
+                n_non_void_samples, name='sum_abs_diff')
+        else:
+            sum_abs_diff = tf.reduce_mean(sum_abs_diff, name='sum_abs_diff')
         add_moving_summary(sum_abs_diff)
         
-        # confusion matrix for mean_iou (also by class) 
+        # confusion matrix for iou and pixel level accuracy
         int_pred = tf.argmax(logits, 1, name='int_pred')
         int_label = tf.argmax(label, 1, name='int_label')
         cm = tf.confusion_matrix(labels=int_label, predictions=int_pred,\
@@ -1014,7 +1035,6 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
 
             BNReLUConv in the original. ConvBNReLU here. 
 
-            DropOut is removed
         """
         l_feats = self._compute_init_l_feats(image)
         pls = [l_feats[0]]
@@ -1029,11 +1049,18 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
             elif bi < self.n_blocks - 1:
                 # To check: first deconv at self.n_pools, every layer except the last block
                 # has pl of featmap-size of n_pools-1. 
-                # The second to the last block has the final upsampling. Only the first 
-                # l_pls[0] can be directly used. the 2nd to last bi == 2*n_poolsi -1
+                # The second to the last block has the final upsampling, and it has 
+                # bi = 2*n_pools - 1; The featmap size matches that of l_pls[0] 
                 skip_pls = l_pls[2*self.n_pools - bi - 1]
                 pls = self.compute_transition_up(pls, skip_pls, bi)
         
         ll_feats = [ [ feat ] for feat in pmls ]
         assert len(ll_feats) == self.total_units
         return ll_feats
+
+    def _get_optimizer(self):
+        assert self.options.init_lr > 0, self.options.init_lr
+        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
+        opt = tf.train.RMSPropOptimizer(lr, 0.995)
+        return opt
+
