@@ -13,6 +13,7 @@ from tensorpack.utils import fs
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeFCDensenet
 
+
 """
 """
 INPUT_SIZE=None
@@ -21,12 +22,16 @@ lr_schedule=None
 max_epoch=None
 get_data=None
 
-def get_camvid_data(which_set, shuffle=True):
+def get_camvid_data(which_set, shuffle=False, slide_all=False):
     isTrain = which_set == 'train' or which_set == 'trainval'
 
+    side = 224
     pixel_z_normalize = True 
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
-        pixel_z_normalize=pixel_z_normalize)
+        pixel_z_normalize=pixel_z_normalize,
+        slide_all=not isTrain,
+        slide_window_size=side,
+        void_overlap=not isTrain)
     if isTrain:
         x_augmentors = []
         xy_augmentors = [
@@ -36,7 +41,7 @@ def get_camvid_data(which_set, shuffle=True):
     else:
         x_augmentors = []
         xy_augmentors = [
-            imgaug.RandomCrop((352, 480)),
+            imgaug.RandomCrop((224, 224)),
         ]
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)
@@ -46,6 +51,22 @@ def get_camvid_data(which_set, shuffle=True):
         ds = PrefetchData(ds, 3, 2)
     return ds
 
+def eval_on_camvid(ds):
+    model = AnytimeFCDensenet(args)
+    pred_config = PredictConfig(
+        model=model,
+        session_init=SaverRestore(args.load),
+        input_names=['input', 'label'],
+        output_names=['layer090.0.pred/confusion_matrix/SparseTensorDenseAdd:0']
+        #, 'eval_mask:0', 'label']
+    )
+    pred = SimpleDatasetPredictor(pred_config, ds)
+    mean_iou = MeanIoUFromConfusionMatrix()
+    mean_iou._before_inference()
+    for o in pred.get_result():
+        mean_iou._datapoint([o[0]])
+    ret = mean_iou._after_inference()
+    print ret
 
 
 def get_config(ds_trian, ds_val, model_cls):
@@ -62,7 +83,7 @@ def get_config(ds_trian, ds_val, model_cls):
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
-            ScheduledHyperParamSetter('learning_rate', lr_schedule),
+            #ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate')
         ] + loss_select_cbs,
         model=model,
@@ -89,12 +110,14 @@ if __name__ == '__main__':
                         type=str, default=None)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
-                        type=bool, default=False)
+                        default=False, action='store_true')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
-                        type=bool, default=False)
+                        default=False, action='store_true')
     parser.add_argument('--is_test', help='Whehter use train-val or trainval-test',
-                        type=bool, default=False)
+                        default=False, action='store_true')
+    parser.add_argument('--eval',  help='whether do evaluation only',
+                        default=False, action='store_true')
     anytime_network.parser_add_fcdense_arguments(parser)
     model_cls = AnytimeFCDensenet
     args = parser.parse_args()
@@ -119,16 +142,20 @@ if __name__ == '__main__':
             ds_train = get_data('train') #trainval
             ds_val = get_data('val') #test
         else:
-            ds_train = get_data('trainval')
+            ds_train = get_data('train')
             ds_val = get_data('test')
 
-        lr_schedule = \
-            [(1, 0.001), (200, 1e-3 * 0.37), (400, 1e-3 * 0.37**2), (600, 1e-3 * 0.37**3)]
-        max_epoch = 750
+        if args.eval:
+            eval_on_camvid(ds_val)
+            sys.exit()
+
+        #lr_schedule = \
+        #    [(1, 0.001), (200, 1e-3 * 0.37), (400, 1e-3 * 0.37**2), (600, 1e-3 * 0.37**3)]
+        max_epoch = 1000
 
     
     config = get_config(ds_train, ds_val, model_cls)
-    if args.load and os.path.exists(arg.load):
+    if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
     SyncMultiGPUTrainer(config).train()
