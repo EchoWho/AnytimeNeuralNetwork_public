@@ -11,7 +11,7 @@ from tensorpack.utils import utils
 from tensorpack.utils import fs
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeFCDensenet
+from tensorpack.network_models.anytime_network import FCDensenet
 
 
 """
@@ -22,14 +22,14 @@ lr_schedule=None
 max_epoch=None
 get_data=None
 
-def get_camvid_data(which_set, shuffle=False, slide_all=False):
+def get_camvid_data(which_set, shuffle=True, slide_all=False):
     isTrain = which_set == 'train' or which_set == 'trainval'
 
     side = 224
     pixel_z_normalize = True 
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize,
-        slide_all=not isTrain,
+        slide_all=False,
         slide_window_size=side,
         void_overlap=not isTrain)
     if isTrain:
@@ -119,7 +119,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval',  help='whether do evaluation only',
                         default=False, action='store_true')
     anytime_network.parser_add_fcdense_arguments(parser)
-    model_cls = AnytimeFCDensenet
+    model_cls = FCDensenet
     args = parser.parse_args()
 
     logger.set_log_root(log_root=args.log_dir)
