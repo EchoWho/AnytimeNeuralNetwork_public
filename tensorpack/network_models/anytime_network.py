@@ -909,7 +909,8 @@ class AnytimeFCN(AnytimeNetwork):
             eval_mask = None
         else:
             float_mask = tf.cast(eval_mask, dtype=tf.float32)
-            n_non_void_samples = tf.reduce_sum(float_mask) + 1e-20
+            n_non_void_samples = tf.reduce_sum(float_mask)
+            n_non_void_samples += tf.cast(tf.equal(n_non_void_samples, 0.0), tf.float32)
             
         ## Local cost/loss for training
 
@@ -1011,6 +1012,9 @@ class FCDensenet(AnytimeFCN):
     def _transition_down(self, stack, bi):
         with tf.variable_scope('TD_{}'.format(bi)) as scope:
             stack = BNReLU('bnrelu', stack)
+            ch_in = stack.get_shape().as_list()[CHANNEL_DIM]
+            stack = Conv2D('conv1x1', stack, ch_in, 1)
+            stack = Dropout('dropout', stack, keep_prob=0.9)
             stack = MaxPooling('pool', stack, 2, padding='SAME')
         return stack
 
@@ -1023,7 +1027,7 @@ class FCDensenet(AnytimeFCN):
             with tf.variable_scope(scope_name+'.feat'):
                 stack = BNReLU('bnrelu', stack)
                 l = Conv2D('conv3x3', stack, self.growth_rate, 3)
-                l = Dropout('dropout', l, keep_prob=0.8)
+                l = Dropout('dropout', l, keep_prob=0.9)
                 stack = tf.concat([stack, l], CHANNEL_DIM, name='concat_feat')
                 l_layers.append(l)
         return stack, unit_idx, l_layers
