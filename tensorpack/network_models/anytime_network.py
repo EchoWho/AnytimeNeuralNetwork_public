@@ -972,6 +972,103 @@ def parser_add_fcdense_arguments(parser):
     return parser, depth_group
 
 
+class FCDensenet(AnytimeFCN):
+    def __init__(self, args):
+        super(FCDensenet, self).__init__(args)
+        self.reduction_ratio = self.options.reduction_ratio
+        self.growth_rate = self.options.growth_rate
+
+        # Class weight for fully convolutional networks
+        self.class_weight = None
+        if hasattr(args, 'class_weight'):
+            self.class_weight = args.class_weight
+        if self.class_weight is None:
+            self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
+        logger.info('Class weights: {}'.format(self.class_weight))
+        
+        # FC-dense specific
+        self.n_pools = args.n_pools
+        
+        # other format is not supported yet
+        assert self.n_pools * 2 + 1 == self.n_blocks
+
+        # FC-dense doesn't support width > 1 yet
+        assert self.width == 1
+        # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
+        assert self.network_config.s_type == 'basic'
+
+        # This version doesn't support anytime prediction (yet) 
+        assert self.options.func_type == FUNC_TYPE_OPT
+    
+    def _transition_up(self, skip_stack, l_layers, bi):
+        with tf.variable_scope('TU_{}'.format(bi)) as scope:
+            stack = tf.concat(l_layers, CHANNEL_DIM, name='concat_recent')
+            ch_out = stack.get_shape().as_list()[CHANNEL_DIM]
+            stack = Deconv2D('deconv', stack, ch_out, 3, 2)
+            stack = tf.concat([skip_stack, stack], CHANNEL_DIM, name='concat_skip')
+        return stack
+
+    def _transition_down(self, stack, bi):
+        with tf.variable_scope('TD_{}'.format(bi)) as scope:
+            stack = BNReLU('bnrelu', stack)
+            stack = MaxPooling('pool', stack, 2, padding='SAME')
+        return stack
+
+    def _dense_block(self, stack, n_units, init_uidx):
+        unit_idx = init_uidx
+        l_layers = []
+        for ui in range(n_units):
+            unit_idx += 1
+            scope_name = self.compute_scope_basename(unit_idx)
+            with tf.variable_scope(scope_name+'.feat'):
+                stack = BNReLU('bnrelu', stack)
+                l = Conv2D('conv3x3', stack, self.growth_rate, 3)
+                l = Dropout('dropout', l, keep_prob=0.8)
+                stack = tf.concat([stack, l], CHANNEL_DIM, name='concat_feat')
+                l_layers.append(l)
+        return stack, unit_idx, l_layers
+    
+    def _compute_ll_feats(self, image):
+        # compute init feature
+        l_feats = self._compute_init_l_feats(image)
+        stack = l_feats[0]
+
+        n_units_per_block = self.network_config.n_units_per_block
+
+        # compute downsample blocks
+        unit_idx = -1
+        skip_connects = []
+        for bi in range(self.n_pools):
+            n_units = n_units_per_block[bi]
+            stack, unit_idx, l_layers = self._dense_block(stack, n_units, unit_idx)
+            skip_connects.append(stack)
+            stack = self._transition_down(stack, bi)
+
+        # center block
+        skip_connects = list(reversed(skip_connects))
+        n_units = n_units_per_block[self.n_pools]
+        stack, unit_idx, l_layers = self._dense_block(stack, n_units, unit_idx) 
+
+        # upsampling blocks
+        for bi in range(self.n_pools):
+            stack = self._transition_up(skip_connects[bi], l_layers, bi)
+            n_units = n_units_per_block[bi+self.n_pools+1] 
+            stack, unit_idx, l_layers = self._dense_block(stack, n_units, unit_idx)
+
+        # interface with AnytimeFCN 
+        # creat dummy feature for previous layers, and use stack as final feat
+        ll_feats = [ [None] for i in range(unit_idx+1) ]
+        stack = BNReLU('bnrelu_final', stack)
+        ll_feats[-1] = [stack]
+        return ll_feats
+
+    def _get_optimizer(self):
+        assert self.options.init_lr > 0, self.options.init_lr
+        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
+        opt = tf.train.RMSPropOptimizer(lr, 0.995)
+        return opt
+
+
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
     """
         Anytime FC-densenet. Use AnytimeFCN to have FC input, logits, costs. 
