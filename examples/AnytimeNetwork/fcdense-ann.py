@@ -11,7 +11,7 @@ from tensorpack.utils import utils
 from tensorpack.utils import fs
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import FCDensenet
+from tensorpack.network_models.anytime_network import AnytimeFCDensenet
 
 
 """
@@ -29,7 +29,7 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
     pixel_z_normalize = True 
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize,
-        slide_all=False,
+        slide_all=slide_all,
         slide_window_size=side,
         void_overlap=not isTrain)
     if isTrain:
@@ -51,21 +51,33 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         ds = PrefetchData(ds, 3, 2)
     return ds
 
-def eval_on_camvid(ds):
+def eval_on_camvid(get_data):
+    if args.is_test:
+        which_set = 'test'
+    else:
+        which_set = 'val'
+    ds = get_data(which_set, shuffle=False, slide_all=True)
     model = AnytimeFCDensenet(args)
     pred_config = PredictConfig(
         model=model,
         session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
-        output_names=['layer090.0.pred/confusion_matrix/SparseTensorDenseAdd:0']
+        output_names=['layer090.0.pred/confusion_matrix/SparseTensorDenseAdd:0',
+            'layer090.0.pred/cross_entropy_loss:0', 'label',
+            'layer090.0.pred/logits:0']
         #, 'eval_mask:0', 'label']
     )
     pred = SimpleDatasetPredictor(pred_config, ds)
     mean_iou = MeanIoUFromConfusionMatrix()
     mean_iou._before_inference()
-    for o in pred.get_result():
+
+    l_output_list = []
+    for i, o in enumerate(pred.get_result()):
+        l_output_list.append(o)
         mean_iou._datapoint([o[0]])
     ret = mean_iou._after_inference()
+    import ipdb as pdb
+    pdb.set_trace()
     print ret
 
 
@@ -83,7 +95,7 @@ def get_config(ds_trian, ds_val, model_cls):
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
-            #ScheduledHyperParamSetter('learning_rate', lr_schedule),
+            ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate')
         ] + loss_select_cbs,
         model=model,
@@ -118,8 +130,10 @@ if __name__ == '__main__':
                         default=False, action='store_true')
     parser.add_argument('--eval',  help='whether do evaluation only',
                         default=False, action='store_true')
+    parser.add_argument('--finetune',  help='whether do fine tuning',
+                        default=False, action='store_true')
     anytime_network.parser_add_fcdense_arguments(parser)
-    model_cls = FCDensenet
+    model_cls = AnytimeFCDensenet
     args = parser.parse_args()
 
     logger.set_log_root(log_root=args.log_dir)
@@ -140,22 +154,26 @@ if __name__ == '__main__':
         get_data = get_camvid_data
         if not args.is_test:
             ds_train = get_data('train') #trainval
-            ds_val = get_data('val') #test
+            ds_val = get_data('val', slide_all=True) #test
         else:
             ds_train = get_data('train')
             ds_val = get_data('test')
 
         if args.eval:
-            eval_on_camvid(ds_val)
+            eval_on_camvid(get_data)
             sys.exit()
 
-        #lr_schedule = \
-        #    [(1, 0.001), (200, 1e-3 * 0.37), (400, 1e-3 * 0.37**2), (600, 1e-3 * 0.37**3)]
-        max_epoch = 1000
+        max_epoch = 750
+        lr = args.init_lr
+        lr_schedule = []
+        for i in range(max_epoch):
+            lr *= 0.995
+            lr_schedule.append((i+1, lr))
 
     
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
-        config.session_init = SaverRestore(args.load)
+        l_not_load = []
+        config.session_init = SaverRestore(args.load, l_not_load=l_not_load)
     config.nr_tower = args.nr_gpu
     SyncMultiGPUTrainer(config).train()

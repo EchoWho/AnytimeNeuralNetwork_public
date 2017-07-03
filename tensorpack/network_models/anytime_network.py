@@ -170,6 +170,8 @@ def parser_add_common_arguments(parser):
                         type=int, default=10)
     parser.add_argument('--regularize_coef', help='How coefficient of regularization decay',
                         type=str, default='const', choices=['const', 'decay']) 
+    parser.add_argument('--regularize_const', help='Regularization constant',
+                        type=float, default=1e-4)
     return parser, depth_group
 
 
@@ -356,7 +358,7 @@ class AnytimeNetwork(ModelDesc):
                 # stop-grad requires cycling lr, and switching training targets
                 wd_w = 0
             elif self.options.regularize_coef == 'const':
-                wd_w = 1e-4
+                wd_w = self.options.regularize_const
             elif self.options.regularize_coef == 'decay':
                 wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                                   480000, 0.2, True)
@@ -410,6 +412,7 @@ class AnytimeNetwork(ModelDesc):
 
                     ## Regularize weights from FC layers.
                     wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W)
+                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.b)
 
                     ## Compute reward for loss selecters. 
 
@@ -438,8 +441,8 @@ class AnytimeNetwork(ModelDesc):
         #end argscope
 
         # weight decay on all W on conv layers for regularization
-        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss), \
-                         name='wd_cost')
+        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss))
+        wd_cost = tf.identity(wd_cost, name='wd_cost')
         total_cost = tf.identity(total_cost, name='sum_losses')
         add_moving_summary(total_cost, wd_cost)
         add_param_summary(('.*/W', ['histogram']))   # monitor W
@@ -759,7 +762,6 @@ class AnytimeDensenet(AnytimeNetwork):
                 else:
                     assert self.network_config.b_type == 'basic'
                     l = Conv2D('conv3x3', ml, self.growth_rate, 3, nl=BNReLU)
-                #l = Dropout(l, keep_prob=0.2)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -783,7 +785,6 @@ class AnytimeDensenet(AnytimeNetwork):
                 new_pls.append((LinearWrap(pl)
                     .Conv2D('conv', int(ch_in * self.reduction_ratio), 1, nl=BNReLU)
                     .AvgPooling('pool', 2, padding='SAME')()))
-                # Dropout(l, keep_prob=0.2)
         return new_pls
 
     def _compute_ll_feats(self, image):
@@ -852,7 +853,9 @@ class AnytimeFCN(AnytimeNetwork):
         if DATA_FORMAT == 'NCHW':
             image = tf.transpose(image, [0,3,1,2])
 
-        eval_mask = tf.reshape(tf.less(label_img, self.num_classes), [-1], name='eval_mask')
+        eval_mask = tf.reshape(tf.less(label_img, self.num_classes), [-1])
+        eval_mask = tf.cast(eval_mask, dtype=tf.float32)
+        eval_mask = Dropout('eval_mask', eval_mask, keep_prob=0.5)
         
 
         # NOTE:
@@ -880,11 +883,11 @@ class AnytimeFCN(AnytimeNetwork):
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
         l_label, eval_mask = label_inputs
         # All previous layers have gone through BNReLU, so conv directly
-        l = Conv2D('linear', l, self.num_classes, 1)
+        l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
         if DATA_FORMAT == 'NCHW':
             l = tf.transpose(l, [0,2,3,1]) 
-        logits = tf.reshape(l, [-1, self.num_classes])
+        logits = tf.reshape(l, [-1, self.num_classes], name='logits')
         logits.variables = logit_vars
 
         # compute  block idx
@@ -1013,8 +1016,8 @@ class FCDensenet(AnytimeFCN):
         with tf.variable_scope('TD_{}'.format(bi)) as scope:
             stack = BNReLU('bnrelu', stack)
             ch_in = stack.get_shape().as_list()[CHANNEL_DIM]
-            stack = Conv2D('conv1x1', stack, ch_in, 1)
-            stack = Dropout('dropout', stack, keep_prob=0.9)
+            stack = Conv2D('conv1x1', stack, ch_in, 1, use_bias=True)
+            stack = Dropout('dropout', stack, keep_prob=0.8)
             stack = MaxPooling('pool', stack, 2, padding='SAME')
         return stack
 
@@ -1026,8 +1029,8 @@ class FCDensenet(AnytimeFCN):
             scope_name = self.compute_scope_basename(unit_idx)
             with tf.variable_scope(scope_name+'.feat'):
                 stack = BNReLU('bnrelu', stack)
-                l = Conv2D('conv3x3', stack, self.growth_rate, 3)
-                l = Dropout('dropout', l, keep_prob=0.9)
+                l = Conv2D('conv3x3', stack, self.growth_rate, 3, use_bias=True)
+                l = Dropout('dropout', l, keep_prob=0.8)
                 stack = tf.concat([stack, l], CHANNEL_DIM, name='concat_feat')
                 l_layers.append(l)
         return stack, unit_idx, l_layers
@@ -1069,8 +1072,9 @@ class FCDensenet(AnytimeFCN):
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr, 0.995)
+        opt = tf.train.RMSPropOptimizer(lr)
         return opt
+
 
 
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
@@ -1162,6 +1166,6 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr, 0.995)
+        opt = tf.train.RMSPropOptimizer(lr)
         return opt
 
