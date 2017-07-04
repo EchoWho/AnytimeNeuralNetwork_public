@@ -29,15 +29,26 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
     pixel_z_normalize = True 
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize,
+        is_label_one_hot=args.is_label_one_hot,
         slide_all=slide_all,
         slide_window_size=side,
         void_overlap=not isTrain)
     if isTrain:
-        x_augmentors = []
-        xy_augmentors = [
-            imgaug.RandomCrop((224, 224)),
-            imgaug.Flip(horiz=True),
-        ]
+        if args.is_label_one_hot:
+            x_augmentors = [
+                imgaug.GaussianBlur(2) ]
+            xy_augmentors = [
+                imgaug.RotationAndCropValid(7),
+                imgaug.RandomResize((0.8, 2.0), (0.8, 2.0), aspect_ratio_thres=0.0),
+                imgaug.RandomCrop((224, 224)),
+                imgaug.Flip(horiz=True),
+            ]
+        else:
+            x_augmentors = []
+            xy_augmentors = [ 
+                imgaug.RandomCrop((224, 224)),
+                imgaug.Flip(horiz=True),
+            ]
     else:
         x_augmentors = []
         xy_augmentors = [
@@ -48,7 +59,7 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
     ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
     ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
     if isTrain:
-        ds = PrefetchData(ds, 3, 2)
+        ds = PrefetchData(ds, 5, 5)
     return ds
 
 def eval_on_camvid(get_data):
@@ -157,7 +168,7 @@ if __name__ == '__main__':
             ds_val = get_data('val', slide_all=True) #test
         else:
             ds_train = get_data('train')
-            ds_val = get_data('test')
+            ds_val = get_data('test', slide_all=True)
 
         if args.eval:
             eval_on_camvid(get_data)
