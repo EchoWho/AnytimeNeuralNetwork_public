@@ -921,18 +921,6 @@ class AnytimeFCN(AnytimeNetwork):
             label_img = AvgPooling('label_img_{}'.format(pi+1), label_img, 2, \
                                    padding='SAME', data_format='NHWC')
 
-        # TODO remove after checking the above code works
-        #l_eval_mask = [compute_eval_mask(label_img, 'eval_mask_init')]
-        #l_label = [flatten_label(label_img, 'label_init')]
-        #
-        #for pi in range(self.n_pools):
-        #    label_img = AvgPooling('label_pool{}'.format(pi), label_img, 2, \
-        #                           padding='SAME', data_format='NHWC')
-        #    label = flatten_label(label_img, 'label_{}'.format(pi))
-        #    l_label.append(label)
-        #    eval_mask = compute_eval_mask(label_img, 'eval_mask_{}'.format(pi))
-        #    l_eval_mask.append(eval_mask)
-
         return image, (l_label, l_mask)
 
 
