@@ -165,10 +165,10 @@ if __name__ == '__main__':
         get_data = get_camvid_data
         if not args.is_test:
             ds_train = get_data('train') #trainval
-            ds_val = get_data('val', slide_all=True) #test
+            ds_val = get_data('val') #test
         else:
             ds_train = get_data('train')
-            ds_val = get_data('test', slide_all=True)
+            ds_val = get_data('test')
 
         if args.eval:
             eval_on_camvid(get_data)
