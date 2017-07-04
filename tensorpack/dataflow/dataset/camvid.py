@@ -53,6 +53,7 @@ class Camvid(RNGDataFlow):
     #    1.42069214,  13.03649617,  28.57158304,   2.11054735])
     
     def __init__(self, which_set, shuffle=True, pixel_z_normalize=True, data_dir=None,
+        is_label_one_hot=False, 
         slide_all=False, slide_window_size=224, void_overlap=False):
         """
         which_set : one of train, val, test, trainval
@@ -61,6 +62,7 @@ class Camvid(RNGDataFlow):
         """
         self.shuffle = shuffle
         self.pixel_z_normalize = pixel_z_normalize
+        self.is_label_one_hot = is_label_one_hot
         self.void_overlap = void_overlap
 
         if data_dir is None:
@@ -78,6 +80,7 @@ class Camvid(RNGDataFlow):
             load_fns = ['test']
         else: #if which_set == 'trainval':
             load_fns = ['train', 'val'] 
+        # These npz are assumed to have NHWC format for image, and NHW for label
         load_fns = map(lambda fn : os.path.join(data_dir, '{}.npz'.format(fn)), load_fns)
 
         self.X, self.Y = load_data_from_npzs(load_fns)
@@ -94,6 +97,13 @@ class Camvid(RNGDataFlow):
         for k in idxs:
             X = np.asarray(self.X[k], dtype=np.float32) / 255.0
             Y = self.Y[k]
+            H,W = (X.shape[0], X.shape[1])
+            if self.is_label_one_hot:
+                K = Camvid.non_void_nclasses
+                Y_tmp = np.zeros((H,W,K),dtype=np.float32) 
+                mask = (Y.reshape([-1]) < K)
+                Y_tmp.reshape([-1,K])[np.arange(H*W)[mask], Y.reshape([-1])[mask]] = 1.0
+                Y = Y_tmp
             if self.pixel_z_normalize:
                 X = (X - Camvid.mean) / Camvid.std
             if not self.slide_all:
@@ -102,7 +112,6 @@ class Camvid(RNGDataFlow):
             else:
                 # slide all windows
                 side = self.slide_window_size
-                H,W = (X.shape[0], X.shape[1])
                 n_h = H // side + int(H % side != 0) 
                 n_w = W // side + int(W % side != 0)
                 for hi in range(n_h):
