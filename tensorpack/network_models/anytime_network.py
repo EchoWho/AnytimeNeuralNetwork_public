@@ -772,6 +772,7 @@ class AnytimeDensenet(AnytimeNetwork):
                     pmls.append(None)
         return pls, pmls
 
+
     def compute_transition(self, pls, trans_idx):
         """
             Note that this is not the same as the original densenet, 
@@ -786,6 +787,7 @@ class AnytimeDensenet(AnytimeNetwork):
                     .Conv2D('conv', int(ch_in * self.reduction_ratio), 1, nl=BNReLU)
                     .AvgPooling('pool', 2, padding='SAME')()))
         return new_pls
+
 
     def _compute_ll_feats(self, image):
         l_feats = self._compute_init_l_feats(image)
@@ -813,12 +815,39 @@ class AnytimeDensenet(AnytimeNetwork):
 #   mismatch the input H/W. (And screw dynamic
 #   shape checking in tensorflow....)
 ################################################
+def parser_add_fcn_arguments(parser):
+    parser.add_argument('--is_label_one_hot', 
+        help='whether label img contains distribution of labels',
+        default=False, action='store_true')
+    parser.add_argument('--eval_threshold', 
+        help='The minimum valid labels weighting in [0,1] to trigger evaluation',
+        type=np.float32, default=0.5) 
+    parser.add_argument('--n_pools',
+        help='number of pooling blocks on the cfg.n_units_per_block',
+        type=int, default=None)
+    return parser
+
 class AnytimeFCN(AnytimeNetwork):
     """
         Overload AnytimeNetwork from classification set-up to semantic labeling.
     """
     def __init__(self, args):
         super(AnytimeFCN, self).__init__(None, args)
+
+        self.is_label_one_hot = args.is_label_one_hot
+        self.eval_threshold = args.eval_threshold
+
+        # TODO
+        # args should contain the size of the image, so that deconv can decide 
+        # whether to crop based on the sizes.
+        # Do not use these shape to set the input size though, because this
+        # would limit the input size, and make the batch-norm info void for
+        # different size of inputs
+        
+        # NOTE
+        # label_img is always NHWC or NHW
+        # If label_img is NHWC, the distribution doesn't include void. 
+        # Furthermore, label_img is 0-vec for void labels
                 
     def compute_classification_callbacks(self):
         vcs = []
@@ -839,50 +868,63 @@ class AnytimeFCN(AnytimeNetwork):
                             scope_name_prefix=scope_name+'val_'))
                         vcs.append(WeightedTensorStats(\
                             names=[scope_name+'sum_abs_diff:0', 
+                                scope_name+'prob_sqr_err:0',
                                 scope_name+'cross_entropy_loss:0'],
                             weight_name='dynamic_batch_size:0',
                             prefix='val_'))
         return vcs
         
+
     def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, None, None, 3], 'input'),
-                InputDesc(tf.int32, [None, None, None], 'label')]
+        if self.options.is_label_one_hot:
+            # the label one-hot is in fact a distribution of labels. 
+            # Void labeled pixels have 0-vector distribution.
+            label_desc = InputDesc(tf.float32, 
+                [None, None, None, self.options.num_classes], 'label')
+        else:
+            label_desc = InputDesc(tf.int32, [None, None, None], 'label')
+        return [InputDesc(tf.float32, [None, None, None, 3], 'input'), label_desc]
+
 
     def _preprocess_inputs(self, inputs):
         image, label_img = inputs
         if DATA_FORMAT == 'NCHW':
             image = tf.transpose(image, [0,3,1,2])
+        if not self.options.is_label_one_hot: 
+            # From now on label_img is tf.float one hot, void has 0-vector.
+            # because we assume void >=num_classes
+            # Note axis=-1 b/c label is NHWC always
+            label_img = tf.one_hot(label_img, self.num_classes, axis=-1)
 
-        eval_mask = tf.reshape(tf.less(label_img, self.num_classes), [-1])
-        eval_mask = tf.cast(eval_mask, dtype=tf.float32)
-        eval_mask = Dropout('eval_mask', eval_mask, keep_prob=0.5)
+        def compute_eval_mask(prob_img, name=None):
+            # note axis=-1 b/c label img is always NHWC
+            mask = tf.cast(tf.greater(tf.reduce_sum(prob_img, axis=-1), 
+                                      self.options.eval_threshold), 
+                           dtype=tf.float32)
+            mask = tf.reshape(mask, [-1])
+            mask = Dropout(name, mask, keep_prob=0.5)
+            return mask
+
+        def compute_flatten_label(prob_img, name=None):
+            return tf.reshape(prob_img, [-1, self.num_classes], name=name)
+
+        l_eval_mask = [compute_eval_mask(label_img, 'eval_mask_init')]
+        l_label = [compute_flatten_label(label_img, 'label_init')]
         
-
-        # NOTE:
-        # If there are void labels, the one_hot generates the 0 distribution instead
-        #
-        # default dtype is tf.float32
-        label_img = tf.one_hot(label_img, self.num_classes, axis=-1)
-
-        # pre-compute label_img at various scales that the algorithm may need.
-        l_label = [tf.reshape(label_img, [-1, self.num_classes], name='label_init')]
-        # TODO not supported yet because it messes up the label_img_idx. 
-        # Is there any FCN that uses imagenet start with double pooling?
-        #if self.network_config.s_type == 'imagenet'
-        #    label_img = AvgPooling('label_init_pool', label_img, 4, \
-        #                           padding='SAME', data_format='NHWC')
-
         for pi in range(self.n_pools):
             label_img = AvgPooling('label_pool{}'.format(pi), label_img, 2, \
                                    padding='SAME', data_format='NHWC')
-            label = tf.reshape(label_img, [-1, self.num_classes], \
-                               name='label_{}'.format(pi))
+            label = compute_flatten_label(label_img, 'label_{}'.format(pi))
             l_label.append(label)
-        return image, (l_label, eval_mask)
+            eval_mask = compute_eval_mask(label_img, 'eval_mask_{}'.format(pi))
+            l_eval_mask.append(eval_mask)
+
+        return image, (l_label, l_eval_mask)
+
 
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
-        l_label, eval_mask = label_inputs
-        # All previous layers have gone through BNReLU, so conv directly
+        l_label, l_eval_mask = label_inputs
+        # Assume all previous layers have gone through BNReLU, so conv directly
         l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
         if DATA_FORMAT == 'NCHW':
@@ -905,17 +947,22 @@ class AnytimeFCN(AnytimeNetwork):
             label_img_idx = 2 * self.n_pools - bi
 
         label = l_label[label_img_idx] # note this is a probability of label distri
+        eval_mask = l_eval_mask[label_img_idx]
 
-        # NOTE If it's not the last one, do not use eval_mask for confusion mat,
-        # because some superpixels have partial void pixels and need to be trained.
-        if not(label_img_idx == 0 and bi > 0):
-            eval_mask = None
-        else:
-            float_mask = tf.cast(eval_mask, dtype=tf.float32)
-            n_non_void_samples = tf.reduce_sum(float_mask)
-            n_non_void_samples += tf.cast(tf.equal(n_non_void_samples, 0.0), tf.float32)
+        n_non_void_samples = tf.reduce_sum(eval_mask)
+        n_non_void_samples += tf.cast(tf.less_equal(n_non_void_samples, 1e-12), tf.float32)
             
         ## Local cost/loss for training
+
+        # Square error between distributions. 
+        # Implement our own here b/c class weighting.
+        prob = tf.nn.softmax(logits, name='pred_prob')
+        sqr_err = tf.reduce_sum(\
+            tf.multiply(tf.square(label - prob), self.class_weight), \
+            axis=1, name='pixel_prob_square_err')
+        sqr_err = tf.divide(tf.reduce_sum(sqr_err * eval_mask), n_non_void_samples,
+            name='prob_sqr_err')
+        add_moving_summary(sqr_err)
 
         # Have to implement our own weighted softmax cross entroy
         # because TF doesn't provide one 
@@ -927,25 +974,16 @@ class AnytimeFCN(AnytimeNetwork):
         _logits = _logits - tf.log(normalizers)
         cross_entropy = -tf.reduce_sum(\
             tf.multiply(label * _logits, self.class_weight), axis=1)
-        if eval_mask is not None:
-            cross_entropy = cross_entropy * float_mask
-            cost = tf.divide(tf.reduce_sum(cross_entropy), n_non_void_samples,
-                name='cross_entropy_loss')
-        else:
-            cost = tf.reduce_mean(cross_entropy, name='cross_entropy_loss')
-        add_moving_summary(cost)
+        cross_entropy = cross_entropy * eval_mask
+        cross_entropy = tf.divide(tf.reduce_sum(cross_entropy), n_non_void_samples,
+                                  name='cross_entropy_loss')
+        add_moving_summary(cross_entropy)
 
-        ## Other evaluation metrics 
-
-        # total abs diff
-        prob = tf.nn.softmax(logits, name='pred_prob')
+        # Unweighted total abs diff
         sum_abs_diff = sum_absolute_difference(prob, label)
-        if eval_mask is not None:
-            sum_abs_diff *= float_mask 
-            sum_abs_diff = tf.divide(tf.reduce_sum(sum_abs_diff), 
-                n_non_void_samples, name='sum_abs_diff')
-        else:
-            sum_abs_diff = tf.reduce_mean(sum_abs_diff, name='sum_abs_diff')
+        sum_abs_diff *= eval_mask 
+        sum_abs_diff = tf.divide(tf.reduce_sum(sum_abs_diff), 
+                                 n_non_void_samples, name='sum_abs_diff')
         add_moving_summary(sum_abs_diff)
         
         # confusion matrix for iou and pixel level accuracy
@@ -955,24 +993,21 @@ class AnytimeFCN(AnytimeNetwork):
             num_classes=self.num_classes, name='confusion_matrix', weights=eval_mask)
 
         # pixel level accuracy
-        accu = tf.cast(tf.reduce_sum(tf.diag_part(cm)), dtype=tf.float32) \
-            / tf.cast(tf.reduce_sum(cm), dtype=tf.float32)
-        accu = tf.identity(accu, name='accuracy')
+        accu = tf.divide(tf.cast(tf.reduce_sum(tf.diag_part(cm)), dtype=tf.float32), \
+                         n_non_void_samples, name='accuracy')
         add_moving_summary(accu)
 
-        return logits, cost
+        return logits, sqr_err
 
 
 ###########
 ## FCDense
 def parser_add_fcdense_arguments(parser):
+    parser = parser_add_fcn_arguments(parser)
     parser, depth_group = parser_add_densenet_arguments(parser)
     depth_group.add_argument('--fcdense_depth',
                             help='depth of the network in number of conv',
                             type=int)
-    parser.add_argument('--n_pools',
-                        help='number of pooling blocks on the cfg.n_units_per_block',
-                        type=int, default=None)
     return parser, depth_group
 
 
