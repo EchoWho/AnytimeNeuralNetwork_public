@@ -98,12 +98,14 @@ class Camvid(RNGDataFlow):
             X = np.asarray(self.X[k], dtype=np.float32) / 255.0
             Y = self.Y[k]
             H,W = (X.shape[0], X.shape[1])
+            void = Camvid._void_labels[0]
             if self.is_label_one_hot:
                 K = Camvid.non_void_nclasses
                 Y_tmp = np.zeros((H,W,K),dtype=np.float32) 
                 mask = (Y.reshape([-1]) < K)
                 Y_tmp.reshape([-1,K])[np.arange(H*W)[mask], Y.reshape([-1])[mask]] = 1.0
                 Y = Y_tmp
+                void = np.zeros(K)
             if self.pixel_z_normalize:
                 X = (X - Camvid.mean) / Camvid.std
             if not self.slide_all:
@@ -129,18 +131,16 @@ class Camvid(RNGDataFlow):
                         col_end = col+side
                         if col_end > W:
                             if self.void_overlap:
-                               w_overlap = col - (W-side) 
+                                w_overlap = col - (W-side) 
                             col = W - side
                             col_end = W
                                 
                         Xrc = X[row:row_end, col:col_end]
-                        Yrc = Y[row:row_end, col:col_end]
-                        if h_overlap > 0 and w_overlap > 0:
-                            Yrc[:h_overlap, :w_overlap] = Camvid._void_labels[0]
-                        elif h_overlap > 0:
-                            Yrc[:h_overlap] = Camvid._void_labels[0]
-                        elif w_overlap > 0:
-                            Yrc[:, :w_overlap] = Camvid._void_labels[0]
+                        Yrc = Y[row:row_end, col:col_end].copy()
+                        if h_overlap > 0:
+                            Yrc[:h_overlap, :] = void
+                        if w_overlap > 0:
+                            Yrc[:, :w_overlap] = void
 
                         yield [Xrc, Yrc]
                 
@@ -155,3 +155,39 @@ class Camvid(RNGDataFlow):
             n_w = W // side + int(W % side !=0)
             self.slide_all_size = n_h * n_w * len(self.X)
         return self.slide_all_size
+
+    def stitch_sliding_images(self, l_imgs):
+        """
+            The l_imgs should be probability distribution of labels. 
+        """
+        side = self.slide_window_size
+        H,W = (Camvid.data_shape[0], Camvid.data_shape[1])
+        n_h = H // side + int(H % side != 0) 
+        n_w = W // side + int(W % side != 0)
+        assert n_h * n_w == len(l_imgs), len(l_imgs)
+
+        n_ch = len(l_imgs[0].reshape([-1])) / side **2
+        assert n_ch > 1, n_ch
+        image = np.zeros((H, W, n_ch))
+        i = -1
+        for hi in range(n_h):
+            row = hi * side
+            row_end = row+side
+            if row_end > H:
+                row_end = H
+                row = H - side
+            for wi in range(n_w):
+                col = wi*side
+                col_end = col+side
+                if col_end > W:
+                    col_end = W
+                    col = W - side
+                i+=1
+                r_ = row_end - row
+                c_ = col_end - col
+                window = l_imgs[i].reshape([side, side, n_ch])
+                image[row:row_end, col:col_end] += window
+        return image
+                    
+
+
