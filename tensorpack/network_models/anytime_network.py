@@ -901,9 +901,9 @@ class AnytimeFCN(AnytimeNetwork):
             mask = tf.cast(tf.greater(tf.reduce_sum(prob_img, axis=-1), 
                                       self.options.eval_threshold), 
                            dtype=tf.float32)
-            mask = tf.reshape(mask, [-1])
+            mask = tf.reshape(mask, [-1], name=name)
             # TODO is this actually beneficial; and which KP to use?
-            mask = Dropout(name, mask, keep_prob=0.5)
+            #mask = Dropout(name, mask, keep_prob=0.5)
             return mask
 
         def flatten_label(prob_img, name=None):
