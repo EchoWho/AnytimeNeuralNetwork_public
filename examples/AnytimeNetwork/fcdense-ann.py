@@ -13,6 +13,9 @@ from tensorpack.utils import fs
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeFCDensenet
 
+import matplotlib.pyplot as plt
+import ipdb as pdb
+from sklearn.metrics import confusion_matrix
 
 """
 """
@@ -21,11 +24,11 @@ args=None
 lr_schedule=None
 max_epoch=None
 get_data=None
+side = 224
 
 def get_camvid_data(which_set, shuffle=True, slide_all=False):
     isTrain = which_set == 'train' or which_set == 'trainval'
 
-    side = 224
     pixel_z_normalize = True 
     ds = dataset.Camvid(which_set, shuffle=shuffle, 
         pixel_z_normalize=pixel_z_normalize,
@@ -35,24 +38,23 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         void_overlap=not isTrain)
     if isTrain:
         if args.is_label_one_hot:
-            x_augmentors = [
-                imgaug.GaussianBlur(2) ]
+            x_augmentors = []
             xy_augmentors = [
-                imgaug.RotationAndCropValid(7),
-                imgaug.RandomResize((0.8, 2.0), (0.8, 2.0), aspect_ratio_thres=0.0),
-                imgaug.RandomCrop((224, 224)),
+                #imgaug.RotationAndCropValid(7),
+                #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
+                imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
         else:
             x_augmentors = []
             xy_augmentors = [ 
-                imgaug.RandomCrop((224, 224)),
+                imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
     else:
         x_augmentors = []
         xy_augmentors = [
-            imgaug.RandomCrop((224, 224)),
+            imgaug.RandomCrop((side, side)),
         ]
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)
@@ -62,32 +64,83 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         ds = PrefetchData(ds, 5, 5)
     return ds
 
+def label_image_to_rgb(label_img, cmap):
+    H, W = (label_img.shape[0], label_img.shape[1])
+    return np.asarray([ cmap[y] for y in label_img.reshape([-1])], dtype=np.uint8).reshape([H,W,3])
+
 def eval_on_camvid(get_data):
     if args.is_test:
         which_set = 'test'
     else:
         which_set = 'val'
     ds = get_data(which_set, shuffle=False, slide_all=True)
+
+    dscamvid = dataset.Camvid(which_set, shuffle=False, 
+        is_label_one_hot=args.is_label_one_hot,
+        slide_all=True,
+        slide_window_size=side,
+        void_overlap=True)
+
     model = AnytimeFCDensenet(args)
     pred_config = PredictConfig(
         model=model,
         session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
         output_names=['layer090.0.pred/confusion_matrix/SparseTensorDenseAdd:0',
-            'layer090.0.pred/cross_entropy_loss:0', 'label',
-            'layer090.0.pred/logits:0']
-        #, 'eval_mask:0', 'label']
+            'layer090.0.pred/pred_prob:0']
     )
     pred = SimpleDatasetPredictor(pred_config, ds)
-    mean_iou = MeanIoUFromConfusionMatrix()
-    mean_iou._before_inference()
-
     l_output_list = []
+    img_idx = -1
+    plt.close('all')
+    n_imgs=None
+    l_imgs=[]
+    total_confusion = None
     for i, o in enumerate(pred.get_result()):
         l_output_list.append(o)
-        mean_iou._datapoint([o[0]])
-    ret = mean_iou._after_inference()
-    import ipdb as pdb
+        pred = o[1]
+        if i % 2 == 0:
+            l_imgs = []
+            n_imgs = pred.shape[0] / side**2
+            l_imgs.extend(pred.reshape((n_imgs, side, side, -1)))
+        else:
+            l_imgs.extend(pred.reshape((n_imgs,side,side,-1)))
+            if (i+1) %2 ==0:
+                img_idx += 1
+                pred = dscamvid.stitch_sliding_images(l_imgs)
+                pred_lbl = np.argmax(pred, axis=-1)
+                image = dscamvid.X[img_idx]
+                label = dscamvid.Y[img_idx]
+                ds_cmap = dataset.Camvid._cmap
+                pred_img = label_image_to_rgb(pred_lbl, ds_cmap)
+                label_img = label_image_to_rgb(label, ds_cmap)
+
+                #if img_idx % 20 == 0:
+                #    fig, axarr = plt.subplots(1,3)
+                #    axarr[0].imshow(image)
+                #    axarr[1].imshow(label_img)
+                #    axarr[2].imshow(pred_img)
+                #    plt.show(block=False)
+
+                mask = label.reshape([-1]) < args.num_classes
+                cm = confusion_matrix(pred_lbl.reshape([-1])[mask], label.reshape([-1])[mask],
+                    labels=np.arange(args.num_classes))
+                if total_confusion is None:
+                    total_confusion = cm
+                else:
+                    total_confusion += cm
+        
+                
+    ret = dict()
+    ret['confmat'] = total_confusion
+    I = np.diag(total_confusion)
+    n_true = np.sum(total_confusion, axis=1)
+    n_pred = np.sum(total_confusion, axis=0)
+    U = n_true + n_pred - I
+    IoUs = np.float32(I) / U
+    mIoU = np.mean(IoUs)
+    ret['IoUs'] = IoUs
+    ret['mIoU'] = mIoU
     pdb.set_trace()
     print ret
 
@@ -158,21 +211,21 @@ if __name__ == '__main__':
     # Make sure the input images have H/W that are divisible by
     # 2**n_pools; see tensorpack/network_models/anytime_network.py
     if args.ds_name == 'camvid':
-        args.num_classes = 11
+        args.num_classes = dataset.Camvid.non_void_nclasses
         # the last weight is for void
         args.class_weight = dataset.Camvid.class_weight[:-1]
         INPUT_SIZE = None
         get_data = get_camvid_data
+        if args.eval:
+            eval_on_camvid(get_data)
+            sys.exit()
+
         if not args.is_test:
             ds_train = get_data('train') #trainval
             ds_val = get_data('val') #test
         else:
             ds_train = get_data('train')
             ds_val = get_data('test')
-
-        if args.eval:
-            eval_on_camvid(get_data)
-            sys.exit()
 
         max_epoch = 750
         lr = args.init_lr
@@ -184,7 +237,6 @@ if __name__ == '__main__':
     
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
-        l_not_load = []
-        config.session_init = SaverRestore(args.load, l_not_load=l_not_load)
+        config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
     SyncMultiGPUTrainer(config).train()
