@@ -38,10 +38,11 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         void_overlap=not isTrain)
     if isTrain:
         if args.is_label_one_hot:
-            x_augmentors = []
+            x_augmentors = [
+#                imgaug.GaussianBlur(2)]
             xy_augmentors = [
-                #imgaug.RotationAndCropValid(7),
-                #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
+#                imgaug.RotationAndCropValid(7),
+#                imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
                 imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
