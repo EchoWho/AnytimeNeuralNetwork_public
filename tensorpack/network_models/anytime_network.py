@@ -346,7 +346,7 @@ class AnytimeNetwork(ModelDesc):
         with argscope([Conv2D, Deconv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format=DATA_FORMAT), \
             argscope([Conv2D, Deconv2D], nl=tf.identity, use_bias=False, 
-                     W_init=variance_scaling_initializer(mode='FAN_OUT')):
+                     W_init=variance_scaling_initializer(mode='FAN_AVG')):
 
             image, label = self._preprocess_inputs(inputs)
             dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
