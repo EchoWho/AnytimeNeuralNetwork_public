@@ -7,7 +7,7 @@ import tensorflow as tf
 from .common import layer_register, VariableHolder
 from ..utils.argtools import shape2d, shape4d
 
-__all__ = ['Conv2D', 'Deconv2D']
+__all__ = ['Conv2D', 'Deconv2D', 'AtrousConv2D']
 
 
 @layer_register()
@@ -165,6 +165,56 @@ def Deconv2D(x, out_shape, kernel_shape,
     conv.set_shape(tf.TensorShape([None] + shp3_static))
     ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
 
+    ret.variables = VariableHolder(W=W)
+    if use_bias:
+        ret.variables.b = b
+    return ret
+
+
+@layer_register()
+def AtrousConv2D(x, ch_out, kernel_shape, dilation_rate,
+                 padding='SAME',
+                 W_init=None, b_init=None,
+                 nl=tf.identity, use_bias=True,
+                 data_format='NHWC'):
+
+    in_shape = x.get_shape().as_list()
+    if data_format == 'NHWC':
+        ch_axis = 3
+        h_axis = 1
+        w_axis = 2
+    else:
+        ch_axis = 1
+        h_axis = 2
+        w_axis = 3
+
+    ch_in = in_shape[ch_axis] 
+    h_in = in_shape[h_axis]
+    w_in = in_shape[w_axis]
+    kernel_shape = shape2d(kernel_shape)
+    filter_shape = kernel_shape + [ch_in, ch_out]
+    dilation_rate = shape2d(dilation_rate)
+    h_out = None if h_in is None else h_in * dilation_rate[0]
+    w_out = None if w_in is None else w_in * dilation_rate[1]
+    if data_format == 'NHWC':
+        out_shape = [None, h_out, w_out, ch_out]
+    else:
+        out_shape = [None, ch_out, h_out, w_out]
+    padding = padding.upper()
+
+    if W_init is None:
+        W_init = tf.contrib.layers.xavier_initializer_conv2d()
+    W = tf.get_variable('W', filter_shape, initializer=W_init)
+    if use_bias:
+        if b_init is None:
+            b_init = tf.constant_initializer()
+        b = tf.get_variable('b', [ch_out], initializer=b_init)
+
+    conv = tf.nn.convolution(x, W, padding, strides=None, 
+        dilation_rate=dilation_rate, data_format=data_format)
+    
+    conv.set_shape(tf.TensorShape(out_shape))
+    ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
     ret.variables = VariableHolder(W=W)
     if use_bias:
         ret.variables.b = b
