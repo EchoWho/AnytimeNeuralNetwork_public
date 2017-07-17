@@ -10,6 +10,7 @@ from tensorpack.utils import anytime_loss, logger, utils, fs
 from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
 from tensorflow.contrib.layers import variance_scaling_initializer
+from tensorflow.contrib.layers import xavier_initializer
 from collections import namedtuple
 import bisect
 
@@ -172,6 +173,8 @@ def parser_add_common_arguments(parser):
                         type=str, default='const', choices=['const', 'decay']) 
     parser.add_argument('--regularize_const', help='Regularization constant',
                         type=float, default=1e-4)
+    parser.add_argument('--w_init', help='method used for initializing W',
+                        type=str, default='var_scale', choices=['var_scale', 'xavier'])
     return parser, depth_group
 
 
@@ -220,6 +223,11 @@ class AnytimeNetwork(ModelDesc):
                 +" Setting samloss to be {}".format(NO_AANN_METHOD))
             self.options.ls_method = NO_AANN_METHOD
             self.options.samloss = NO_AANN_METHOD
+
+        if self.options.w_init == 'xavier':
+            self.w_init = xavier_initializer()
+        elif self.options.w_init == 'var_scale':
+            self.w_init = variance_scaling_initializer(mode='FAN_AVG')
     
     def _get_inputs(self):
         return [InputDesc(tf.float32, \
@@ -346,7 +354,7 @@ class AnytimeNetwork(ModelDesc):
         with argscope([Conv2D, Deconv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format=DATA_FORMAT), \
             argscope([Conv2D, Deconv2D], nl=tf.identity, use_bias=False), \
-            argscope([Conv2D], W_init=variance_scaling_initializer(mode='FAN_AVG')):
+            argscope([Conv2D], W_init=self.w_init):
 
             image, label = self._preprocess_inputs(inputs)
             dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
