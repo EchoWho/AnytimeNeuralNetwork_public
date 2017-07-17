@@ -82,69 +82,98 @@ def eval_on_camvid(get_data):
         slide_all=True,
         slide_window_size=side,
         void_overlap=True)
+    ds_cmap = dataset.Camvid._cmap
 
     model = AnytimeFCDensenet(args)
+
+    pred_probs = [] 
+    
+    for i, weight in enumerate(model.weights):
+        if weight > 0:
+            pred_probs.append('layer{:03d}.0.pred/pred_prob:0'.format(i))
+    print "The prediction tensor names are: {}".format(pred_probs)
+
     pred_config = PredictConfig(
         model=model,
         session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
-        output_names=['layer090.0.pred/confusion_matrix/SparseTensorDenseAdd:0',
-            'layer090.0.pred/pred_prob:0']
+        output_names=['layer090.0.pred/confusion_matrix/SparseTensorDenseAdd:0'] + pred_probs
     )
     pred = SimpleDatasetPredictor(pred_config, ds)
     l_output_list = []
     img_idx = -1
     plt.close('all')
     n_imgs=None
-    l_imgs=[]
-    total_confusion = None
-    for i, o in enumerate(pred.get_result()):
-        l_output_list.append(o)
-        pred = o[1]
-        if i % 2 == 0:
-            l_imgs = []
-            n_imgs = pred.shape[0] / side**2
-            l_imgs.extend(pred.reshape((n_imgs, side, side, -1)))
-        else:
-            l_imgs.extend(pred.reshape((n_imgs,side,side,-1)))
+    n_ann_preds = len(pred_probs)
+    ll_imgs=[[] for _ in range(len(pred_probs))]
+    l_total_confusion = [None for _ in range(len(pred_probs))]
+    save_img_dir = '/home/hanzhang/ann/img_fcn'
+    save_every = 1
+    assert args.batch_size == 3 # or this will not work yet
+
+    def copy_resize(imgs, n, h, w, c, rate):
+        return np.tile(np.tile(imgs.reshape([n * h * w, c]), 
+                               [1,rate]).reshape([n*h, w*rate*c]), 
+                       [1,rate]).reshape([n, h*rate, w*rate, c])
+        
+
+    for i, o in enumerate(pred.get_result()): # here i means batch i
+        #l_output_list.append(o)
+        if i % 2 == 1: 
+            img_idx += 1
+            image = dscamvid.X[img_idx]
+            label = dscamvid.Y[img_idx]
+            mask = label.reshape([-1]) < args.num_classes
+            label_img = label_image_to_rgb(label, ds_cmap)
+            if img_idx % save_every == 0:
+                fig, axarr = plt.subplots(1,2 + n_ann_preds, figsize=(1+ 6*(2+n_ann_preds), 5))
+                axarr[0].imshow(image)
+                axarr[1].imshow(label_img)
+
+        for pi, pred in enumerate(o[1:]):
+            if i % 2 == 0:
+                ll_imgs[pi] = []
+            l_imgs = ll_imgs[pi]
+            n_imgs = args.batch_size
+            side_pi = int(np.sqrt(pred.reshape([-1]).shape[0] / n_imgs / args.num_classes))
+            pred = copy_resize(pred, n_imgs, side_pi, side_pi, args.num_classes, side/side_pi)
+            l_imgs.extend(pred)
+
             if (i+1) %2 ==0:
-                img_idx += 1
                 pred = dscamvid.stitch_sliding_images(l_imgs)
                 pred_lbl = np.argmax(pred, axis=-1)
-                image = dscamvid.X[img_idx]
-                label = dscamvid.Y[img_idx]
-                ds_cmap = dataset.Camvid._cmap
                 pred_img = label_image_to_rgb(pred_lbl, ds_cmap)
-                label_img = label_image_to_rgb(label, ds_cmap)
 
-                #if img_idx % 20 == 0:
-                #    fig, axarr = plt.subplots(1,3)
-                #    axarr[0].imshow(image)
-                #    axarr[1].imshow(label_img)
-                #    axarr[2].imshow(pred_img)
-                #    plt.show(block=False)
+                if img_idx % save_every == 0:
+                    axarr[2 + pi].imshow(pred_img)
 
-                mask = label.reshape([-1]) < args.num_classes
-                cm = confusion_matrix(pred_lbl.reshape([-1])[mask], label.reshape([-1])[mask],
+                cm = confusion_matrix(pred_lbl.reshape([-1])[mask], 
+                    label.reshape([-1])[mask],
                     labels=np.arange(args.num_classes))
-                if total_confusion is None:
-                    total_confusion = cm
+                if l_total_confusion[pi] is None:
+                    l_total_confusion[pi] = cm
                 else:
-                    total_confusion += cm
+                    l_total_confusion[pi] += cm
         
+        if i % 2 == 1 and img_idx % save_every == 0: 
+            #plt.show(block=False)
+            img_name = os.path.join(save_img_dir, 'predictions_{:03d}.png'.format(img_idx))
+            fig.savefig(img_name, bbox_inches='tight', dpi=fig.dpi)
                 
-    ret = dict()
-    ret['confmat'] = total_confusion
-    I = np.diag(total_confusion)
-    n_true = np.sum(total_confusion, axis=1)
-    n_pred = np.sum(total_confusion, axis=0)
-    U = n_true + n_pred - I
-    IoUs = np.float32(I) / U
-    mIoU = np.mean(IoUs)
-    ret['IoUs'] = IoUs
-    ret['mIoU'] = mIoU
+    l_ret = []
+    for i, total_confusion in enumerate(l_total_confusion):
+        ret = dict()
+        ret['confmat'] = total_confusion
+        I = np.diag(total_confusion)
+        n_true = np.sum(total_confusion, axis=1)
+        n_pred = np.sum(total_confusion, axis=0)
+        U = n_true + n_pred - I
+        IoUs = np.float32(I) / U
+        mIoU = np.mean(IoUs)
+        ret['IoUs'] = IoUs
+        ret['mIoU'] = mIoU
+        l_ret.append(ret)
     pdb.set_trace()
-    print ret
 
 
 def get_config(ds_trian, ds_val, model_cls):
