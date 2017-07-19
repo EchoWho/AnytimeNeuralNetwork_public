@@ -29,15 +29,6 @@ def get_data(train_or_test):
                                   args.batch_size // args.nr_gpu, 
                                   height=INPUT_SIZE, 
                                   width=INPUT_SIZE)
-    #image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
-    #image_std = np.array([0.229, 0.224, 0.225], dtype='float32')
-    #imgaug.Saturation(0.4)
-    #imgaug.Lighting(0.1,
-    #             eigval=[0.2175, 0.0188, 0.0045],
-    #             eigvec=[[-0.5675, 0.7192, 0.4009],
-    #                     [-0.5808, -0.0045, -0.8140],
-    #                     [-0.5836, -0.6948, 0.4203]]
-    #             )
     return ds
 
 
@@ -60,7 +51,7 @@ def get_config():
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(dataset_val, classification_cbs),
             ScheduledHyperParamSetter('learning_rate',
-                [(1, 0.05), (10, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]),
+                [(1, 0.05), (30, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]),
             HumanHyperParamSetter('learning_rate'),
         ] + loss_select_cbs,
         model=model,
