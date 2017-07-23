@@ -51,7 +51,7 @@ def get_config():
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(dataset_val, classification_cbs),
             ScheduledHyperParamSetter('learning_rate',
-                [(1, 0.05), (30, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]),
+                [(1, 0.1/2), (30, 0.01 /2 ), (60, 1e-3/2), (90, 1e-4/2), (105, 1e-5/2)]),
             HumanHyperParamSetter('learning_rate'),
         ] + loss_select_cbs,
         model=model,

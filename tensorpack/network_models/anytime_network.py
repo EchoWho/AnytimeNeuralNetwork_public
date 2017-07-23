@@ -485,7 +485,7 @@ class AnytimeResnet(AnytimeNetwork):
     def __init__(self, input_size, args):
         super(AnytimeResnet, self).__init__(input_size, args)
 
-    def residual(self, name, l_feats, increase_dim=False):
+    def residual_basic(self, name, l_feats, increase_dim=False):
         """
         Basic residual function for WANN: for index w, 
         the input feat is the concat of all featus upto and including 
@@ -540,6 +540,7 @@ class AnytimeResnet(AnytimeNetwork):
                 ef = Conv2D('conv2', merged_feats, out_channel, 3)
                 # The second conv need to be BN before addition.
                 ef = BatchNorm('bn2', ef)
+                ef = tf.nn.relu(ef)
                 l = l_feats[w]
                 if increase_dim:
                     l = AvgPooling('pool', l, shape=2, stride=2)
@@ -592,8 +593,8 @@ class AnytimeResnet(AnytimeNetwork):
                 l = (LinearWrap(merged_feats)
                     .Conv2D('conv1x1_0', ch_base, 1, nl=BNReLU)
                     .Conv2D('conv3x3_1', ch_base, 3, stride=stride, nl=BNReLU)
-                    .Conv2D('conv1x1_2', ch_base*4, 1)())
-                l = BatchNorm('bn_3', l)
+                    .Conv2D('conv1x1_2', ch_base*4, 1, nl=BNReLU)())
+                #l = BatchNorm('bn_3', l)
 
                 shortcut = l_feats[w]
                 if ch_in_to_ch_base < 4:
@@ -617,7 +618,7 @@ class AnytimeResnet(AnytimeNetwork):
                 layer_idx += 1
                 scope_name = self.compute_scope_basename(layer_idx)
                 if self.network_config.b_type == 'basic':
-                    l_feats = self.residual(scope_name, l_feats, \
+                    l_feats = self.residual_basic(scope_name, l_feats, \
                         increase_dim=(k==0 and bi > 0))
                 else:
                     assert self.network_config.b_type == 'bottleneck'
