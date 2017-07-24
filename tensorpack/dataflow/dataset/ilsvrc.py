@@ -20,6 +20,8 @@ from ..base import RNGDataFlow
 import _ilsvrc_vgg_preprocess
 import _ilsvrc_inception_preprocess
 
+slim = tf.contrib.slim
+
 __all__ = ['ILSVRCMeta', 'ILSVRC12', 'ILSVRC12TFRecord']
 
 CAFFE_ILSVRC12_URL = "http://dl.caffe.berkeleyvision.org/caffe_ilsvrc12.tar.gz"
@@ -30,10 +32,10 @@ FLAGS = tf.app.flags.FLAGS
 #        """Number of images to process in a batch.""")
 #tf.app.flags.DEFINE_integer('image_size', 299,
 #        """Provide square images of this size.""")
-tf.app.flags.DEFINE_integer('num_preprocess_threads', 4,
+tf.app.flags.DEFINE_integer('num_preprocess_threads', 16,
                             """Number of preprocessing threads per tower. """
                             """Please make this a multiple of 4.""")
-tf.app.flags.DEFINE_integer('num_readers', 4,
+tf.app.flags.DEFINE_integer('num_readers', 16,
                             """Number of parallel readers during train.""")
 tf.app.flags.DEFINE_integer('train_queue_capacity', 16,
                             """training queue capacity""")
@@ -383,19 +385,24 @@ class ILSVRC12TFRecord(RNGDataFlow):
                     
                     inputs.append([image, label_index])
 
-                images, label_index_batch = tf.train.batch_join(
+                images, labels = tf.train.batch(
                     inputs,
                     batch_size=self.batch_size,
-                    capacity=2 * num_preprocess_threads * self.batch_size,
+                    num_threads=num_preprocess_threads, 
+                    capacity=5 * self.batch_size,
                     allow_smaller_final_batch=not train)
+                
+                batch_queue = slim.prefetch_queue.prefetch_queue(\
+                    [images, labels], capacity=8)
+
+                images, labels = batch_queue.dequeue()
                 
                 images = tf.cast(images, tf.float32)
                 images = tf.reshape(images, shape=[self.batch_size, self.height, self.width, 3])
-
-                label_index_batch = tf.reshape(label_index_batch, [self.batch_size])
+                labels = tf.reshape(labels, [self.batch_size])
                 
                 self.im = images
-                self.label = label_index_batch
+                self.label = labels
 
     def get_data(self):
         for _ in range(self.size()):
