@@ -518,8 +518,8 @@ class AnytimeResnet(AnytimeNetwork):
         for w in range(self.width):
             with tf.variable_scope(name+'.'+str(w)+'.mid') as scope:
                 l = BatchNorm('bn0', l_feats[w])
-                # The first round doesn't use relu per pyramidial deep net
-                # l = tf.nn.relu(l)
+                # The first round doesn't use pre relu according to pyramidial deep net
+                l = tf.nn.relu(l)
                 if w == 0:
                     merged_feats = l
                 else:
@@ -540,7 +540,6 @@ class AnytimeResnet(AnytimeNetwork):
                 ef = Conv2D('conv2', merged_feats, out_channel, 3)
                 # The second conv need to be BN before addition.
                 ef = BatchNorm('bn2', ef)
-                ef = tf.nn.relu(ef)
                 l = l_feats[w]
                 if increase_dim:
                     l = AvgPooling('pool', l, shape=2, stride=2)
@@ -586,6 +585,8 @@ class AnytimeResnet(AnytimeNetwork):
         for w in range(self.width): 
             with tf.variable_scope('{}.{}.0'.format(name, w)) as scope:
                 l = BatchNorm('bn0', l_feats[w])
+                # according to pyramidal net, do not use relu here
+                l = tf.nn.relu(l)
                 if w == 0:
                     merged_feats = l
                 else:
@@ -593,8 +594,8 @@ class AnytimeResnet(AnytimeNetwork):
                 l = (LinearWrap(merged_feats)
                     .Conv2D('conv1x1_0', ch_base, 1, nl=BNReLU)
                     .Conv2D('conv3x3_1', ch_base, 3, stride=stride, nl=BNReLU)
-                    .Conv2D('conv1x1_2', ch_base*4, 1, nl=BNReLU)())
-                #l = BatchNorm('bn_3', l)
+                    .Conv2D('conv1x1_2', ch_base*4, 1)())
+                l = BatchNorm('bn_3', l)
 
                 shortcut = l_feats[w]
                 if ch_in_to_ch_base < 4:
