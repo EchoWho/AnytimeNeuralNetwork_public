@@ -45,13 +45,14 @@ def get_config():
     model=AnytimeResnet(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
+    #lr_schedule = [(1, 1e-1/2), (30, 1e-2 /2 ), (60, 1e-3/2), (90, 1e-4/2), (105, 1e-5/2)]
+    lr_schedule = [(1, 1e-1 /2), (60, 1e-2 /2 ), (90, 1e-3 /2), (105, 1e-4 /2)]
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(dataset_val, classification_cbs),
-            ScheduledHyperParamSetter('learning_rate',
-                [(1, 0.1/2), (30, 0.01 /2 ), (60, 1e-3/2), (90, 1e-4/2), (105, 1e-5/2)]),
+            ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate'),
         ] + loss_select_cbs,
         model=model,
