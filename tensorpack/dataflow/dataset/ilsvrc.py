@@ -8,6 +8,7 @@ import cv2
 import six
 import numpy as np
 import xml.etree.ElementTree as ET
+import time
 
 import tensorflow as tf
 from tensorflow.python.ops import control_flow_ops
@@ -19,6 +20,8 @@ from ..base import RNGDataFlow
 
 import _ilsvrc_vgg_preprocess
 import _ilsvrc_inception_preprocess
+import _slim_imagenet
+
 
 slim = tf.contrib.slim
 
@@ -32,7 +35,15 @@ FLAGS = tf.app.flags.FLAGS
 #        """Number of images to process in a batch.""")
 #tf.app.flags.DEFINE_integer('image_size', 299,
 #        """Provide square images of this size.""")
-tf.app.flags.DEFINE_integer('num_preprocess_threads', 16,
+
+tf.app.flags.DEFINE_integer(
+    'labels_offset', 1,
+    'An offset for the labels in the dataset. This flag is primarily used to '
+    'evaluate the VGG and ResNet architectures which do not use a background '
+    'class for the ImageNet dataset.')
+
+
+tf.app.flags.DEFINE_integer('num_preprocess_threads', 32,
                             """Number of preprocessing threads per tower. """
                             """Please make this a multiple of 4.""")
 tf.app.flags.DEFINE_integer('num_readers', 16,
@@ -311,111 +322,62 @@ class ILSVRC12TFRecord(RNGDataFlow):
         """
             construct preprocessing graph on CPU. (copied from tf-slim)
         """
+        is_training = self.subset == 'train'
+        dataset = _slim_imagenet.get_split(self.subset, self.tfrecord_dir)
+
+        def image_preprocess(image):
+            if self.preprocess == 'vgg':
+                image = _ilsvrc_vgg_preprocess.preprocess_image(image,
+                    self.height, self.width, is_training)
+            elif self.preprocess == 'inception':
+                image = _ilsvrc_inception_preprocess.preprocess_image(image,
+                    self.height, self.width, is_training)
+            return image
+
         with tf.device('/cpu:0'):
-            with tf.name_scope('get_data'):
-                data_files = self.data_files()
-                train = self.subset == 'train'
-                if train:
-                    train_queue_capacity = FLAGS.train_queue_capacity
-                    filename_queue = tf.train.string_input_producer(data_files,
-                                                                    shuffle=True,
-                                                                    capacity=train_queue_capacity)
-                else:
-                    filename_queue = tf.train.string_input_producer(data_files,
-                                                                    shuffle=False,
-                                                                    capacity=1)
-                num_preprocess_threads = FLAGS.num_preprocess_threads
-                if num_preprocess_threads % 4:
-                    raise ValueError('Please make num_preprocess_threads a multiple '
-                                     'of 4 (%d % 4 != 0).', num_preprocess_threads)
+            provider = slim.dataset_data_provider.DatasetDataProvider(
+                dataset,
+                num_readers=FLAGS.num_readers,
+                common_queue_capacity=20 * self.batch_size,
+                common_queue_min=10 * self.batch_size, 
+                shuffle=is_training)
+            [image, label] = provider.get(['image', 'label'])
+            label -= FLAGS.labels_offset
+            
+            image = image_preprocess(image)
 
-                num_readers = FLAGS.num_readers
-                if num_readers < 1:
-                    raise ValueError('Please make num_readers at least 1')
+            images, labels = tf.train.batch(
+                [image, label],
+                batch_size=self.batch_size,
+                num_threads=FLAGS.num_preprocess_threads, 
+                capacity=5 * self.batch_size,
+                allow_smaller_final_batch=not is_training)
+            
+            images = tf.cast(images, tf.float32)
+            images = tf.reshape(images, shape=[self.batch_size, self.height, self.width, 3])
+            labels = tf.reshape(labels, [self.batch_size])
 
-                # Approximate number of examples per shard.
-                examples_per_shard = 1024
-                # Size the random shuffle queue to balance between good global
-                # mixing (more examples) and memory use (fewer examples).
-                # 1 image uses 299*299*3*4 bytes = 1MB
-                # The default input_queue_memory_factor is 16 implying a shuffling queue
-                # size: examples_per_shard * 16 * 1MB = 17.6GB
-                min_queue_examples = examples_per_shard * FLAGS.input_queue_memory_factor
-                if train:
-                     examples_queue = tf.RandomShuffleQueue(
-                        capacity=min_queue_examples + 3 * self.batch_size,
-                        min_after_dequeue=min_queue_examples,
-                        dtypes=[tf.string])
-                else:
-                    examples_queue = tf.FIFOQueue(
-                        capacity=examples_per_shard + 3 * self.batch_size,
-                        dtypes=[tf.string])
+            batch_queue = slim.prefetch_queue.prefetch_queue(\
+                [images, labels], capacity=8)
 
-                # Create multiple readers to populate the queue of examples.
-                if num_readers > 1:
-                  enqueue_ops = []
-                  for _ in range(num_readers):
-                    reader = tf.TFRecordReader()
-                    _, value = reader.read(filename_queue)
-                    enqueue_ops.append(examples_queue.enqueue([value]))
-
-                  tf.train.queue_runner.add_queue_runner(
-                      tf.train.queue_runner.QueueRunner(examples_queue, enqueue_ops))
-                  example_serialized = examples_queue.dequeue()
-                else:
-                  reader = tf.TFRecordReader()
-                  _, example_serialized = reader.read(filename_queue)
-
-                inputs = []
-                for thread_id in range(num_preprocess_threads):
-                    image_buffer, label_index, bbox, _ = ILSVRC12TFRecord.parse_example_proto(
-                        example_serialized)
-                    image = ILSVRC12TFRecord.decode_jpeg(image_buffer)
-                    if self.preprocess == 'vgg':
-                        image = _ilsvrc_vgg_preprocess.preprocess_image(image,
-                            self.height, self.width, train)
-                    elif self.preprocess == 'inception':
-                        image = _ilsvrc_inception_preprocess.preprocess(image,
-                            self.height, self.width, train, bbox)
-
-                    #image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
-                    #image_std_inv = 1.0 / np.array([0.229, 0.224, 0.225], dtype='float32')
-                    #image = tf.subtract(image, image_mean)
-                    #image = tf.multiply(image, image_std_inv)
-                    
-                    inputs.append([image, label_index])
-
-                images, labels = tf.train.batch(
-                    inputs,
-                    batch_size=self.batch_size,
-                    num_threads=num_preprocess_threads, 
-                    capacity=5 * self.batch_size,
-                    allow_smaller_final_batch=not train)
-                
-                batch_queue = slim.prefetch_queue.prefetch_queue(\
-                    [images, labels], capacity=8)
-
-                images, labels = batch_queue.dequeue()
-                
-                images = tf.cast(images, tf.float32)
-                images = tf.reshape(images, shape=[self.batch_size, self.height, self.width, 3])
-                labels = tf.reshape(labels, [self.batch_size])
-                
-                self.im = images
-                self.label = labels
+            images, labels = batch_queue.dequeue()
+            
+            
+            self.im = images
+            self.label = labels
 
     def get_data(self):
         for _ in range(self.size()):
             # it's better to run a whole bunch of images together and in parallel
             sess = tf.get_default_session()
             if sess is not None:
+                t0 = time.time()
                 im, label = sess.run([self.im, self.label])
+                t_spent = time.time() - t0
+                logger.info('loading and preprocessing: {:.4f}sec'.format(t_spent))
             else:
                 raise Exception("Expect there is a default session")
-
-            # label -1 because imagenet default labels are 1 based. (0 is background)
-            offset = 1
-            yield [im, label - offset]
+            yield [im, label]
 
     @staticmethod
     def decode_jpeg(image_buffer, scope=None):
