@@ -19,17 +19,22 @@ from tensorpack.utils.stats import RatioCounter
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeResnet
 
+import get_augmented_data
+
 args = None
 INPUT_SIZE = 224
 
+#def get_data(train_or_test):
+#    isTrain = train_or_test == 'train'
+#    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
+#                                  train_or_test, 
+#                                  args.batch_size // args.nr_gpu, 
+#                                  height=INPUT_SIZE, 
+#                                  width=INPUT_SIZE)
+#    return ds
+
 def get_data(train_or_test):
-    isTrain = train_or_test == 'train'
-    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
-                                  train_or_test, 
-                                  args.batch_size // args.nr_gpu, 
-                                  height=INPUT_SIZE, 
-                                  width=INPUT_SIZE)
-    return ds
+    return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
 
 
 def get_config():
@@ -95,6 +100,12 @@ if __name__ == '__main__':
     
     assert args.init_channel == 64
     assert args.num_classes == 1000
+    args.do_mean_std_gpu_process = True
+    args.input_type = 'uint8'
+    args.mean = get_augmented_data.ilsvrc_mean
+    args.std = get_augmented_data.ilsvrc_std
+    assert args.do_mean_std_gpu_process and args.input_type == 'uint8'
+    assert args.mean is not None and args.std is not None
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)

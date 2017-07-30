@@ -175,6 +175,14 @@ def parser_add_common_arguments(parser):
                         type=float, default=1e-4)
     parser.add_argument('--w_init', help='method used for initializing W',
                         type=str, default='var_scale', choices=['var_scale', 'xavier'])
+
+    # Special options to force input as uint8 and do mean/std process in graph in order to save memory
+    # during cpu - gpu communication
+    parser.add_argument('--input_type', help='Type for input, uint8 for certain dataset to speed up',
+                        type=str, default='float32', choices=['float32', 'uint8'])
+    parser.add_argument('--do_mean_std_gpu_process', 
+                        help='Whether use args.mean args.std to process in graph',
+                        default=False, action='store_true')
     return parser, depth_group
 
 
@@ -228,10 +236,17 @@ class AnytimeNetwork(ModelDesc):
             self.w_init = xavier_initializer()
         elif self.options.w_init == 'var_scale':
             self.w_init = variance_scaling_initializer(mode='FAN_AVG')
+
+        self.input_type = tf.float32 if self.options.input_type == 'float32' else tf.uint8
+        if self.do_mean_std_gpu_process:
+            if not hasattr(self.options, 'mean'):
+                raise Exception('gpu_graph expects mean but it is not in the options')
+            if not hasattr(self.options, 'std'):
+                raise Exception('gpu_graph expects std, but it is not in the options')
     
     def _get_inputs(self):
-        return [InputDesc(tf.float32, \
-                    [None, self.input_size, self.input_size, 3], 'input'),
+        return [InputDesc(self.input_type, 
+                    [None, self.input_size, self.input_size, 3],'input'),
                 InputDesc(tf.int32, [None], 'label')]
 
     def compute_scope_basename(self, layer_idx):
@@ -341,10 +356,16 @@ class AnytimeNetwork(ModelDesc):
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         return logits, cost
 
-    def _preprocess_inputs(self, inputs):
+
+    def _parse_inputs(self, inputs):
+        """
+            Parse the inputs so that it's split into image, followed by a "label" object.
+            Note that the label object may contain multiple labels, such as coarse labels,
+            and soft labels. 
+
+            The first returned variable is always the image as it was inputted
+        """
         image, label = inputs
-        if DATA_FORMAT == 'NCHW':
-            image = tf.transpose(image, [0,3,1,2])
         return image, label
 
     def _build_graph(self, inputs):
@@ -356,7 +377,19 @@ class AnytimeNetwork(ModelDesc):
             argscope([Conv2D, Deconv2D], nl=tf.identity, use_bias=False), \
             argscope([Conv2D], W_init=self.w_init):
 
-            image, label = self._preprocess_inputs(inputs)
+            image, label = self._parse_inputs(inputs)
+
+            # Common GPU side preprocess (uint8 -> float32), mean std, NCHW.
+            if self.input_type == tf.uint8:
+                image = tf.cast(image, tf.float32) * (1.0 / 255)
+            if self.options.do_mean_std_gpu_process:
+                if self.options.mean is not None:
+                    image = image - tf.constant(self.options.mean, dtype=tf.float32) 
+                if self.options.std is not None:
+                    image = image / tf.constant(self.options.std, dtype=tf.float32)
+            if DATA_FORMAT == 'NCHW':
+                image = tf.transpose(image, [0,3,1,2])
+
             dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
             ll_feats = self._compute_ll_feats(image)
             
@@ -893,13 +926,11 @@ class AnytimeFCN(AnytimeNetwork):
                 [None, None, None, self.options.num_classes], 'label')
         else:
             label_desc = InputDesc(tf.int32, [None, None, None], 'label')
-        return [InputDesc(tf.float32, [None, None, None, 3], 'input'), label_desc]
+        return [InputDesc(self.input_type, [None, None, None, 3], 'input'), label_desc]
 
 
-    def _preprocess_inputs(self, inputs):
+    def _parse_inputs(self, inputs):
         image, label_img = inputs
-        if DATA_FORMAT == 'NCHW':
-            image = tf.transpose(image, [0,3,1,2])
         if not self.options.is_label_one_hot: 
             # From now on label_img is tf.float one hot, void has 0-vector.
             # because we assume void >=num_classes
