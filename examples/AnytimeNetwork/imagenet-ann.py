@@ -44,7 +44,7 @@ def get_config():
         dataset_val = get_data('toy_validation')
     else:
         dataset_train = get_data('train')
-        dataset_val = get_data('validation')
+        dataset_val = get_data('val') #val for caffe style meta input; validation for tf-slim
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
     model=AnytimeResnet(INPUT_SIZE, args)

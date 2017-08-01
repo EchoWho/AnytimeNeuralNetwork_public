@@ -12,13 +12,14 @@ from tensorpack import *
 ilsvrc_mean = [0.485, 0.456, 0.406][::-1] 
 ilsvrc_std = [0.229, 0.224, 0.225][::-1]
 
-def get_ilsvrc_augmented_data(subset, options):
+def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
     isTrain = subset == 'train'
     lmdb_path = os.path.join(options.data_dir, 'ilsvrc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
-    ds = LocallyShuffleData(ds, 1024*64)  # This is 64G~80G in memory images
+    if isTrain:
+        ds = LocallyShuffleData(ds, 1024*64)  # This is 64G~80G in memory images
     ds = PrefetchData(ds, 1024*8, 1) # prefetch around 8 G
-    ds = LMDBDataPoint(ds)
+    ds = LMDBDataPoint(ds, deserialize=True)
     ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), 0) # BGR uint8 data
     if isTrain:
         class Resize(imgaug.ImageAugmentor):
@@ -71,7 +72,7 @@ def get_ilsvrc_augmented_data(subset, options):
             imgaug.ToUint8()
         ]
     ds = AugmentImageComponent(ds, augmentors, copy=False)
-    if isTrain:
-        ds = PrefetchDataZMQ(ds, min(20, multiprocessing.cpu_count()))
-    ds = BatchData(ds, options.batch_size, remainder=not isTrain)
+    if do_multiprocess:
+        ds = PrefetchDataZMQ(ds, min(24, multiprocessing.cpu_count()))
+    ds = BatchData(ds, options.batch_size // options.nr_gpu, remainder=not isTrain)
     return ds

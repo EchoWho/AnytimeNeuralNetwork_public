@@ -238,7 +238,7 @@ class AnytimeNetwork(ModelDesc):
             self.w_init = variance_scaling_initializer(mode='FAN_AVG')
 
         self.input_type = tf.float32 if self.options.input_type == 'float32' else tf.uint8
-        if self.do_mean_std_gpu_process:
+        if self.options.do_mean_std_gpu_process:
             if not hasattr(self.options, 'mean'):
                 raise Exception('gpu_graph expects mean but it is not in the options')
             if not hasattr(self.options, 'std'):
