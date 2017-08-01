@@ -165,7 +165,7 @@ class LMDBDataPoint(MapData):
         Args:
             args, kwargs: Same as in :class:`LMDBData`.
         """
-        if isinstance(args[0], LMDBData):
+        if isinstance(args[0], LMDBData) or kwargs['deserialize']:
             ds = args[0]
         else:
             ds = LMDBData(*args, **kwargs)
