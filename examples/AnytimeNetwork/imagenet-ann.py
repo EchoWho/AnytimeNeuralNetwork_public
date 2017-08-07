@@ -50,8 +50,10 @@ def get_config():
     model=AnytimeResnet(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
-    #lr_schedule = [(1, 1e-1/2), (30, 1e-2 /2 ), (60, 1e-3/2), (90, 1e-4/2), (105, 1e-5/2)]
-    lr_schedule = [(1, 1e-1 /2), (60, 1e-2 /2 ), (90, 1e-3 /2), (105, 1e-4 /2)]
+    #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
+
+    lr_rate = args.lr_divider
+    lr_schedule = [(1, 1e-1 / lr_rate), (60, 1e-2 / lr_rate ), (90, 1e-3 / lr_rate), (105, 1e-4 / lr_rate)]
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
@@ -106,6 +108,8 @@ if __name__ == '__main__':
     args.std = get_augmented_data.ilsvrc_std
     assert args.do_mean_std_gpu_process and args.input_type == 'uint8'
     assert args.mean is not None and args.std is not None
+    args.lr_divider = 2.0 * 256.0 / args.batch_size 
+    args.batch_norm_decay=0.9**(2.0/args.lr_divider)  # according to Torch blog
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)

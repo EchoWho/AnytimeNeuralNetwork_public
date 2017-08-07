@@ -167,6 +167,8 @@ def parser_add_common_arguments(parser):
     # misc
     parser.add_argument('--init_lr', help='The initial learning rate',
                         type=np.float32, default=0.01)
+    parser.add_argument('--batch_norm_decay', help='decay rate of batchnorms',
+                        type=np.float32, default=0.9)
     parser.add_argument('--num_classes', help='Number of classes', 
                         type=int, default=10)
     parser.add_argument('--regularize_coef', help='How coefficient of regularization decay',
@@ -375,7 +377,8 @@ class AnytimeNetwork(ModelDesc):
         with argscope([Conv2D, Deconv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format=DATA_FORMAT), \
             argscope([Conv2D, Deconv2D], nl=tf.identity, use_bias=False), \
-            argscope([Conv2D], W_init=self.w_init):
+            argscope([Conv2D], W_init=self.w_init), \
+            argscope([BatchNorm], decay=self.options.batch_norm_decay):
 
             image, label = self._parse_inputs(inputs)
 
