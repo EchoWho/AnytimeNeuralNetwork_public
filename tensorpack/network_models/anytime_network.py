@@ -696,6 +696,9 @@ def parser_add_densenet_arguments(parser):
                              type=int)
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
+    parser.add_argument('--growth_rate_multiplier', 
+                        help='a constant to multiply growth rate by at pooling',
+                        type=int, default=1, choices=[1,2])
     parser.add_argument('--use_init_ch', 
         help='whether to use specified init channel argument, '\
         +' useful for networks that has init_ch based on'\
@@ -705,6 +708,8 @@ def parser_add_densenet_arguments(parser):
                         type=int, default=0)
     parser.add_argument('--log_dense_coef', help='The constant multiplier of log(depth) to connect',
                         type=np.float32, default=1)
+    parser.add_argument('--log_dense_base', help='base of log',
+                        type=np.float32, default=2)
     parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
                         type=np.float32, default=1)
     return parser, depth_group
@@ -750,7 +755,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 df = 1
                 exponential_diffs = [0]
                 while True:
-                    df = df * 2
+                    df = df * self.log_dense_base
                     if df > self.total_units * self.log_dense_coef:
                         break
                     int_df = int((df-1) / self.log_dense_coef)
@@ -759,9 +764,11 @@ class AnytimeDensenet(AnytimeNetwork):
                 self.exponential_diffs = exponential_diffs
             diffs = self.exponential_diffs 
         elif self.dense_select_method == 1:
-            diffs = list(range(int(np.log2(ui + 1) * self.log_dense_coef) + 1))
+            diffs = list(range(int(np.log2(ui + 1) \
+                / np.log2(self.log_dense_base) * self.log_dense_coef) + 1))
         elif self.dense_select_method == 2:
-            n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
+            n_select = int((np.log2(self.total_units +1) \
+                / np.log2(self.log_dense_base) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
         elif self.dense_select_method == 3:
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
@@ -773,12 +780,26 @@ class AnytimeDensenet(AnytimeNetwork):
                 if len(diffs) == 0 or int_df != diffs[-1]:
                     diffs.append(int_df)
                 df += delta
-        elif self.dense_select_method == 4:
+        elif self.dense_select_method == 4: #actual dense net
             diffs = list(range(ui+1))
+        elif self.dense_select_method == 5: 
+            diffs = [0, 1]
+            left = 0
+            right = self.total_units + 1
+            while right != ui+2: # seek ui+1
+                mid = (left + right) // 2
+                if ui+1 >= mid:
+                    left = mid
+                else:
+                    right = mid
+            df = right - (right + left) // 2 - 1
+            if df > 1:
+                diffs.append(df)
+
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
         return indices
 
-    def compute_block(self, pls, pmls, n_units):
+    def compute_block(self, pls, pmls, n_units, growth):
         """
             pls : previous layers. including the init_feat. Hence pls[i] is from 
                 layer i-1 for i > 0
@@ -803,11 +824,11 @@ class AnytimeDensenet(AnytimeNetwork):
                 #ml = BNReLU('bnrelu_merged', ml)
                 if self.network_config.b_type == 'bottleneck':
                     l = (LinearWrap(ml)
-                        .Conv2D('conv1x1', 4*self.growth_rate, 1, nl=BNReLU)
-                        .Conv2D('conv3x3', self.growth_rate, 3, nl=BNReLU)())
+                        .Conv2D('conv1x1', 4 * growth, 1, nl=BNReLU)
+                        .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     assert self.network_config.b_type == 'basic'
-                    l = Conv2D('conv3x3', ml, self.growth_rate, 3, nl=BNReLU)
+                    l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -829,8 +850,9 @@ class AnytimeDensenet(AnytimeNetwork):
         for pli, pl in enumerate(pls):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
                 ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
+                ch_out = int(ch_in * self.growth_rate_multiplier * self.reduction_ratio)
                 new_pls.append((LinearWrap(pl)
-                    .Conv2D('conv', int(ch_in * self.reduction_ratio), 1, nl=BNReLU)
+                    .Conv2D('conv', ch_out, 1, nl=BNReLU)
                     .AvgPooling('pool', 2, padding='SAME')()))
         return new_pls
 
@@ -839,9 +861,11 @@ class AnytimeDensenet(AnytimeNetwork):
         l_feats = self._compute_init_l_feats(image)
         pls = [l_feats[0]]
         pmls = []
+        growth = self.growth_rate
         for bi, n_units in enumerate(self.network_config.n_units_per_block):  
-            pls, pmls = self.compute_block(pls, pmls, n_units)
+            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
             if bi != self.n_blocks - 1: 
+                growth *= self.growth_rate_multiplier
                 pls = self.compute_transition(pls, bi)
         
         ll_feats = [ [ feat ] for feat in pmls ]
@@ -1226,11 +1250,13 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         pls = [l_feats[0]]
         l_pls = []
         pmls = []
+        growth = self.growth_rate
         for bi, n_units in enumerate(self.network_config.n_units_per_block):  
-            pls, pmls = self.compute_block(pls, pmls, n_units)
+            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
             if bi < self.n_pools: 
                 # downsampling
                 l_pls.append(pls)
+                growth *= self.growth_rate_multiplier
                 pls = self.compute_transition(pls, bi)
             elif bi < self.n_blocks - 1:
                 # To check: first deconv at self.n_pools, every layer except the last block
@@ -1238,6 +1264,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
                 # The second to the last block has the final upsampling, and it has 
                 # bi = 2*n_pools - 1; The featmap size matches that of l_pls[0] 
                 skip_pls = l_pls[2*self.n_pools - bi - 1]
+                growth /= self.growth_rate_multiplier
                 pls = self.compute_transition_up(pls, skip_pls, bi)
         
         ll_feats = [ [ feat ] for feat in pmls ]
