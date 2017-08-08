@@ -136,7 +136,7 @@ def parser_add_common_arguments(parser):
                         help='whether use 1x1 before fc to predict',
                         default=False, action='store_true')
 
-    # stop gradient / forward thinking
+    # stop gradient / forward thinking / boost-net / no-grad
     parser.add_argument('--stop_gradient', help='Whether to stop gradients.',
                         default=False, action='store_true')
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
@@ -164,7 +164,7 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--opt_at', help='Optimal at', 
                         type=int, default=-1)
 
-    # misc
+    # misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',
                         type=np.float32, default=0.01)
     parser.add_argument('--batch_norm_decay', help='decay rate of batchnorms',
@@ -177,7 +177,6 @@ def parser_add_common_arguments(parser):
                         type=float, default=1e-4)
     parser.add_argument('--w_init', help='method used for initializing W',
                         type=str, default='var_scale', choices=['var_scale', 'xavier'])
-
     # Special options to force input as uint8 and do mean/std process in graph in order to save memory
     # during cpu - gpu communication
     parser.add_argument('--input_type', help='Type for input, uint8 for certain dataset to speed up',
@@ -697,12 +696,12 @@ def parser_add_densenet_arguments(parser):
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
     parser.add_argument('--growth_rate_multiplier', 
-                        help='a constant to multiply growth rate by at pooling',
+                        help='a constant to multiply growth_rate by at pooling',
                         type=int, default=1, choices=[1,2])
     parser.add_argument('--use_init_ch', 
-        help='whether to use specified init channel argument, '\
-        +' useful for networks that has init_ch based on'\
-        +' other metrics such as densenet',
+                        help='whether to use specified init channel argument, '\
+                            +' useful for networks that has specific init_ch based on'\
+                            +' other metrics such as densenet',
                         default=False, action='store_true')
     parser.add_argument('--dense_select_method', help='densenet previous feature selection choice',
                         type=int, default=0)
@@ -712,6 +711,8 @@ def parser_add_densenet_arguments(parser):
                         type=np.float32, default=2)
     parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
                         type=np.float32, default=1)
+    parser.add_argument('--transition_batch_size', help='number of layers to transit together per conv',
+                        type=int, default=1)
     return parser, depth_group
 
 
@@ -720,15 +721,18 @@ class AnytimeDensenet(AnytimeNetwork):
         super(AnytimeDensenet, self).__init__(input_size, args)
         self.dense_select_method = self.options.dense_select_method
         self.log_dense_coef = self.options.log_dense_coef
+        self.log_dense_base = self.options.log_dense_base
         self.reduction_ratio = self.options.reduction_ratio
         self.growth_rate = self.options.growth_rate
+        self.growth_rate_multiplier = self.options.growth_rate_multiplier
+        self.transition_batch_size=self.options.transition_batch_size
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
             if self.init_channel != default_ch:
                 self.init_channel = default_ch
-                logger.info("Densenet sets the init_channel to be "
-                    + "2*growth_rate by default. "
+                logger.info("Densenet sets the init_channel to be " \
+                    + "2*growth_rate by default. " \
                     + "I'm setting this automatically!")
         
         # width > 1 is not implemented for densenet
@@ -845,15 +849,56 @@ class AnytimeDensenet(AnytimeNetwork):
             Note that this is not the same as the original densenet, 
             which 1x1 conv the whole merged feats. Here we 1x1 each 
             layer individually to prevent the mix.
+
+            However, since each transition (conv+pool) has overhead, 
+            transiting each layer individually is actually slow. 
+            Instead we batch self.transition_batch_size number of layers
+            together and transit them togther, and then split them
+            in order to speed up the transition. We can still 
+            enforce the independency during transition using W_mask, 
+            a mask on the transition conv weight W.
         """
         new_pls = []
-        for pli, pl in enumerate(pls):
+
+        pli = 0
+        l_ch_in = [ pl.get_shape().as_list()[CHANNEL_DIM] for pl in pls]
+        l_ch_out = [ int(ch_in * self.growth_rate_multiplier * self.reduction_ratio) \
+            for ch_in in l_ch_in ]
+        while pli < len(pls):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
-                ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
-                ch_out = int(ch_in * self.growth_rate_multiplier * self.reduction_ratio)
-                new_pls.append((LinearWrap(pl)
-                    .Conv2D('conv', ch_out, 1, nl=BNReLU)
-                    .AvgPooling('pool', 2, padding='SAME')()))
+                n_splits = min(len(pls) - pli, self.transition_batch_size)
+                pli_end = n_splits + pli
+                if n_splits == 1:
+                    pl = pls[pli]
+                    ch_in = l_ch_in[pli]
+                    ch_out = l_ch_out[pli]
+                    W_mask = None
+                else: 
+                    pl = tf.concat(pls[pli:pli_end], CHANNEL_DIM, name='concat') 
+                    ch_ins = l_ch_in[pli:pli_end]
+                    ch_outs = l_ch_out[pli:pli_end]
+                    ch_in = np.sum(ch_ins)
+                    ch_out = np.sum(ch_outs)
+                    W_mask = np.zeros((1,1,ch_in,ch_out),dtype=np.float32) 
+                    in_start = 0
+                    out_start = 0
+                    for split in range(n_splits):
+                        in_end = in_start + ch_ins[split]
+                        out_end = out_start + ch_outs[split] 
+                        # W is [kernel, kernel, in, out], so mask is the same shape
+                        W_mask[:, :, in_start:in_end, out_start:out_end] = 1.0
+                        in_start = in_end
+                        out_start = out_end
+
+                new_pl = (LinearWrap(pl)
+                    .Conv2D('conv', ch_out, 1, nl=BNReLU, W_mask=W_mask)
+                    .AvgPooling('pool', 2, padding='SAME')())
+                if n_splits == 1:
+                    new_pls.append(new_pl)
+                else:
+                    new_pls.extend(tf.split(new_pl, ch_outs, CHANNEL_DIM, name='split'))
+            pli = pli_end
+        # end while pli < len(pls)
         return new_pls
 
 
@@ -970,7 +1015,7 @@ class AnytimeFCN(AnytimeNetwork):
                                       self.options.eval_threshold), 
                            dtype=tf.float32)
             mask = tf.reshape(mask, [-1], name=name)
-            # TODO is this actually beneficial; and which KP to use?
+            # TODO is this actually beneficial; and which KeepProb to use?
             #mask = Dropout(name, mask, keep_prob=0.5)
             return mask
 
@@ -1081,6 +1126,7 @@ def parser_add_fcdense_arguments(parser):
     return parser, depth_group
 
 
+## reproduction of tiramisu FC-Densenet for scene parsing. no anytime prediction supports yet
 class FCDensenet(AnytimeFCN):
     def __init__(self, args):
         super(FCDensenet, self).__init__(args)
@@ -1106,7 +1152,7 @@ class FCDensenet(AnytimeFCN):
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
         assert self.network_config.s_type == 'basic'
 
-        # This version doesn't support anytime prediction (yet) 
+        # TODO This version doesn't support anytime prediction (yet) 
         assert self.options.func_type == FUNC_TYPE_OPT
     
     def _transition_up(self, skip_stack, l_layers, bi):

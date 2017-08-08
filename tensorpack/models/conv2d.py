@@ -13,7 +13,7 @@ __all__ = ['Conv2D', 'Deconv2D', 'AtrousConv2D']
 @layer_register()
 def Conv2D(x, out_channel, kernel_shape,
            padding='SAME', stride=1,
-           W_init=None, b_init=None,
+           W_init=None, b_init=None, W_mask=None,
            nl=tf.identity, split=1, use_bias=True,
            data_format='NHWC'):
     """
@@ -58,6 +58,8 @@ def Conv2D(x, out_channel, kernel_shape,
         b_init = tf.constant_initializer()
 
     W = tf.get_variable('W', filter_shape, initializer=W_init)
+    if W_mask is not None:
+        W = tf.multiply(W, W_mask)
 
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
