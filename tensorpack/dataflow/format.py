@@ -15,7 +15,7 @@ from ..utils.argtools import log_once
 from .base import RNGDataFlow, DataFlow
 from .common import MapData
 
-__all__ = ['HDF5Data', 'LMDBData', 'LMDBDataDecoder', 'LMDBDataPoint',
+__all__ = ['HDF5Data', 'LMDBData', 'LMDBDataDecoder', 'LMDBDataPoint', 'LMDBDataPointIndexed',
            'CaffeLMDB', 'SVMLightData', 'TFRecordData']
 
 """
@@ -173,6 +173,23 @@ class LMDBDataPoint(MapData):
         def f(dp):
             return loads(dp[1])
         super(LMDBDataPoint, self).__init__(ds, f)
+
+
+class LMDBDataPointIndexed(MapData):
+    """ Read a LMDB file and produce deserialized values.
+        This can work with :func:`tensorpack.dataflow.dftools.dump_dataflow_to_lmdb`. 
+        
+        The input DS can be processed already (with join, shuffle, etc), so the index
+        of key and val are specified. 
+
+        Further more, there could be multiple LMDB data fused together before local shuffle.
+    """
+    def __init__(self, ds, index=1):
+        def f(dp):
+            # replace key and serialized val with val
+            dp[index-1:index+1] = loads(dp[index])
+            return dp
+        super(LMDBDataPointIndexed, self).__init__(ds, f)
 
 
 def CaffeLMDB(lmdb_path, shuffle=True, keys=None):
