@@ -1126,7 +1126,9 @@ def parser_add_fcdense_arguments(parser):
     return parser, depth_group
 
 
-## reproduction of tiramisu FC-Densenet for scene parsing. no anytime prediction supports yet
+## 
+# This class reproduces tiramisu FC-Densenet for scene parsing. 
+# It is meant for a comparison against anytime FCN 
 class FCDensenet(AnytimeFCN):
     def __init__(self, args):
         super(FCDensenet, self).__init__(args)
@@ -1323,3 +1325,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         opt = tf.train.RMSPropOptimizer(lr)
         return opt
 
+
+###########################
+# Multi-scale Dense-Network and its log-dense variant
+###########################
