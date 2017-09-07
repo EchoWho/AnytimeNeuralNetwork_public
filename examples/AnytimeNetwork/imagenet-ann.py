@@ -102,13 +102,18 @@ if __name__ == '__main__':
     
     assert args.init_channel == 64
     assert args.num_classes == 1000
+
+    # GPU will handle mean std transformation to save CPU-GPU communication
     args.do_mean_std_gpu_process = True
     args.input_type = 'uint8'
     args.mean = get_augmented_data.ilsvrc_mean
     args.std = get_augmented_data.ilsvrc_std
     assert args.do_mean_std_gpu_process and args.input_type == 'uint8'
     assert args.mean is not None and args.std is not None
+
+    # Scale learning rate with the batch size linearly 
     args.lr_divider = 2.0 * 256.0 / args.batch_size 
+    args.init_lr = 1e-1 / args.lr_divider
     args.batch_norm_decay=0.9**(2.0/args.lr_divider)  # according to Torch blog
 
     # directory setup
