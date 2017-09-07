@@ -74,7 +74,8 @@ def recursive_heavy_end(N):
             break
         i = i // 2
         w = w / 2.0 
-    weights[-1] += N # make sure last layer has 1/2
+    weights[ N*3 // 4  - 1 ] += N / 8.0
+    weights[-1] += N * ( 1.0 + 1.0 / 16.0 ) # make sure last layer has 1/2
     weights /= np.sum(weights) / np.log2(N)
     return weights
 
