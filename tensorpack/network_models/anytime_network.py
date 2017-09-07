@@ -63,8 +63,14 @@ def compute_cfg(options):
         elif options.depth == 152:
             n_units_per_block = [3,8,36,3]
             b_type = 'bottleneck'
+        elif options.depth == 26:
+            n_units_per_block = [2,2,2,2]
+            b_type = 'bottleneck'
+        elif options.depth == 14:
+            n_units_per_block = [1,1,1,1]
+            b_type = 'bottleneck'
         else:
-            raise ValueError('depth {} must be in [18, 34, 50, 101, 152]'\
+            raise ValueError('depth {} must be in [18, 34, 50, 101, 152, 26, 14]'\
                 .format(options.depth))
         s_type = 'imagenet' 
         return NetworkConfig(n_units_per_block, b_type, s_type)
