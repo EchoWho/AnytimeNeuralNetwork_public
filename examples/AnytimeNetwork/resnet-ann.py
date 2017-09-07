@@ -201,6 +201,8 @@ if __name__ == '__main__':
 
 
     elif args.ds_name == 'imagenet':
+        logger.info("tf record ilsvrc is very very slow, use the lmdb version instead")
+        assert False
         args.num_classes = 1000
         args.regularize_coef = 'const'
         INPUT_SIZE = 224
