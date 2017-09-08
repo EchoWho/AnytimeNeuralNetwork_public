@@ -88,6 +88,9 @@ def compute_cfg(options):
         elif options.densenet_depth == 161:
             n_units_per_block = [6, 12, 36, 24]
             #default_growth_rate = 48
+        elif options.densenet_depth == 404:
+            n_units_per_block = [6, 12, 120, 64] 
+            #default_growth_rate = 32
         else:
             raise ValueError('densenet depth {} is undefined'\
                 .format(options.densenet_depth))
@@ -836,8 +839,7 @@ class AnytimeDensenet(AnytimeNetwork):
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', 4 * growth, 1, nl=BNReLU)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
-                else:
-                    assert self.network_config.b_type == 'basic'
+                elif self.network_config.b_type == 'basic':
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
                 pls.append(l)
 
