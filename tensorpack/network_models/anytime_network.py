@@ -834,7 +834,7 @@ class AnytimeDensenet(AnytimeNetwork):
                                CHANNEL_DIM, name='concat_feat')
                 #ml = BNReLU('bnrelu_merged', ml)
                 ch_in = ml.get_shape().as_list()[CHANNEL_DIM] 
-                if ch_in * 9 * growth < ch_in * 4 * growth + 36 * growth**2:
+                if ch_in * 5 * growth < 36 * growth**2:
                     is_basic_cheaper = True
                 else:
                     is_basic_cheaper = False
