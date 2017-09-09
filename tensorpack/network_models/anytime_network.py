@@ -139,6 +139,9 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--prediction_1x1_conv', 
                         help='whether use 1x1 before fc to predict',
                         default=False, action='store_true')
+    #parser.add_argument('--bottleneck',
+    #                    help='Whether use bottleneck units or basic units, resnet currently don\'t support this',
+    #                    default=False, action='store_true')
 
     # stop gradient / forward thinking / boost-net / no-grad
     parser.add_argument('--stop_gradient', help='Whether to stop gradients.',
@@ -830,7 +833,13 @@ class AnytimeDensenet(AnytimeNetwork):
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
                 #ml = BNReLU('bnrelu_merged', ml)
-                if self.network_config.b_type == 'bottleneck':
+                ch_in = ml.get_shape().as_list()[CHANNEL_DIM] 
+                if ch_in * 9 * growth < ch_in * 4 * growth + 36 * growth**2:
+                    is_basic_cheaper = True
+                else:
+                    is_basic_cheaper = False
+
+                if self.network_config.b_type == 'bottleneck' and not is_basic_cheaper:
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', 4 * growth, 1, nl=BNReLU)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
