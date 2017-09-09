@@ -843,7 +843,7 @@ class AnytimeDensenet(AnytimeNetwork):
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', 4 * growth, 1, nl=BNReLU)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
-                elif self.network_config.b_type == 'basic':
+                else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
                 pls.append(l)
 
