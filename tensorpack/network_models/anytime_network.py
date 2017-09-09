@@ -78,19 +78,14 @@ def compute_cfg(options):
     elif hasattr(options, 'densenet_depth') and options.densenet_depth is not None:
         if options.densenet_depth == 121:
             n_units_per_block = [6, 12, 24, 16]
-            #default_growth_rate = 32
         elif options.densenet_depth == 169:
             n_units_per_block = [6, 12, 32, 32]
-            #default_growth_rate = 32
         elif options.densenet_depth == 201:
             n_units_per_block = [6, 12, 48, 32]
-            #default_growth_rate = 32
-        elif options.densenet_depth == 161:
-            n_units_per_block = [6, 12, 36, 24]
-            #default_growth_rate = 48
-        elif options.densenet_depth == 404:
+        elif options.densenet_depth == 265:
+            n_units_per_block = [6, 12, 64, 48]
+        elif options.densenet_depth == 409:
             n_units_per_block = [6, 12, 120, 64] 
-            #default_growth_rate = 32
         else:
             raise ValueError('densenet depth {} is undefined'\
                 .format(options.densenet_depth))
