@@ -151,7 +151,7 @@ def parser_add_common_arguments(parser):
                         type=int)
     parser.add_argument('--samloss', 
                         help='Method to Sample losses to update',
-                        type=int, default=0)
+                        type=int, default=6)
     parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
                         type=np.float32, default=0.3)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
