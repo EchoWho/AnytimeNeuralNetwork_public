@@ -702,6 +702,8 @@ def parser_add_densenet_arguments(parser):
                              type=int)
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
+    parser.add_argument('--bottleneck_width', help='multiplier of growth for width of bottleneck',
+                        type=float, default=4.0)
     parser.add_argument('--growth_rate_multiplier', 
                         help='a constant to multiply growth_rate by at pooling',
                         type=int, default=1, choices=[1,2])
@@ -833,15 +835,10 @@ class AnytimeDensenet(AnytimeNetwork):
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
                 #ml = BNReLU('bnrelu_merged', ml)
-                ch_in = ml.get_shape().as_list()[CHANNEL_DIM] 
-                if ch_in * 5 * growth < 36 * growth**2:
-                    is_basic_cheaper = True
-                else:
-                    is_basic_cheaper = False
-
-                if self.network_config.b_type == 'bottleneck' and not is_basic_cheaper:
+                if self.network_config.b_type == 'bottleneck':
+                    bottleneck_width = int(self.options.bottleneck_width * growth)
                     l = (LinearWrap(ml)
-                        .Conv2D('conv1x1', 4 * growth, 1, nl=BNReLU)
+                        .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
