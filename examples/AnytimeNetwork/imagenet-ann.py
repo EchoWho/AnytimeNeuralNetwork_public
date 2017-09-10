@@ -19,26 +19,22 @@ from tensorpack.utils.stats import RatioCounter
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeResnet
 
+import get_augmented_data
+
 args = None
 INPUT_SIZE = 224
 
+#def get_data(train_or_test):
+#    isTrain = train_or_test == 'train'
+#    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
+#                                  train_or_test, 
+#                                  args.batch_size // args.nr_gpu, 
+#                                  height=INPUT_SIZE, 
+#                                  width=INPUT_SIZE)
+#    return ds
+
 def get_data(train_or_test):
-    isTrain = train_or_test == 'train'
-    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
-                                  train_or_test, 
-                                  args.batch_size // args.nr_gpu, 
-                                  height=INPUT_SIZE, 
-                                  width=INPUT_SIZE)
-    #image_mean = np.array([0.485, 0.456, 0.406], dtype='float32')
-    #image_std = np.array([0.229, 0.224, 0.225], dtype='float32')
-    #imgaug.Saturation(0.4)
-    #imgaug.Lighting(0.1,
-    #             eigval=[0.2175, 0.0188, 0.0045],
-    #             eigvec=[[-0.5675, 0.7192, 0.4009],
-    #                     [-0.5808, -0.0045, -0.8140],
-    #                     [-0.5836, -0.6948, 0.4203]]
-    #             )
-    return ds
+    return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
 
 
 def get_config():
@@ -48,19 +44,22 @@ def get_config():
         dataset_val = get_data('toy_validation')
     else:
         dataset_train = get_data('train')
-        dataset_val = get_data('validation')
+        dataset_val = get_data('val') #val for caffe style meta input; validation for tf-slim
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
     model=AnytimeResnet(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
+    #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
+
+    lr_rate = args.lr_divider
+    lr_schedule = [(1, 1e-1 / lr_rate), (60, 1e-2 / lr_rate ), (90, 1e-3 / lr_rate), (105, 1e-4 / lr_rate)]
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
             ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
             InferenceRunner(dataset_val, classification_cbs),
-            ScheduledHyperParamSetter('learning_rate',
-                [(1, 0.05), (10, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]),
+            ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate'),
         ] + loss_select_cbs,
         model=model,
@@ -103,6 +102,19 @@ if __name__ == '__main__':
     
     assert args.init_channel == 64
     assert args.num_classes == 1000
+
+    # GPU will handle mean std transformation to save CPU-GPU communication
+    args.do_mean_std_gpu_process = True
+    args.input_type = 'uint8'
+    args.mean = get_augmented_data.ilsvrc_mean
+    args.std = get_augmented_data.ilsvrc_std
+    assert args.do_mean_std_gpu_process and args.input_type == 'uint8'
+    assert args.mean is not None and args.std is not None
+
+    # Scale learning rate with the batch size linearly 
+    args.lr_divider = 2.0 * 256.0 / args.batch_size 
+    args.init_lr = 1e-1 / args.lr_divider
+    args.batch_norm_decay=0.9**(2.0/args.lr_divider)  # according to Torch blog
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)
