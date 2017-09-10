@@ -30,7 +30,7 @@ def eann_sieve(N):
     return weights
 
 def constant_weights(N):
-    return np.ones(N,dtype=np.float32)
+    return np.ones(N,dtype=np.float32) #/ N * np.log2(N)
 
 def optimal_at(N, optimal_l):
     """ Note that optimal_l is zero-based """
@@ -74,13 +74,15 @@ def recursive_heavy_end(N):
             break
         i = i // 2
         w = w / 2.0 
-    weights[-1] += N # make sure last layer has 1/2
-    weights /= N
+    weights[ N*3 // 4  - 1 ] += N / 8.0
+    weights[-1] += N * ( 1.0 + 1.0 / 16.0 ) # make sure last layer has 1/2
+    weights /= np.sum(weights) / np.log2(N)
     return weights
 
 def linear(N, a=0.25, b=1.0):
     delta = (b-a) / (N-1.0)
     weights = np.arange(N, dtype=np.float32) * delta + a
+    #weights /= np.sum(weights) / np.log2(N)
     return weights
 
 def exponential_weights(N, base=2.0):
