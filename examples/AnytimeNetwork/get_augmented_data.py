@@ -14,7 +14,7 @@ ilsvrc_std = [0.229, 0.224, 0.225][::-1]
 
 def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
     isTrain = subset == 'train'
-    lmdb_path = os.path.join(options.data_dir, 'ilsvrc2012_{}.lmdb'.format(subset))
+    lmdb_path = os.path.join(options.data_dir, 'lmdb2', 'ilsvrc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
     if isTrain:
         ds = LocallyShuffleData(ds, 1024*64)  # This is 64G~80G in memory images
