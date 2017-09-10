@@ -174,6 +174,7 @@ if __name__ == '__main__':
             args.num_classes = 10
         else:
             args.num_classes = 100
+        args.regularize_coef = 'decay'
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_cifar_data
@@ -187,6 +188,7 @@ if __name__ == '__main__':
 
     elif args.ds_name == 'svhn':
         args.num_classes = 10
+        args.regularize_coef = 'decay'
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_svhn_data
@@ -199,7 +201,10 @@ if __name__ == '__main__':
 
 
     elif args.ds_name == 'imagenet':
+        logger.info("tf record ilsvrc is very very slow, use the lmdb version instead")
+        assert False
         args.num_classes = 1000
+        args.regularize_coef = 'const'
         INPUT_SIZE = 224
         get_data = get_ilsvrc12_tfrecord_data
         if args.is_toy:
