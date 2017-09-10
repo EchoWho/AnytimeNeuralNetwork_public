@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 from ...utils import logger
-from ...utils.fs import get_dataset_path, download
+from ...utils.fs import get_dataset_path, download, DATASET_AUTO_DOWNLOAD
 from ..base import RNGDataFlow
 
 __all__ = ['SVHNDigit']
@@ -39,6 +39,8 @@ class SVHNDigit(RNGDataFlow):
         assert name in ['train', 'test', 'extra'], name
         filename = os.path.join(data_dir, name + '_32x32.mat')
         if not os.path.isfile(filename):
+            if not DATASET_AUTO_DOWNLOAD:
+                raise Exception("SVHN data doesn't exist")
             url = SVHN_URL + os.path.basename(filename)
             logger.info("File {} not found! Downloading from {}.".format(filename, url))
             download(url, os.path.dirname(filename))
