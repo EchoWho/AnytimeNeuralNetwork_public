@@ -93,6 +93,20 @@ def compute_cfg(options):
         s_type = 'imagenet'
         return NetworkConfig(n_units_per_block, b_type, s_type)#, default_growth_rate)
 
+    elif hasattr(options, 'msdensenet_depth') and options.msdensenet_depth is not None:
+        if options.msdensenet_depth == 24:
+            n_units_per_block = [7, 8, 8]
+            s_type = 'basic'
+            # g=24
+        elif options.msdensenet_depth == 23: 
+            n_units_per_block = [6, 6, 5, 5]
+            s_type = 'imagenet'
+            # g=64
+        else:
+            raise ValueError('Undefined msdensenet_depth')
+        b_type = 'bottleneck'
+        return NetworkConfig(n_units_per_block, b_type, s_type)
+
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
@@ -136,9 +150,12 @@ def parser_add_common_arguments(parser):
                         help='number of units per stack, '
                         +'i.e., number of units per prediction, or prediction period',
                         type=int, default=1)
-    parser.add_argument('--prediction_1x1_conv', 
-                        help='whether use 1x1 before fc to predict',
-                        default=False, action='store_true')
+    parser.add_argument('--prediction_feature', 
+                        help='Type of feature processing for prediction',
+                        type=str, default='none', choices=['none', '1x1', 'msdense'])
+    parser.add_argument('--prediction_feature_ch_out_rate',
+                        help='ch_out= int( <rate> * ch_in)',
+                        type=np.float32, default=1.0)
     #parser.add_argument('--bottleneck',
     #                    help='Whether use bottleneck units or basic units, resnet currently don\'t support this',
     #                    default=False, action='store_true')
@@ -340,7 +357,7 @@ class AnytimeNetwork(ModelDesc):
         return l_feats
     
     def _compute_ll_feats(self, image):
-        raise Exception("Invoked abstract AnytimeNetwork. Use a specific one instead")
+        raise Exception("Invoked the base AnytimeNetwork. Use a specific one instead")
 
     def _compute_prediction_and_loss(self, l, label, unit_idx):
         """
@@ -437,10 +454,21 @@ class AnytimeNetwork(ModelDesc):
                         else:
                             merged_feats = tf.concat([merged_feats, l], CHANNEL_DIM, name='concat')
                         l = merged_feats
-                        if self.options.prediction_1x1_conv:
-                            ch_in = l.get_shape().as_list()[CHANNEL_DIM]
-                            l = Conv2D('conv1x1', l, ch_in, 1)
+                        ch_in = l.get_shape().as_list()[CHANNEL_DIM]
+                        if self.options.prediction_feature == '1x1':
+                            ch_out = int(self.options.prediction_feature_ch_out_rate * ch_in)
+                            l = Conv2D('conv1x1', l, ch_out, 1)
                             l = BNReLU('bnrelu1x1', l)
+                        elif self.options.prediction_feature == 'msdense':
+                            if self.network_config.s_type == 'basic':
+                                ch_inter = 128
+                            else:
+                                ch_inter = ch_in
+                                
+                            l = Conv2D('conv1x1_0', l, ch_inter, 3, stride=2)
+                            l = BNReLU('bnrelu1x1_0', l)
+                            l = Conv2D('conv1x1_1', l, ch_inter, 3, stride=2)
+                            l = BNReLU('bnrelu1x1_1', l)
                         
                         logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
                     #end scope of layer.w.pred
@@ -720,8 +748,13 @@ def parser_add_densenet_arguments(parser):
                         type=np.float32, default=2)
     parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
                         type=np.float32, default=1)
-    parser.add_argument('--transition_batch_size', help='number of layers to transit together per conv',
+    parser.add_argument('--transition_batch_size', 
+                        help='number of layers to transit together per conv; ' +\
+                             '-1 means all previous layers transition together using 1x1 conv',
                         type=int, default=1)
+    parser.add_argument('--use_transition_mask',
+                        help='When transition together, whether use W_mask to force indepence',
+                        default=False, action='store_true')
     return parser, depth_group
 
 
@@ -734,7 +767,8 @@ class AnytimeDensenet(AnytimeNetwork):
         self.reduction_ratio = self.options.reduction_ratio
         self.growth_rate = self.options.growth_rate
         self.growth_rate_multiplier = self.options.growth_rate_multiplier
-        self.transition_batch_size=self.options.transition_batch_size
+        self.transition_batch_size = self.options.transition_batch_size
+        self.use_transition_mask = self.options.use_transition_mask
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
@@ -764,6 +798,7 @@ class AnytimeDensenet(AnytimeNetwork):
         #    return list(range(self.total_units))
 
         if self.dense_select_method == 0:
+            # log dense
             if not hasattr(self, 'exponential_diffs'):
                 df = 1
                 exponential_diffs = [0]
@@ -777,13 +812,16 @@ class AnytimeDensenet(AnytimeNetwork):
                 self.exponential_diffs = exponential_diffs
             diffs = self.exponential_diffs 
         elif self.dense_select_method == 1:
+            # all at the end with log(i)
             diffs = list(range(int(np.log2(ui + 1) \
                 / np.log2(self.log_dense_base) * self.log_dense_coef) + 1))
         elif self.dense_select_method == 2:
+            # all at the end with log(L)
             n_select = int((np.log2(self.total_units +1) \
                 / np.log2(self.log_dense_base) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
         elif self.dense_select_method == 3:
+            # Evenly spaced connections
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
             delta = (ui+1.0) / n_select
             df = 0
@@ -793,9 +831,11 @@ class AnytimeDensenet(AnytimeNetwork):
                 if len(diffs) == 0 or int_df != diffs[-1]:
                     diffs.append(int_df)
                 df += delta
-        elif self.dense_select_method == 4: #actual dense net
+        elif self.dense_select_method == 4: 
+            #actual dense net
             diffs = list(range(ui+1))
         elif self.dense_select_method == 5: 
+            # mini dense (only close to the last layer) 
             diffs = [0, 1]
             left = 0
             right = self.total_units + 1
@@ -875,9 +915,12 @@ class AnytimeDensenet(AnytimeNetwork):
             for ch_in in l_ch_in ]
         while pli < len(pls):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
-                n_splits = min(len(pls) - pli, self.transition_batch_size)
-                pli_end = n_splits + pli
-                if n_splits == 1:
+                if self.transition_batch_size == -1:
+                    split_size = len(pls) - pli
+                else:
+                    split_size = min(len(pls) - pli, self.transition_batch_size)
+                pli_end = split_size + pli
+                if split_size == 1:
                     pl = pls[pli]
                     ch_in = l_ch_in[pli]
                     ch_out = l_ch_out[pli]
@@ -888,16 +931,18 @@ class AnytimeDensenet(AnytimeNetwork):
                     ch_outs = l_ch_out[pli:pli_end]
                     ch_in = np.sum(ch_ins)
                     ch_out = np.sum(ch_outs)
-                    W_mask = np.zeros((1,1,ch_in,ch_out),dtype=np.float32) 
-                    in_start = 0
-                    out_start = 0
-                    for split in range(n_splits):
-                        in_end = in_start + ch_ins[split]
-                        out_end = out_start + ch_outs[split] 
-                        # W is [kernel, kernel, in, out], so mask is the same shape
-                        W_mask[:, :, in_start:in_end, out_start:out_end] = 1.0
-                        in_start = in_end
-                        out_start = out_end
+                    W_mask = None
+                    if self.use_transition_mask:
+                        W_mask = np.zeros((1,1,ch_in,ch_out),dtype=np.float32) 
+                        in_start = 0
+                        out_start = 0
+                        for split in range(split_size):
+                            in_end = in_start + ch_ins[split]
+                            out_end = out_start + ch_outs[split] 
+                            # W is [kernel, kernel, in, out], so mask is the same shape
+                            W_mask[:, :, in_start:in_end, out_start:out_end] = 1.0
+                            in_start = in_end
+                            out_start = out_end
 
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=BNReLU, W_mask=W_mask)
@@ -927,11 +972,43 @@ class AnytimeDensenet(AnytimeNetwork):
         return ll_feats
 
 
+class AnytimeDensenetV2(AnytimeDensenet):
+    """
+        This version of dense net will do block compression 
+        by compression a block into log L layers. 
+        Any future layer will use the entire log L layers,
+        even in log-dense
+    """
+    def __init__(self, input_size, args):
+        super(AnytimeDensenetV2, self).__init__(input_size, args)
+        return 
+
+    def compute_block(self, pls, pmls, n_units, growth):
+        pass
+
+    def compute_transition(self, pls, pmls, trans_idx):
+        pass
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        pls = [l_feats[0]]
+        pmls = []
+        growth = self.growth_rate
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
+            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
+            if bi != self.n_blocks - 1: 
+                growth *= self.growth_rate_multiplier
+                pls, pmls = self.compute_transition(pls, pmls, bi)
+        
+        ll_feats = [ [ feat ] for feat in pmls ]
+        assert len(ll_feats) == self.total_units
+        return ll_feats
+
 
 ################################################
 # FCN for semantic labeling
 #
-# Important alert:
+# NOTE:
 #   Since the layer H/W are induced based on 
 #   the input layer rn, DO NOT give inputs of 
 #   H/W that are not divisible by 2**n_pools.
@@ -1338,3 +1415,91 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
 ###########################
 # Multi-scale Dense-Network and its log-dense variant
 ###########################
+def parser_add_msdensenet_arguments(parser):
+    parser, depth_group = parser_add_common_arguments(parser)
+    depth_group.add_argument('--msdensenet_depth',
+                             help='depth of multiscale densenet', type=int)
+    parser.add_argument('-g', '--growth_rate', help='growth rate at high resolution',
+                        type=int, default=24)
+    parser.add_argument('--bottleneck_width', help='multiplier of growth for width of bottleneck',
+                        type=float, default=4.0)
+    parser.add_argument('--num_scales', help='number of scales',
+                        type=int, default=3)
+
+class AnytimeMultiScaleDenseNet(AnytimeNetwork):
+    
+    def __init__(self, input_size, args):
+        super(AnytimeMultiScaleDenseNet, self).__init__(input_size, args)
+        self.num_scales = self.options.num_scales
+        self.growth_rate = self.options.growth_rate
+        self.bottleneck_width = self.options.bottleneck_width
+        self.init_channel = self.growth_rate * 2
+
+    def _compute_init_l_feats(self, image):
+        l_feats = []
+        ch_out = self.init_channel
+        for w in range(self.num_scales):
+            with tf.variable_scope('init_conv'+str(w)) as scope:
+                if w == 0:
+                    if self.network_config.s_type == 'basic':
+                        l = Conv2D('conv0', image, ch_out, 3) #, nl=BNReLU) 
+                    else:
+                        assert self.network_config.s_type == 'imagenet'
+                        l = (LinearWrap(image)
+                            .Conv2D('conv0', ch_out, 7, stride=2, nl=BNReLU)
+                            .MaxPooling('pool0', shape=3, stride=2, padding='SAME')())
+                else:
+                    l = Conv2D('conv0', l, ch_out, 3, stride=2, nl=BNReLU) 
+                l_feats.append(l)
+                ch_out /= 2
+        return l_feats
+
+    def compute_edge(self, l, ch_out, l_type='normal', name=""):
+        if self.network_config.b_type == 'bottleneck':
+            bnw = int(self.bottleneck_width * ch_out)
+            l = Conv2D('conv1x1_'+name, l, bnw, 1, nl=BNReLU)
+        if l_type == 'normal':
+            stride = 1
+        elif l_type == 'down':
+            stride = 2
+        l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride=stride, nl=BNReLU)
+        return l
+        
+
+    def compute_block(self, bi, n_units, layer_idx, ll_merged_feats):
+        g = self.growth_rate
+        l_mf = ll_merged_feats[-1]
+        for k in range(n_units):
+            layer_idx += 1
+            scope_name = self.compute_scope_basename(layer_idx)
+            l_feats = [None] * bi
+            for w in range(bi, self.num_scales):
+                with tf.variable_scope(scope_name+'.'+str(w)) as scope:
+                    if w == bi and (layer_idx ==0 or k > 0):
+                        l = self.compute_edge(l_mf[w], g, 'normal')
+                    else:
+                        l = self.compute_edge(l_mf[w], g/2, 'normal', name='e1')
+                        lp = self.compute_edge(l_mf[w-1], g/2, 'down', name='e2')
+                        l = tf.concat([l, lp], CHANNEL_DIM, name='concat_ms') 
+                    l_feats.append(l)
+            #end for w
+            new_l_mf = [None] * self.num_scales
+            for w in range(bi, self.num_scales):
+                with tf.variable_scope(scope_name+'.'+str(w)+'.merge') as scope:
+                    new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], 
+                        CHANNEL_DIM, name='merge_feats')
+            ll_merged_feats.append(new_l_mf)
+            l_mf = new_l_mf
+        return ll_merged_feats
+
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        ll_merged_feats = [[ feat for feat in l_feats ]]
+        layer_idx = -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            ll_merged_feats = self.compute_block(bi, n_units, layer_idx, ll_merged_feats) 
+            layer_idx += n_units
+        ll_feats = [ [l_merged_feats[-1]] for l_merged_feats in ll_merged_feats ]
+        # since ll_feats now contains the initial feature, which we don't want..
+        return ll_feats[1:]
