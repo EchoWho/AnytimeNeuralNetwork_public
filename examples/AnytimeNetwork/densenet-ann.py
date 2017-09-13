@@ -10,7 +10,7 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet
+from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
 
 """
 """
@@ -80,17 +80,6 @@ def get_svhn_data(train_or_test):
         ds = PrefetchData(ds, 5, 5)
     return ds
 
-
-def get_ilsvrc12_tfrecord_data(train_or_test):
-    isTrain = train_or_test == 'train'
-    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
-                                  train_or_test, 
-                                  args.batch_size // args.nr_gpu, 
-                                  height=INPUT_SIZE, 
-                                  width=INPUT_SIZE)
-    return ds
-
-
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
     steps_per_epoch = ds_train.size() // args.nr_gpu
@@ -143,7 +132,7 @@ if __name__ == '__main__':
     # Dataset choice 
     parser.add_argument('--ds_name', help='name of dataset',
                         type=str, 
-                        choices=['cifar10', 'cifar100', 'svhn', 'imagenet'])
+                        choices=['cifar10', 'cifar100', 'svhn'])
     # other common args
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=128)
@@ -160,8 +149,13 @@ if __name__ == '__main__':
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
     anytime_network.parser_add_densenet_arguments(parser)
-    model_cls = AnytimeDensenet
     args = parser.parse_args()
+    if args.densenet_version == 'atv1':
+        model_cls = AnytimeDensenet
+    elif args.densenet_version == 'atv2':
+        model_cls = AnytimeLogDensenetV2
+    elif args.densenet_version == 'dense':
+        model_cls = DenseNet
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
@@ -198,22 +192,6 @@ if __name__ == '__main__':
         lr_schedule = \
             [(1, 0.1), (20, 0.01), (30, 0.001), (45, 0.0001)]
         max_epoch = 60
-
-
-    elif args.ds_name == 'imagenet':
-        args.num_classes = 1000
-        INPUT_SIZE = 224
-        get_data = get_ilsvrc12_tfrecord_data
-        if args.is_toy:
-            ds_train = get_data('toy_train')
-            ds_val = get_data('toy_validation')
-        else:
-            ds_train = get_data('train')
-            ds_val = get_data('validation')
-
-        lr_schedule = \
-            [(1, 0.05), (30, 0.01), (60, 1e-3), (85, 1e-4), (100, 1e-5)]
-        max_epoch=115
          
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(arg.load):
