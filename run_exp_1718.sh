@@ -66,4 +66,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/densenet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---densenet_version=atv2 -f=5 -n=32 -s=12 -g=32 --ds_name=cifar10 --opt_at=-1 --samloss=6 --batch_size=64 
+--densenet_version=atv2 -f=5 -n=32 -s=12 -g=32 --ds_name=cifar10 --opt_at=-1 --samloss=6 --batch_size=64 --nr_gpu=1 

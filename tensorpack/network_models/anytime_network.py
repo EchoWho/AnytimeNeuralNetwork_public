@@ -950,7 +950,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=BNReLU, W_mask=W_mask)
                     .AvgPooling('pool', 2, padding='SAME')())
-                if n_splits == 1:
+                if split_size == 1:
                     new_pls.append(new_pl)
                 else:
                     new_pls.extend(tf.split(new_pl, ch_outs, CHANNEL_DIM, name='split'))
@@ -1001,7 +1001,7 @@ class DenseNet(AnytimeDensenet):
                 l = pml
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
-                    l = conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
+                    l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
                 l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
                 pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
                 pmls.append(pml)
@@ -1043,7 +1043,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                 else:
                     sl_indices = self.dense_select_indices(unit_idx-1)
                 logger.info("layer_idx = {}, len past_feats = {}, selected_feats: {}".format(\
-                    unit_idx, len(pls), sl_indices))
+                    layer_idx, len(pls), sl_indices))
 
                 ml = tf.concat([bcml] + [pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
