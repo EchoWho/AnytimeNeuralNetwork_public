@@ -17,21 +17,12 @@ from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet
+from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
 
 import get_augmented_data
 
 args = None
 INPUT_SIZE = 224
-
-#def get_data(train_or_test):
-#    isTrain = train_or_test == 'train'
-#    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
-#                                  train_or_test, 
-#                                  args.batch_size // args.nr_gpu, 
-#                                  height=INPUT_SIZE, 
-#                                  width=INPUT_SIZE)
-#    return ds
 
 def get_data(train_or_test):
     return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
@@ -99,7 +90,13 @@ if __name__ == '__main__':
                         type=bool, default=False)
     anytime_network.parser_add_densenet_arguments(parser)
     args = parser.parse_args()
-    
+    if args.densenet_version == 'atv1':
+        model_cls = AnytimeDensenet
+    elif args.densenet_version == 'atv2':
+        model_cls = AnytimeLogDensenetV2
+    elif args.densenet_version == 'dense':
+        model_cls = DenseNet
+
     assert args.num_classes == 1000
 
     # GPU will handle mean std transformation to save CPU-GPU communication

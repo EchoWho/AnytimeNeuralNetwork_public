@@ -728,6 +728,8 @@ def parser_add_densenet_arguments(parser):
     depth_group.add_argument('--densenet_depth',
                              help='depth of densenet for predefined networks',
                              type=int)
+    parser.add_argument('--densenet_version', help='specify the version of densenet to use',
+                        type=str, default='atv1', choices=['atv1', 'atv2', 'dense'])
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
     parser.add_argument('--bottleneck_width', help='multiplier of growth for width of bottleneck',
@@ -769,6 +771,7 @@ class AnytimeDensenet(AnytimeNetwork):
         self.growth_rate_multiplier = self.options.growth_rate_multiplier
         self.transition_batch_size = self.options.transition_batch_size
         self.use_transition_mask = self.options.use_transition_mask
+        self.bottleneck_width = self.options.bottleneck_width
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
@@ -972,7 +975,52 @@ class AnytimeDensenet(AnytimeNetwork):
         return ll_feats
 
 
-class AnytimeDensenetV2(AnytimeDensenet):
+
+class DenseNet(AnytimeDensenet):
+    """
+        This class is for reproducing densenet results. 
+        There is no choices of selecting connections as in AnytimeDensenet
+    """
+    def __init__(self, input_size, args):
+        super(DenseNet, self).__init__(input_size, args)
+
+
+    def compute_block(self, pmls, layer_idx, n_units, growth):
+        pml = pmls[-1]
+        if layer_idx > -1:
+            with tf.variable_scope('transit_after_{}'.format(layer_idx)) as scope:
+                ch_in = pml.get_shape().as_list()[CHANNEL_DIM]
+                ch_out = int(ch_in * self.reduction_ratio)
+                pml = Conv2D('conv1x1', pml, ch_out, 1, nl=BNReLU)
+                pml = AvgPooling('pool', pml, 2, padding='SAME')
+
+        for k in range(n_units):
+            layer_idx +=1
+            scope_name = self.compute_scope_basename(layer_idx)
+            with tf.variable_scope(scope_name) as scope:
+                l = pml
+                if self.network_config.b_type == 'bottleneck':
+                    bnw = int(self.bottleneck_width * growth)
+                    l = conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
+                l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
+                pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
+                pmls.append(pml)
+        return pmls
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        pmls = [l_feats[0]]
+        growth = self.growth_rate
+        layer_idx = -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            pmls = self.compute_block(pmls, layer_idx, n_units, growth)
+            layer_idx += n_units
+
+        ll_feats = [ [ml] for ml in pmls]
+        return ll_feats[1:]
+
+
+class AnytimeLogDensenetV2(AnytimeDensenet):
     """
         This version of dense net will do block compression 
         by compression a block into log L layers. 
@@ -980,27 +1028,70 @@ class AnytimeDensenetV2(AnytimeDensenet):
         even in log-dense
     """
     def __init__(self, input_size, args):
-        super(AnytimeDensenetV2, self).__init__(input_size, args)
-        return 
+        super(AnytimeLogDensenetV2, self).__init__(input_size, args)
 
-    def compute_block(self, pls, pmls, n_units, growth):
-        pass
+    def compute_block(self, layer_idx, n_units, l_mls, bcml, growth):
+        unit_idx = -1
+        pls = []
+        for k in range(n_units):
+            layer_idx += 1
+            unit_idx += 1
+            scope_name = self.compute_scope_basename(layer_idx)
+            with tf.variable_scope(scope_name):
+                if unit_idx == 0:
+                    sl_indices = []
+                else:
+                    sl_indices = self.dense_select_indices(unit_idx-1)
+                logger.info("layer_idx = {}, len past_feats = {}, selected_feats: {}".format(\
+                    unit_idx, len(pls), sl_indices))
 
-    def compute_transition(self, pls, pmls, trans_idx):
-        pass
+                ml = tf.concat([bcml] + [pls[sli] for sli in sl_indices], \
+                               CHANNEL_DIM, name='concat_feat')
+                if self.network_config.b_type == 'bottleneck':
+                    bnw = int(self.bottleneck_width * growth)
+                    l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
+                    l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
+                else:
+                    l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU) 
+                pls.append(l)
+                ml = tf.concat([ml, l], CHANNEL_DIM, name='concat_pred')
+                l_mls.append(ml)
+        return pls, l_mls
+
+
+    def update_compressed_feature(self, layer_idx, ch_out, pls, bcml):
+        """
+            pls: new layers
+            bcml : the compressed features for generating pls
+        """
+        with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
+            l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
+            ch_new = l.get_shape().as_list()[CHANNEL_DIM]
+            l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=BNReLU) 
+            l = AvgPooling('pool_new', l, 2, padding='SAME')
+
+            ch_old = bcml.get_shape().as_list()[CHANNEL_DIM]
+            bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=BNReLU) 
+            bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
+            
+            bcml = tf.concat([bcml, l], CHANNEL_DIM, name='concat_all')
+        return bcml
+
 
     def _compute_ll_feats(self, image):
         l_feats = self._compute_init_l_feats(image)
-        pls = [l_feats[0]]
-        pmls = []
+        bcml = l_feats[0]
+        l_mls = []
         growth = self.growth_rate
+        layer_idx = -1
         for bi, n_units in enumerate(self.network_config.n_units_per_block):  
-            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
+            pls, l_mls = self.compute_block(layer_idx, n_units, l_mls, bcml, growth)
+            layer_idx += n_units
             if bi != self.n_blocks - 1: 
-                growth *= self.growth_rate_multiplier
-                pls, pmls = self.compute_transition(pls, pmls, bi)
+                ch_out = growth * (int(np.log2(self.total_units + 1)) + 1)
+                bcml = self.update_compressed_feature(layer_idx, ch_out, pls, bcml)
         
-        ll_feats = [ [ feat ] for feat in pmls ]
+        ll_feats = [ [ml] for ml in l_mls ]
         assert len(ll_feats) == self.total_units
         return ll_feats
 
