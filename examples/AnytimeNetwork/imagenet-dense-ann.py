@@ -28,7 +28,7 @@ def get_data(train_or_test):
     return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
 
 
-def get_config():
+def get_config(model_cls):
     # prepare dataset
     if args.is_toy:
         dataset_train = get_data('toy_train')
@@ -38,7 +38,7 @@ def get_config():
         dataset_val = get_data('val') #val for caffe style meta input; validation for tf-slim
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
-    model=AnytimeDensenet(INPUT_SIZE, args)
+    model=model_cls(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
     #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
@@ -97,6 +97,8 @@ if __name__ == '__main__':
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
 
+    print model_cls
+
     assert args.num_classes == 1000
 
     # GPU will handle mean std transformation to save CPU-GPU communication
@@ -121,7 +123,7 @@ if __name__ == '__main__':
     #    eval_on_ILSVRC12(args.load, args.data_dir)
     #    sys.exit()
 
-    config = get_config()
+    config = get_config(model_cls)
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
