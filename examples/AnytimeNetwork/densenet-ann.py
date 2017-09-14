@@ -156,7 +156,7 @@ if __name__ == '__main__':
         lr_multiplier *= 1
     elif args.densenet_version == 'atv2':
         model_cls = AnytimeLogDensenetV2
-        lr_multiplier *= 0.5
+        lr_multiplier *= 2.0
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
         lr_multiplier *= 1
