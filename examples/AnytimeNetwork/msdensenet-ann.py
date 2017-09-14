@@ -10,7 +10,7 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
+from tensorpack.network_models.anytime_network import AnytimeMultiScaleDenseNet
 
 """
 """
@@ -132,7 +132,7 @@ if __name__ == '__main__':
     # Dataset choice 
     parser.add_argument('--ds_name', help='name of dataset',
                         type=str, 
-                        choices=['cifar10', 'cifar100', 'svhn'])
+                        choices=['cifar10', 'cifar100', 'svhn', 'imagenet'])
     # other common args
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=128)
@@ -148,25 +148,14 @@ if __name__ == '__main__':
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
-    anytime_network.parser_add_densenet_arguments(parser)
+    anytime_network.parser_add_msdensenet_arguments(parser)
+    model_cls = AnytimeMultiScaleDenseNet
     args = parser.parse_args()
-    lr_multiplier = 1.0 * args.batch_size / 64
-    if args.densenet_version == 'atv1':
-        model_cls = AnytimeDensenet
-        lr_multiplier *= 1
-    elif args.densenet_version == 'atv2':
-        model_cls = AnytimeLogDensenetV2
-        lr_multiplier *= 0.5
-    elif args.densenet_version == 'dense':
-        model_cls = DenseNet
-        lr_multiplier *= 1
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
     logger.info("Arguments: {}".format(args))
     logger.info("TF version: {}".format(tf.__version__))
-
-    assert args.batch_size <= 64
 
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':
@@ -180,8 +169,8 @@ if __name__ == '__main__':
         ds_train = get_data('train')
         ds_val = get_data('test')
 
-        lr_schedule = [(1, 0.1), (150, 0.01), (225, 0.001)]
-        lr_schedule = [ (t, v*lr_multiplier) for (t, v) in lr_schedule ] 
+        lr_schedule = \
+            [(1, 0.1), (150, 0.01), (225, 0.001)]
         max_epoch=300
 
 
@@ -193,10 +182,10 @@ if __name__ == '__main__':
         ds_train = get_data('train')
         ds_val = get_data('test')
 
-        lr_schedule = [(1, 0.1), (20, 0.01), (30, 0.001), (45, 0.0001)]
-        lr_schedule = [ (t, v*lr_multiplier) for (t, v) in lr_schedule ] 
+        lr_schedule = \
+            [(1, 0.1), (20, 0.01), (30, 0.001), (45, 0.0001)]
         max_epoch = 60
-         
+        
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(arg.load):
         config.session_init = SaverRestore(args.load)
