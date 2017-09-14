@@ -61,9 +61,15 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/AnytimeNetwork/densenet-ann.py \
+python $CONFIG_DIR/examples/AnytimeNetwork/msdensenet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---densenet_version=atv2 -f=5 -n=32 -s=12 -g=32 --ds_name=cifar100 --opt_at=-1 --samloss=6 --batch_size=64 --nr_gpu=1 
+--prediction_feature=msdense \
+--msdensenet_depth=24 \
+-g=24 \
+-s=2 \
+--samloss=6 \
+--num_scales=3 \
+-f=4 --ds_name=svhn --batch_size=64 --opt_at=-1 
