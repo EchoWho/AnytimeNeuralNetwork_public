@@ -1,15 +1,15 @@
 #!/bin/bash
 
-for i in {1544..1594}
+for i in {1518}
 do
 
 	USERNAME="dedey"
 	PASSWORD="Valar2god?"
-	CLUSTER="gcr"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="2"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -29,13 +29,5 @@ do
 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
 
 	echo "$CMD"
-
-	# FOR WHEN YOU NEED IMAGENET	
-	# CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2Flmdb2%2F&"
-
-	# FOR WHEN YOU NEED OTHER DATASETS
-	# CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
-
-	# Test here
 
 done
