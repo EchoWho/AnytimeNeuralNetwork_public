@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {1518}
+for i in {1720..1722}
 do
 
 	USERNAME="dedey"
