@@ -102,31 +102,6 @@ def get_config(ds_trian, ds_val, model_cls):
         max_epoch=max_epoch,
     )
 
-
-#def eval_on_ILSVRC12(model_file, data_dir):
-#    ds = get_data('val')
-#    model = AnytimeResnet(INPUT_SIZE, args)
-#    pred_config = PredictConfig(
-#        model=model,
-#        session_init=get_model_loader(model_file),
-#        input_names=['input', 'label'],
-#        output_names=['wrong-top1', 'wrong-top5']
-#    )
-#    pred = SimpleDatasetPredictor(pred_config, ds)
-#    acc1, acc5 = RatioCounter(), RatioCounter()
-#    for o in pred.get_result():
-#        batch_size = o[0].shape[0]
-#        acc1.feed(o[0].sum(), batch_size)
-#        acc5.feed(o[1].sum(), batch_size)
-#    print("Top1 Error: {}".format(acc1.ratio))
-#    print("Top5 Error: {}".format(acc5.ratio))
-
-#if args.eval:
-#    BATCH_SIZE = 128    # something that can run on one gpu
-#    eval_on_ILSVRC12(args.load, args.data_dir)
-#    sys.exit()
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Dataset choice 
