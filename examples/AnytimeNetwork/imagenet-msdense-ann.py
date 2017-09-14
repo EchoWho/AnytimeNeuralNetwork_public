@@ -17,18 +17,27 @@ from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
+from tensorpack.network_models.anytime_network import AnytimeMultiScaleDenseNet
 
 import get_augmented_data
 
 args = None
 INPUT_SIZE = 224
 
+#def get_data(train_or_test):
+#    isTrain = train_or_test == 'train'
+#    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
+#                                  train_or_test, 
+#                                  args.batch_size // args.nr_gpu, 
+#                                  height=INPUT_SIZE, 
+#                                  width=INPUT_SIZE)
+#    return ds
+
 def get_data(train_or_test):
     return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
 
 
-def get_config(model_cls):
+def get_config():
     # prepare dataset
     if args.is_toy:
         dataset_train = get_data('toy_train')
@@ -38,7 +47,7 @@ def get_config(model_cls):
         dataset_val = get_data('val') #val for caffe style meta input; validation for tf-slim
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
-    model=model_cls(INPUT_SIZE, args)
+    model=AnytimeMultiScaleDenseNet(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
     #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
@@ -88,17 +97,9 @@ if __name__ == '__main__':
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
-    anytime_network.parser_add_densenet_arguments(parser)
+    anytime_network.parser_add_msdensenet_arguments(parser)
     args = parser.parse_args()
-    if args.densenet_version == 'atv1':
-        model_cls = AnytimeDensenet
-    elif args.densenet_version == 'atv2':
-        model_cls = AnytimeLogDensenetV2
-    elif args.densenet_version == 'dense':
-        model_cls = DenseNet
-
-    print model_cls
-
+    
     assert args.num_classes == 1000
 
     # GPU will handle mean std transformation to save CPU-GPU communication
@@ -123,7 +124,7 @@ if __name__ == '__main__':
     #    eval_on_ILSVRC12(args.load, args.data_dir)
     #    sys.exit()
 
-    config = get_config(model_cls)
+    config = get_config()
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
