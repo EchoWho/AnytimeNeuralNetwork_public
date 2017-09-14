@@ -8,11 +8,11 @@ import pdb
 
 def collect_info():
     user = 'dedey'
-    password = 'Chakra2god?'
+    password = 'Valar2god?'
     cluster = 'gcr'
     vc = 'msrlabs'
     status = 'Passed'
-    num_finished_jobs = '2000'
+    num_finished_jobs = '200'
 
     cmd = "https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(
         cluster, vc, num_finished_jobs, user, status)
