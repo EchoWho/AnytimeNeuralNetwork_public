@@ -132,15 +132,15 @@ def loss_weights(N, args):
     elif FUNC_TYPE == 3: #exponential weights
         return exponential_weights(N, base=args.exponential_base)
     elif FUNC_TYPE == 4: #constant weights
-        return constant_weights(N) 
+        return stack_loss_weights(N, args.stack, constant_weights)
     elif FUNC_TYPE == 5: # sieve with stack
         return stack_loss_weights(N, args.stack, sieve_loss_weights)
     elif FUNC_TYPE == 6: # linear
-        return linear(N, a=0.25, b=1.0)
+        return stack_loss_weights(N, args.stack, linear)
     elif FUNC_TYPE == 7: # half constant, half optimal at -1
-        return half_constant_half_optimal(N, -1)
+        return stack_loss_weights(N, args.stack, half_constant_half_optimal)
     elif FUNC_TYPE == 8: # quater constant, half optimal
-        return quater_constant_half_optimal(N)
+        return stack_loss_weights(N, args.stack, quater_constant_half_optimal)
     elif FUNC_TYPE == 9: # recursive heavy end
         return stack_loss_weights(N, args.stack, recursive_heavy_end) 
     else:

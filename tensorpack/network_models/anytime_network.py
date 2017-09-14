@@ -1533,7 +1533,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
             with tf.variable_scope('init_conv'+str(w)) as scope:
                 if w == 0:
                     if self.network_config.s_type == 'basic':
-                        l = Conv2D('conv0', image, ch_out, 3) #, nl=BNReLU) 
+                        l = Conv2D('conv0', image, ch_out, 3, nl=BNReLU) #, nl=BNReLU) 
                     else:
                         assert self.network_config.s_type == 'imagenet'
                         l = (LinearWrap(image)
