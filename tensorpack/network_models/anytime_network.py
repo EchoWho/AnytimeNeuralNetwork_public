@@ -152,7 +152,7 @@ def parser_add_common_arguments(parser):
                         type=int, default=1)
     parser.add_argument('--prediction_feature', 
                         help='Type of feature processing for prediction',
-                        type=str, default='none', choices=['none', '1x1', 'msdense'])
+                        type=str, default='none', choices=['none', '1x1', 'msdense', 'bnrelu'])
     parser.add_argument('--prediction_feature_ch_out_rate',
                         help='ch_out= int( <rate> * ch_in)',
                         type=np.float32, default=1.0)
@@ -464,11 +464,12 @@ class AnytimeNetwork(ModelDesc):
                                 ch_inter = 128
                             else:
                                 ch_inter = ch_in
-                                
                             l = Conv2D('conv1x1_0', l, ch_inter, 3, stride=2)
                             l = BNReLU('bnrelu1x1_0', l)
                             l = Conv2D('conv1x1_1', l, ch_inter, 3, stride=2)
                             l = BNReLU('bnrelu1x1_1', l)
+                        elif self.options.prediction_feature == 'bnrelu':
+                            l = BNReLU('bnrelu', l)
                         
                         logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
                     #end scope of layer.w.pred
