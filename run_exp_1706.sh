@@ -68,7 +68,7 @@ python $CONFIG_DIR/examples/AnytimeNetwork/msdensenet-ann.py \
 --load=${MODEL_DIR}/checkpoint \
 --prediction_feature=msdense \
 --msdensenet_depth=24 \
--g=24 \
+-g=6 \
 -s=2 \
 --samloss=6 \
 --num_scales=3 \

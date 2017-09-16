@@ -1512,7 +1512,7 @@ def parser_add_msdensenet_arguments(parser):
     depth_group.add_argument('--msdensenet_depth',
                              help='depth of multiscale densenet', type=int)
     parser.add_argument('-g', '--growth_rate', help='growth rate at high resolution',
-                        type=int, default=24)
+                        type=int, default=6)
     parser.add_argument('--bottleneck_width', help='multiplier of growth for width of bottleneck',
                         type=float, default=4.0)
     parser.add_argument('--num_scales', help='number of scales',
@@ -1543,7 +1543,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 else:
                     l = Conv2D('conv0', l, ch_out, 3, stride=2, nl=BNReLU) 
                 l_feats.append(l)
-                ch_out /= 2
+                ch_out *= 2
         return l_feats
 
     def compute_edge(self, l, ch_out, l_type='normal', name=""):
@@ -1559,12 +1559,13 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         
 
     def compute_block(self, bi, n_units, layer_idx, ll_merged_feats):
-        g = self.growth_rate
         l_mf = ll_merged_feats[-1]
+        g_base = self.growth_rate * 2**bi
         for k in range(n_units):
             layer_idx += 1
             scope_name = self.compute_scope_basename(layer_idx)
             l_feats = [None] * bi
+            g = g_base
             for w in range(bi, self.num_scales):
                 with tf.variable_scope(scope_name+'.'+str(w)) as scope:
                     if w == bi and (layer_idx ==0 or k > 0):
@@ -1574,6 +1575,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                         lp = self.compute_edge(l_mf[w-1], g/2, 'down', name='e2')
                         l = tf.concat([l, lp], CHANNEL_DIM, name='concat_ms') 
                     l_feats.append(l)
+                g *= 2
             #end for w
             new_l_mf = [None] * self.num_scales
             for w in range(bi, self.num_scales):
