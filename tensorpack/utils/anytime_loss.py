@@ -24,6 +24,19 @@ def sieve_loss_weights(N):
     weights /= (np.sum(weights) / num_steps)
     return np.flipud(weights)
 
+def sieve_loss_weights_v2(N):
+    if N == 1:
+        return np.ones(1)
+    weights = np.ones(N, dtype=np.float32)
+    step = N/2.0
+    while np.round(step) > 1:
+        for i in np.arange(step, N, step):
+            weights[int(i)] += 1
+        step /= 2.0
+    weights[-1] = np.sum(weights[1:])
+    weights /= np.sum(weights) / np.log2(N+1)
+    return weights
+
 def eann_sieve(N):
     weights = sieve_loss_weights(N)
     weights[:N//2] = 0.0
@@ -143,6 +156,8 @@ def loss_weights(N, args):
         return stack_loss_weights(N, args.stack, quater_constant_half_optimal)
     elif FUNC_TYPE == 9: # recursive heavy end
         return stack_loss_weights(N, args.stack, recursive_heavy_end) 
+    elif FUNC_TYPE == 10: # sieve v2 
+        return stack_loss_weights(N, args.stack, sieve_loss_weights_v2)
     else:
         raise NameError('func type must be either 0: exponential or 1: square' \
             + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
