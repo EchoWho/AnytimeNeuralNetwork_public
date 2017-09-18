@@ -33,7 +33,7 @@ def sieve_loss_weights_v2(N):
         for i in np.arange(step, N, step):
             weights[int(i)] += 1
         step /= 2.0
-    weights[-1] = np.sum(weights[1:])
+    weights[-1] = np.sum(weights[:-1])
     weights /= np.sum(weights) / np.log2(N+1)
     return weights
 
