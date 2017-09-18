@@ -156,17 +156,23 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--prediction_feature_ch_out_rate',
                         help='ch_out= int( <rate> * ch_in)',
                         type=np.float32, default=1.0)
-    #parser.add_argument('--bottleneck',
-    #                    help='Whether use bottleneck units or basic units, resnet currently don\'t support this',
-    #                    default=False, action='store_true')
 
-    # stop gradient / forward thinking / boost-net / no-grad
+    ## alternative_training_target
+    parser.add_argument('--alter_label', help="Type of alternative target to use",
+                        type=str, default='none', choices=['none', 'vec'])
+    parser.add_argument('--alter_loss_w', help="percentage of alter loss weight",
+                        type=np.float32, default=0.5)
+    parser.add_argument('--alter_label_activate_frac', 
+                        help="Fraction of anytime predictions that uses alter_label",
+                        type=np.float32, default=0.75)
+
+    ## stop gradient / forward thinking / boost-net / no-grad
     parser.add_argument('--stop_gradient', help='Whether to stop gradients.',
                         default=False, action='store_true')
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
                         type=np.float32, default=0)
 
-    # selecting loss 
+    ## selecting loss 
     parser.add_argument('--init_select_idx', help='the loss anytime_idx to select initially',
                         type=int)
     parser.add_argument('--samloss', 
@@ -179,7 +185,7 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
                         type=np.float32, default=0.85)
 
-    # loss_weight computation
+    ## loss_weight computation
     parser.add_argument('-f', '--func_type', 
                         help='Type of non-linear spacing to use: 0 for exp, 1 for sqr', 
                         type=int, default=FUNC_TYPE_ANN)
@@ -188,7 +194,7 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--opt_at', help='Optimal at', 
                         type=int, default=-1)
 
-    # misc: training params, data-set params, speed/memory params
+    ## misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',
                         type=np.float32, default=0.01)
     parser.add_argument('--batch_norm_decay', help='decay rate of batchnorms',
@@ -201,7 +207,7 @@ def parser_add_common_arguments(parser):
                         type=float, default=1e-4)
     parser.add_argument('--w_init', help='method used for initializing W',
                         type=str, default='var_scale', choices=['var_scale', 'xavier'])
-    # Special options to force input as uint8 and do mean/std process in graph in order to save memory
+    ## Special options to force input as uint8 and do mean/std process in graph in order to save memory
     # during cpu - gpu communication
     parser.add_argument('--input_type', help='Type for input, uint8 for certain dataset to speed up',
                         type=str, default='float32', choices=['float32', 'uint8'])
@@ -237,6 +243,9 @@ class AnytimeNetwork(ModelDesc):
         self.n_blocks = len(self.network_config.n_units_per_block) 
         self.width = args.width
         self.num_classes = args.num_classes
+        self.alter_label = self.options.alter_label
+        self.alter_label_activate_frac = self.options.alter_label_activate_frac
+        self.alter_loss_w = self.options.alter_loss_w
 
         self.weights = anytime_loss.loss_weights(self.total_units, args)
         self.ls_K = np.sum(np.asarray(self.weights) > 0)
@@ -270,9 +279,13 @@ class AnytimeNetwork(ModelDesc):
                 raise Exception('gpu_graph expects std, but it is not in the options')
     
     def _get_inputs(self):
+        if self.alter_label == 'none':
+            additional_input = []
+        elif self.alter_label == 'vec':
+            additional_input = [InputDesc(tf.float32, [None, self.num_classes], 'alter_label')]
         return [InputDesc(self.input_type, 
                     [None, self.input_size, self.input_size, 3],'input'),
-                InputDesc(tf.int32, [None], 'label')]
+                InputDesc(tf.int32, [None], 'label')] + additional_input
 
     def compute_scope_basename(self, layer_idx):
         return "layer{:03d}".format(layer_idx)
@@ -359,16 +372,17 @@ class AnytimeNetwork(ModelDesc):
     def _compute_ll_feats(self, image):
         raise Exception("Invoked the base AnytimeNetwork. Use a specific one instead")
 
-    def _compute_prediction_and_loss(self, l, label, unit_idx):
+    def _compute_prediction_and_loss(self, l, label_obj, unit_idx):
         """
             l: feat_map of DATA_FORMAT 
-            label: target to determine the loss
+            label_obj: target to determine the loss
             unit_idx : the feature computation unit index.
         """
         l = GlobalAvgPooling('gap', l)
         logits = FullyConnected('linear', l, self.num_classes, nl=tf.identity)
             
         ## local cost/error_rate
+        label = label_obj[0]
         cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
             logits=logits, labels=label)
         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
@@ -379,6 +393,13 @@ class AnytimeNetwork(ModelDesc):
         
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
+        
+        if self.alter_label and unit_idx < self.alter_label_activate_frac * self.total_units:
+            alabel = label_obj[1]
+            sq_loss = tf.losses.mean_squared_error(labels=alabel, predictions=logits)  
+            add_moving_summary(sq_loss, name='alter_sq_loss')
+            if self.alter_loss_w != 0.0:
+                 cost = cost * (1- self.alter_loss_w) + sq_loss * self.alter_loss_w
         return logits, cost
 
 
@@ -390,7 +411,8 @@ class AnytimeNetwork(ModelDesc):
 
             The first returned variable is always the image as it was inputted
         """
-        image, label = inputs
+        image = inputs[0]
+        label = inputs[1:]
         return image, label
 
     def _build_graph(self, inputs):
@@ -1212,7 +1234,7 @@ class AnytimeFCN(AnytimeNetwork):
             label_img = AvgPooling('label_img_{}'.format(pi+1), label_img, 2, \
                                    padding='SAME', data_format='NHWC')
 
-        return image, (l_label, l_mask)
+        return image, [l_label, l_mask]
 
 
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
