@@ -165,6 +165,8 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--alter_label_activate_frac', 
                         help="Fraction of anytime predictions that uses alter_label",
                         type=np.float32, default=0.75)
+    parser.add_argument('--high_temperature', help='Temperature for training distill targets',
+                        type=np.float32, default=1.0)
 
     ## stop gradient / forward thinking / boost-net / no-grad
     parser.add_argument('--stop_gradient', help='Whether to stop gradients.',
@@ -380,6 +382,8 @@ class AnytimeNetwork(ModelDesc):
         """
         l = GlobalAvgPooling('gap', l)
         logits = FullyConnected('linear', l, self.num_classes, nl=tf.identity)
+        if self.options.high_temperature > 1.0:
+            logits /= self.options.high_temperature
             
         ## local cost/error_rate
         label = label_obj[0]
@@ -394,7 +398,7 @@ class AnytimeNetwork(ModelDesc):
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         
-        if self.alter_label and unit_idx < self.alter_label_activate_frac * self.total_units:
+        if self.alter_label != 'none' and unit_idx < self.alter_label_activate_frac * self.total_units:
             alabel = label_obj[1]
             sq_loss = tf.losses.mean_squared_error(labels=alabel, predictions=logits)  
             add_moving_summary(sq_loss, name='alter_sq_loss')
