@@ -41,6 +41,7 @@ case $key in
     ;;
     -l|--log-dir)
     LOG_DIR="$2"
+    shift
   ;;
     *)
     echo Unkown option $key
