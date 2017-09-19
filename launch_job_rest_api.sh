@@ -1,15 +1,15 @@
 #!/bin/bash
 
-for i in {1720..1722}
+for i in {1868..1803}
 do
 
 	USERNAME="dedey"
 	PASSWORD="Valar2god?"
-	CLUSTER="cam"
+	CLUSTER="gcr"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="2"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
