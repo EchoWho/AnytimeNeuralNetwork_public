@@ -126,6 +126,7 @@ if __name__ == '__main__':
     anytime_network.parser_add_msdensenet_arguments(parser)
     model_cls = AnytimeMultiScaleDenseNet
     args = parser.parse_args()
+    args.ds_name="imagenet"
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
