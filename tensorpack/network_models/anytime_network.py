@@ -244,7 +244,7 @@ class AnytimeNetwork(ModelDesc):
 
         self.n_blocks = len(self.network_config.n_units_per_block) 
         self.width = args.width
-        self.num_classes = args.num_classes
+        self.num_classes = self.options.num_classes
         self.alter_label = self.options.alter_label
         self.alter_label_activate_frac = self.options.alter_label_activate_frac
         self.alter_loss_w = self.options.alter_loss_w
@@ -398,12 +398,15 @@ class AnytimeNetwork(ModelDesc):
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         
-        if self.alter_label != 'none' and unit_idx < self.alter_label_activate_frac * self.total_units:
+        if self.alter_label != 'none' and \
+                unit_idx < self.alter_label_activate_frac * self.total_units:
             alabel = label_obj[1]
-            sq_loss = tf.losses.mean_squared_error(labels=alabel, predictions=logits)  
+            sq_loss = np.float32(self.num_classes) * \
+                tf.losses.mean_squared_error(labels=alabel, predictions=logits)
             add_moving_summary(sq_loss, name='alter_sq_loss')
             if self.alter_loss_w != 0.0:
-                 cost = cost * (1- self.alter_loss_w) + sq_loss * self.alter_loss_w
+                 cost = cost * (1 - self.alter_loss_w) + sq_loss * self.alter_loss_w
+
         return logits, cost
 
 
@@ -1199,7 +1202,7 @@ class AnytimeFCN(AnytimeNetwork):
             # the label one-hot is in fact a distribution of labels. 
             # Void labeled pixels have 0-vector distribution.
             label_desc = InputDesc(tf.float32, 
-                [None, None, None, self.options.num_classes], 'label')
+                [None, None, None, self.num_classes], 'label')
         else:
             label_desc = InputDesc(tf.int32, [None, None, None], 'label')
         return [InputDesc(self.input_type, [None, None, None, 3], 'input'), label_desc]
