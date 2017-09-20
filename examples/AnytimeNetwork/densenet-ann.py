@@ -180,9 +180,9 @@ if __name__ == '__main__':
         ds_train = get_data('train')
         ds_val = get_data('test')
 
-        lr_schedule = [(1, 0.1), (150, 0.01), (225, 0.001)]
+        lr_schedule = [(1, 0.1), (140, 0.01), (210, 0.001)]
         lr_schedule = [ (t, v*lr_multiplier) for (t, v) in lr_schedule ] 
-        max_epoch=300
+        max_epoch=250
 
 
     elif args.ds_name == 'svhn':
