@@ -160,7 +160,7 @@ def parser_add_common_arguments(parser):
 
     ## alternative_training_target
     parser.add_argument('--alter_label', help="Type of alternative target to use",
-                        type=str, default='none', choices=['none', 'vec'])
+                        default=False, action='store_true')
     parser.add_argument('--alter_loss_w', help="percentage of alter loss weight",
                         type=np.float32, default=0.5)
     parser.add_argument('--alter_label_activate_frac', 
@@ -282,12 +282,8 @@ class AnytimeNetwork(ModelDesc):
                 raise Exception('gpu_graph expects std, but it is not in the options')
     
     def _get_inputs(self):
-        ctx = get_current_tower_context()
-        if not ctx.is_training:
-            additional_input = []
-        elif self.alter_label == 'none':
-            additional_input = []
-        elif self.alter_label == 'vec':
+        additional_input = []
+        if self.is_train and self.alter_label:
             additional_input = [InputDesc(tf.float32, [None, self.num_classes], 'alter_label')]
         return [InputDesc(self.input_type, 
                     [None, self.input_size, self.input_size, 3],'input'),
@@ -402,7 +398,7 @@ class AnytimeNetwork(ModelDesc):
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         
-        if self.alter_label != 'none' and \
+        if self.alter_label and self.is_train and \
                 unit_idx < self.alter_label_activate_frac * self.total_units:
             alabel = label_obj[1]
             sq_loss = np.float32(self.num_classes) * \
