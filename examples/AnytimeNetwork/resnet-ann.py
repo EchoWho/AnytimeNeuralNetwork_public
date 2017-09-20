@@ -14,7 +14,7 @@ from tensorpack.utils import utils
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeResnet
 
-import get_augmented_data
+from get_augmented_data import get_cifar_augmented_data, get_svhn_augmented_data
 
 """
 """
@@ -23,67 +23,6 @@ args=None
 lr_schedule=None
 max_epoch=None
 get_data=None
-
-def get_cifar_data(train_or_test, shuffle=True):
-    isTrain = train_or_test == 'train'
-    if args.num_classes == 10:
-        ds = dataset.Cifar10(train_or_test, shuffle=shuffle, do_validation=args.do_validation)
-    elif args.num_classes == 100:
-        ds = dataset.Cifar100(train_or_test, shuffle=shuffle, do_validation=args.do_validation)
-    else:
-        raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
-    if args.do_validation: 
-        logger.info('[Validation] {} set has n_samples: {}'.format(isTrain, len(ds.data)))
-    pp_mean = ds.get_per_pixel_mean()
-    if isTrain:
-        augmentors = [
-            imgaug.CenterPaste((40, 40)),
-            imgaug.RandomCrop((32, 32)),
-            imgaug.Flip(horiz=True),
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0),
-        ]
-    else:
-        augmentors = [
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0)
-        ]
-    ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
-    if isTrain and not args.do_eval:
-        ds = PrefetchData(ds, 3, 2)
-    return ds
-
-
-def get_svhn_data(train_or_test, shuffle=True):
-    isTrain = train_or_test == 'train'
-    pp_mean = dataset.SVHNDigit.get_per_pixel_mean()
-    if isTrain:
-        d1 = dataset.SVHNDigit('train', shuffle=shuffle)
-        d2 = dataset.SVHNDigit('extra', shuffle=shuffle)
-        ds = RandomMixData([d1, d2])
-    else:
-        ds = dataset.SVHNDigit('test', shuffle=shuffle)
-
-    if isTrain:
-        augmentors = [
-            imgaug.CenterPaste((40, 40)),
-            imgaug.Brightness(10),
-            imgaug.Contrast((0.8, 1.2)),
-            imgaug.GaussianDeform(  # this is slow. without it, can only reach 1.9% error
-                [(0.2, 0.2), (0.2, 0.8), (0.8, 0.8), (0.8, 0.2)],
-                (40, 40), 0.2, 3),
-            imgaug.RandomCrop((32, 32)),
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0),
-        ]
-    else:
-        augmentors = [
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0)
-        ]
-    ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
-    if isTrain and not args.do_eval:
-        ds = PrefetchData(ds, 5, 5)
-    return ds
-
 
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
@@ -200,7 +139,7 @@ if __name__ == '__main__':
 
     # generate a list of none-empty strings for specifying the splits
     args.evaluate = filter(bool, args.evaluate.split(','))
-    args.do_eval = len(args.evaluate) > 0
+    do_eval = len(args.evaluate) > 0
 
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':
@@ -211,9 +150,9 @@ if __name__ == '__main__':
         args.regularize_coef = 'decay'
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
-        get_data = get_cifar_data
-        ds_train = get_data('train', shuffle=not args.do_eval)
-        ds_val = get_data('test', shuffle=False)
+        get_data = get_cifar_augmented_data
+        ds_train = get_data('train', args, not do_eval)
+        ds_val = get_data('test', args, False)
 
         lr_schedule = \
             [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
@@ -225,16 +164,16 @@ if __name__ == '__main__':
         args.regularize_coef = 'decay'
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
-        get_data = get_svhn_data
-        ds_train = get_data('train', shuffle=not args.do_eval)
-        ds_val = get_data('test', False)
+        get_data = get_svhn_augmented_data
+        ds_train = get_data('train', args, not do_eval)
+        ds_val = get_data('test', args, False)
 
         lr_schedule = \
             [(1, 0.1), (15, 0.01), (30, 0.001), (45, 0.0002)]
         max_epoch = 60
 
 
-    if args.do_eval:
+    if do_eval:
         for eval_name in args.evaluate:
             if eval_name == 'train':
                 ds = ds_train

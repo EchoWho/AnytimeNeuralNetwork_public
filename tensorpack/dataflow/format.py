@@ -298,7 +298,8 @@ class BinaryData(DataFlow):
     def get_data(self):
         with open(self.path, 'rb') as fin:
             for _ in range(self._size):
-                yield list(struct.unpack(self.dp_format, fin.read(self.row_n_bytes)))
+                yield [np.asarray(struct.unpack(self.dp_format, 
+                    fin.read(self.row_n_bytes)),dtype=np.float32)]
 
 from ..utils.develop import create_dummy_class   # noqa
 try:

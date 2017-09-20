@@ -50,7 +50,9 @@ class InputSource(object):
         pass
 
     def setup_training(self, trainer):
+        trainer.model.set_train_or_test(is_train=True)
         self.setup(trainer.model)
+        trainer.model.set_train_or_test(is_train=False)
 
     @abstractmethod
     def reset_state(self):
