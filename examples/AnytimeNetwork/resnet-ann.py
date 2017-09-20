@@ -3,6 +3,8 @@ import argparse
 import os, sys, datetime
 
 import tensorflow as tf
+import ipdb as pdb
+import struct 
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
@@ -20,12 +22,12 @@ lr_schedule=None
 max_epoch=None
 get_data=None
 
-def get_cifar_data(train_or_test):
+def get_cifar_data(train_or_test, shuffle=True):
     isTrain = train_or_test == 'train'
     if args.num_classes == 10:
-        ds = dataset.Cifar10(train_or_test, do_validation=args.do_validation)
+        ds = dataset.Cifar10(train_or_test, shuffle=shuffle, do_validation=args.do_validation)
     elif args.num_classes == 100:
-        ds = dataset.Cifar100(train_or_test, do_validation=args.do_validation)
+        ds = dataset.Cifar100(train_or_test, shuffle=shuffle, do_validation=args.do_validation)
     else:
         raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
     if args.do_validation: 
@@ -44,20 +46,20 @@ def get_cifar_data(train_or_test):
         ]
     ds = AugmentImageComponent(ds, augmentors)
     ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
-    if isTrain:
+    if isTrain and not args.do_eval:
         ds = PrefetchData(ds, 3, 2)
     return ds
 
 
-def get_svhn_data(train_or_test):
+def get_svhn_data(train_or_test, shuffle=True):
     isTrain = train_or_test == 'train'
     pp_mean = dataset.SVHNDigit.get_per_pixel_mean()
     if isTrain:
-        d1 = dataset.SVHNDigit('train')
-        d2 = dataset.SVHNDigit('extra')
+        d1 = dataset.SVHNDigit('train', shuffle=shuffle)
+        d2 = dataset.SVHNDigit('extra', shuffle=shuffle)
         ds = RandomMixData([d1, d2])
     else:
-        ds = dataset.SVHNDigit('test')
+        ds = dataset.SVHNDigit('test', shuffle=shuffle)
 
     if isTrain:
         augmentors = [
@@ -76,18 +78,8 @@ def get_svhn_data(train_or_test):
         ]
     ds = AugmentImageComponent(ds, augmentors)
     ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
-    if isTrain:
+    if isTrain and not args.do_eval:
         ds = PrefetchData(ds, 5, 5)
-    return ds
-
-
-def get_ilsvrc12_tfrecord_data(train_or_test):
-    isTrain = train_or_test == 'train'
-    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
-                                  train_or_test, 
-                                  args.batch_size // args.nr_gpu, 
-                                  height=INPUT_SIZE, 
-                                  width=INPUT_SIZE)
     return ds
 
 
@@ -114,28 +106,58 @@ def get_config(ds_trian, ds_val, model_cls):
     )
 
 
-#def eval_on_ILSVRC12(model_file, data_dir):
-#    ds = get_data('val')
-#    model = AnytimeResnet(INPUT_SIZE, args)
-#    pred_config = PredictConfig(
-#        model=model,
-#        session_init=get_model_loader(model_file),
-#        input_names=['input', 'label'],
-#        output_names=['wrong-top1', 'wrong-top5']
-#    )
-#    pred = SimpleDatasetPredictor(pred_config, ds)
-#    acc1, acc5 = RatioCounter(), RatioCounter()
-#    for o in pred.get_result():
-#        batch_size = o[0].shape[0]
-#        acc1.feed(o[0].sum(), batch_size)
-#        acc5.feed(o[1].sum(), batch_size)
-#    print("Top1 Error: {}".format(acc1.ratio))
-#    print("Top5 Error: {}".format(acc5.ratio))
+def evaluate(model_cls, ds, eval_names):
+    assert args is not None, args
+    model = model_cls(INPUT_SIZE, args) 
 
-#if args.eval:
-#    BATCH_SIZE = 128    # something that can run on one gpu
-#    eval_on_ILSVRC12(args.load, args.data_dir)
-#    sys.exit()
+    output_names = []
+    for i, w in enumerate(model.weights):
+        if w > 0:
+            output_names.append('layer{:03d}.0.pred/linear/output:0'.format(i))
+
+    pred_config = PredictConfig(
+        model=model,
+        session_init=SaverRestore(args.load),
+        input_names=['input', 'label'],
+        output_names=['input', 'label'] + output_names)
+    
+    pred = SimpleDatasetPredictor(pred_config, ds)
+
+    if args.store_final_prediction:
+        store_fn = args.store_basename + "_{}.bin".format(eval_name)
+        f_store_out = open(store_fn, 'wb')
+
+    l_labels = []
+    for idx, output in enumerate(pred.get_result()):
+        # o contains a list of predictios at various locations; each pred contains a small batch
+        image, label = output[0:2]
+        l_labels.append(label)
+        anytime_preds = output[2:]
+        
+        if args.store_final_prediction:
+            preds = anytime_preds[-1]
+            f_store_out.write(preds)
+
+    # since the labels comes in batches
+    l_labels = np.asarray(l_labels).reshape([-1])
+    
+    if args.store_final_prediction:
+        f_store_out.close()
+        
+        ## report accuracy of the stored predicitons
+        with open(store_fn, 'rb') as fin:
+            l_logits = []
+            n_wrong = 0
+            row_len = 4 * args.num_classes
+            for label in l_labels:
+                contents = fin.read(row_len)
+                logit = np.asarray(struct.unpack('f'*args.num_classes, contents))
+
+                l_logits.append(logit)
+                n_wrong += int(np.argmax(logit) != label)
+
+        error_rate = n_wrong / np.float32(len(l_labels))
+        logger.info("Verify error rate of the stored prediction to be {}".format(error_rate))
 
 
 if __name__ == '__main__':
@@ -159,6 +181,12 @@ if __name__ == '__main__':
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
+    parser.add_argument('--evaluate', help='a comma separated list containing [train, test]',
+                        default="", type=str)
+    parser.add_argument('--store_final_prediction', help='wheter evaluation stores final prediction',
+                        default=False, action='store_true')
+    parser.add_argument('--store_basename', help='basename_<train/test>.bin for storing the logits',
+                        type=str, default='distill_target')
     anytime_network.parser_add_resnet_arguments(parser)
     model_cls = AnytimeResnet
     args = parser.parse_args()
@@ -167,6 +195,10 @@ if __name__ == '__main__':
     logger.auto_set_dir()
     logger.info("Arguments: {}".format(args))
     logger.info("TF version: {}".format(tf.__version__))
+
+    # generate a list of none-empty strings for specifying the splits
+    args.evaluate = filter(bool, args.evaluate.split(','))
+    args.do_eval = len(args.evaluate) > 0
 
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':
@@ -178,8 +210,8 @@ if __name__ == '__main__':
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_cifar_data
-        ds_train = get_data('train')
-        ds_val = get_data('test')
+        ds_train = get_data('train', shuffle=not args.do_eval)
+        ds_val = get_data('test', shuffle=False)
 
         lr_schedule = \
             [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
@@ -192,33 +224,22 @@ if __name__ == '__main__':
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_svhn_data
-        ds_train = get_data('train')
-        ds_val = get_data('test')
+        ds_train = get_data('train', shuffle=not args.do_eval)
+        ds_val = get_data('test', False)
 
         lr_schedule = \
             [(1, 0.1), (15, 0.01), (30, 0.001), (45, 0.0002)]
         max_epoch = 60
 
 
-    elif args.ds_name == 'imagenet':
-        logger.info("tf record ilsvrc is very very slow, use the lmdb version instead")
-        assert False
-        args.num_classes = 1000
-        args.regularize_coef = 'const'
-        INPUT_SIZE = 224
-        get_data = get_ilsvrc12_tfrecord_data
-        if args.is_toy:
-            ds_train = get_data('toy_train')
-            ds_val = get_data('toy_validation')
-        else:
-            ds_train = get_data('train')
-            ds_val = get_data('validation')
-
-        assert args.init_channel == 64
-        lr_schedule = \
-            [(1, 0.05), (30, 0.005), (60, 5e-4), (90, 5e-5), (105, 5e-6)]
-        max_epoch = 128
-         
+    if args.do_eval:
+        for eval_name in args.evaluate:
+            if eval_name == 'train':
+                ds = ds_train
+            elif eval_name == 'test':
+                ds = ds_val
+            evaluate(model_cls, ds, eval_name)
+        sys.exit()
 
 
     config = get_config(ds_train, ds_val, model_cls)
