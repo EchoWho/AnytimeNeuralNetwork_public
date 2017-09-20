@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
+from tensorpack.tfutils.tower import get_current_tower_context
 from tensorpack.utils import anytime_loss, logger, utils, fs
 from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
 
@@ -281,7 +282,10 @@ class AnytimeNetwork(ModelDesc):
                 raise Exception('gpu_graph expects std, but it is not in the options')
     
     def _get_inputs(self):
-        if self.alter_label == 'none':
+        ctx = get_current_tower_context()
+        if not ctx.is_training:
+            additional_input = []
+        elif self.alter_label == 'none':
             additional_input = []
         elif self.alter_label == 'vec':
             additional_input = [InputDesc(tf.float32, [None, self.num_classes], 'alter_label')]

@@ -14,6 +14,8 @@ from tensorpack.utils import utils
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeResnet
 
+import get_augmented_data
+
 """
 """
 INPUT_SIZE=None
