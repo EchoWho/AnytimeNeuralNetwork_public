@@ -5,6 +5,8 @@ LOG_DIR=${GLOBAL_LOG_DIR}/imagenet-ann101/
 MODEL_DIR=${GLOBAL_MODEL_DIR}/imagenet_model/ann101/
 CONFIG_DIR=/home/hanzhang/code/tensorpack/
 
+mkdir -p $MODEL_DIR
+
 # Run the actual job
 python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-ann.py \
 --data_dir=$DATA_DIR \
