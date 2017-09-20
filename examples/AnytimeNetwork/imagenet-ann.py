@@ -99,6 +99,7 @@ if __name__ == '__main__':
                         type=bool, default=False)
     anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
+    args.ds_name="imagenet"
     
     assert args.init_channel == 64
     assert args.num_classes == 1000
