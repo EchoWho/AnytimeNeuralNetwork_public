@@ -158,6 +158,14 @@ if __name__ == '__main__':
             [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
         max_epoch = 300
 
+        if do_eval:
+            for eval_name in args.evaluate:
+                if eval_name == 'train':
+                    ds = ds_train
+                elif eval_name == 'test':
+                    ds = ds_val
+                evaluate(model_cls, ds, eval_name)
+            sys.exit()
 
     elif args.ds_name == 'svhn':
         args.num_classes = 10
@@ -165,7 +173,17 @@ if __name__ == '__main__':
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_svhn_augmented_data
-        ds_train = get_data('train', args, not do_eval)
+        
+        if do_eval:
+            if 'train' in args.evaluate:
+                args.evaluate.append('extra')
+            for eval_name in args.evaluate:
+                ds = get_data(eval_name, args, False)
+                evaluate(model_cls, ds, eval_name)
+            sys.exit()
+
+        ## Training model 
+        ds_train = get_data('train', args, True)
         ds_val = get_data('test', args, False)
 
         lr_schedule = \
@@ -173,15 +191,7 @@ if __name__ == '__main__':
         max_epoch = 60
 
 
-    if do_eval:
-        for eval_name in args.evaluate:
-            if eval_name == 'train':
-                ds = ds_train
-            elif eval_name == 'test':
-                ds = ds_val
-            evaluate(model_cls, ds, eval_name)
-        sys.exit()
-
+    
 
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
