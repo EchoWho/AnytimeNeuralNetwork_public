@@ -72,7 +72,7 @@ def evaluate(model_cls, ds, eval_names):
     for idx, output in enumerate(pred.get_result()):
         # o contains a list of predictios at various locations; each pred contains a small batch
         image, label = output[0:2]
-        l_labels.append(label)
+        l_labels.extend(label)
         anytime_preds = output[2:]
         
         if args.store_final_prediction:
@@ -80,7 +80,8 @@ def evaluate(model_cls, ds, eval_names):
             f_store_out.write(preds)
 
     # since the labels comes in batches
-    l_labels = np.asarray(l_labels).reshape([-1])
+    l_labels = np.asarray(l_labels)
+    logger.info("N samples predicted: {}".format(len(l_labels)))
     
     if args.store_final_prediction:
         f_store_out.close()
@@ -175,13 +176,13 @@ if __name__ == '__main__':
             if 'train' in args.evaluate:
                 args.evaluate.append('extra')
             for eval_name in args.evaluate:
-                ds = get_data(eval_name, args, False)
+                ds = get_data(eval_name, args, do_multiprocess=False)
                 evaluate(model_cls, ds, eval_name)
             sys.exit()
 
         ## Training model 
-        ds_train = get_data('train', args, True)
-        ds_val = get_data('test', args, False)
+        ds_train = get_data('train', args, do_multiprocess=True)
+        ds_val = get_data('test', args, do_multiprocess=False)
 
         lr_schedule = \
             [(1, 0.1), (15, 0.01), (30, 0.001), (45, 0.0002)]
