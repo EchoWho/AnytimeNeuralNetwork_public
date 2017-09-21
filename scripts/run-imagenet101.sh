@@ -1,9 +1,9 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0,3
+export CUDA_VISIBLE_DEVICES=0,1
 DATA_DIR=${GLOBAL_DATA_DIR}
 LOG_DIR=${GLOBAL_LOG_DIR}/imagenet-ann101/
 MODEL_DIR=${GLOBAL_MODEL_DIR}/imagenet_model/ann101/
-CONFIG_DIR=/home/hanzhang/code/tensorpack/
+CONFIG_DIR=/home/dedey/AnytimeNeuralNetwork
 
 mkdir -p $MODEL_DIR
 
