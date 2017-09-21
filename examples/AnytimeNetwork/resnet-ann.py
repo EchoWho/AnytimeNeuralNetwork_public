@@ -87,15 +87,12 @@ def evaluate(model_cls, ds, eval_names):
         
         ## report accuracy of the stored predicitons
         with open(store_fn, 'rb') as fin:
-            l_logits = []
             n_wrong = 0
             row_len = 4 * args.num_classes
             for label in l_labels:
                 contents = fin.read(row_len)
-                logit = np.asarray(struct.unpack('f'*args.num_classes, contents))
-
-                l_logits.append(logit)
-                n_wrong += int(np.argmax(logit) != label)
+                logit = np.asarray(struct.unpack('f'*args.num_classes, contents)).reshape([1, args.num_classes])
+                n_wrong += int(np.argmax(logit, axis=1) != label)
 
         error_rate = n_wrong / np.float32(len(l_labels))
         logger.info("Verify error rate of the stored prediction to be {}".format(error_rate))
