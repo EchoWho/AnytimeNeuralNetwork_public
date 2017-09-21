@@ -154,6 +154,11 @@ class ModelDesc(object):
     def set_train_or_test(self, is_train=True):
         self.is_train = is_train
 
+    def is_model_training(self):
+        if hasattr(self, 'is_train'):
+            return self.is_train
+        return False
+
 class ModelFromMetaGraph(ModelDesc):
     """
     Load the exact TF graph from a saved meta_graph.
