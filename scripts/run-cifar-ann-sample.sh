@@ -1,10 +1,10 @@
 #!/bin/bash
 ds_name=cifar100  #cifar10, cifar100 or svhn
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1
 DATA_DIR=${GLOBAL_DATA_DIR}/
 LOG_DIR=${GLOBAL_LOG_DIR}/${ds_name}/
 MODEL_DIR=${GLOBAL_MODEL_DIR}/${ds_name}/
-CONFIG_DIR=/home/hanzhang/code/tensorpack/
+CONFIG_DIR=/home/dedey/AnytimeNeuralNetwork/
 
 mkdir -p $MODEL_DIR
 
