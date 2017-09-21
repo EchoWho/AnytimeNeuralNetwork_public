@@ -28,9 +28,9 @@ def join_distill_and_shuffle(ds, subset, options, buffer_size=None):
     return ds
 
 def get_cifar_augmented_data(subset, options, do_multiprocess=True):
-    isTrain = subset == 'train'
+    isTrain = subset == 'train' and do_multiprocess
     use_distill = isTrain and options.alter_label
-    shuffle = isTrain and do_multiprocess and not use_distill
+    shuffle = isTrain and not options.alter_label
     if options.num_classes == 10:
         ds = dataset.Cifar10(subset, shuffle=shuffle)
     elif options.num_classes == 100:
@@ -60,9 +60,9 @@ def get_cifar_augmented_data(subset, options, do_multiprocess=True):
 
 
 def get_svhn_augmented_data(subset, options, do_multiprocess=True):
-    isTrain = subset == 'train'
+    isTrain = subset == 'train' and do_multiprocess
     use_distill = isTrain and options.alter_label
-    shuffle = isTrain and do_multiprocess and not use_distill
+    shuffle = isTrain and not options.alter_label
     pp_mean = dataset.SVHNDigit.get_per_pixel_mean()
     if isTrain:
         d1 = dataset.SVHNDigit('train', shuffle=shuffle)
@@ -72,7 +72,7 @@ def get_svhn_augmented_data(subset, options, do_multiprocess=True):
             d2 = join_distill_and_shuffle(d2, 'extra', options)
         ds = RandomMixData([d1, d2])
     else:
-        ds = dataset.SVHNDigit('test', shuffle=shuffle)
+        ds = dataset.SVHNDigit(subset, shuffle=shuffle)
 
     if isTrain:
         augmentors = [

@@ -283,7 +283,7 @@ class AnytimeNetwork(ModelDesc):
     
     def _get_inputs(self):
         additional_input = []
-        if self.is_train and self.alter_label:
+        if self.is_model_training() and self.alter_label:
             additional_input = [InputDesc(tf.float32, [None, self.num_classes], 'alter_label')]
         return [InputDesc(self.input_type, 
                     [None, self.input_size, self.input_size, 3],'input'),
@@ -398,7 +398,7 @@ class AnytimeNetwork(ModelDesc):
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         
-        if self.alter_label and self.is_train and \
+        if self.alter_label and self.is_model_training() and \
                 unit_idx < self.alter_label_activate_frac * self.total_units:
             alabel = label_obj[1]
             sq_loss = np.float32(self.num_classes) * \
