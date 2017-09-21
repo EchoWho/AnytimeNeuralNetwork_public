@@ -7,7 +7,7 @@ s=2
 DATA_DIR=${GLOBAL_DATA_DIR}
 LOG_DIR=${GLOBAL_LOG_DIR}/imagenet-ann$d/
 MODEL_DIR=${GLOBAL_MODEL_DIR}/imagenet_model/ann$d/
-CONFIG_DIR=/home/hanzhang/code/tensorpack/
+CONFIG_DIR=.
 
 mkdir -p $MODEL_DIR
 
