@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/resnet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---ds_name=cifar10 -f=10 --opt_at=-1 -n=7 -c=32 -s=1 --samloss=6 --batch_size=128 --alter_label --alter_label_activate_frac=1.01 --alter_loss_w=1.0
+--ds_name=cifar10 -f=10 --opt_at=-1 -n=7 -c=32 -s=1 --samloss=6 --batch_size=64 --alter_label --alter_label_activate_frac=1.01 --alter_loss_w=1.0
