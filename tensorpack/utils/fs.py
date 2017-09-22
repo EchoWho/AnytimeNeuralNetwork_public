@@ -95,8 +95,8 @@ def get_dataset_path(*args):
     d = os.environ.get('TENSORPACK_DATASET', None)
     global TENSORPACK_DATASET
     if TENSORPACK_DATASET is not None:
-        logger.info("the environemnt varible TENSORPACK_DATASET is not set, \
-                    but the app received a directory to be set as the TENSORPACK_DATASET")
+        logger.info("the environemnt varible TENSORPACK_DATASET is not set, "\
+                    +"but the app received a directory to be set as the TENSORPACK_DATASET")
         d = TENSORPACK_DATASET
     if d is None:
         old_d = os.path.abspath(os.path.join(
