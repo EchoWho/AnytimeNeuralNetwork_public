@@ -90,6 +90,7 @@ if __name__ == '__main__':
                         type=bool, default=False)
     anytime_network.parser_add_densenet_arguments(parser)
     args = parser.parse_args()
+    args.ds_name="imagenet"
     if args.densenet_version == 'atv1':
         model_cls = AnytimeDensenet
     elif args.densenet_version == 'atv2':

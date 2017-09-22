@@ -6,6 +6,7 @@ import numpy as np
 import six
 from six.moves import range
 import os
+import struct
 
 from ..utils import logger, get_tqdm
 from ..utils.timer import timed_operation
@@ -16,7 +17,7 @@ from .base import RNGDataFlow, DataFlow
 from .common import MapData
 
 __all__ = ['HDF5Data', 'LMDBData', 'LMDBDataDecoder', 'LMDBDataPoint', 'LMDBDataPointIndexed',
-           'CaffeLMDB', 'SVMLightData', 'TFRecordData']
+           'CaffeLMDB', 'SVMLightData', 'TFRecordData', 'BinaryData']
 
 """
 Adapters for different data format.
@@ -278,6 +279,27 @@ class TFRecordData(DataFlow):
     def get_data(self):
         for dp in self._gen:
             yield loads(dp)
+
+class BinaryData(DataFlow):
+    """
+    Produce data points from a binary file. A format for each row is given 
+    to the init so that we can decode the binary data one row at a time.
+    """
+    def __init__(self, path, n_val_per_row=None):
+        self.dp_format = 'f' * n_val_per_row
+        self.row_n_bytes = 4 * n_val_per_row
+        self.path = path
+        self.statinfo = os.stat(self.path)
+        self._size = self.statinfo.st_size / 4 / n_val_per_row
+
+    def size(self):
+        return self._size 
+
+    def get_data(self):
+        with open(self.path, 'rb') as fin:
+            for _ in range(self._size):
+                yield [np.asarray(struct.unpack(self.dp_format, 
+                    fin.read(self.row_n_bytes)),dtype=np.float32)]
 
 from ..utils.develop import create_dummy_class   # noqa
 try:

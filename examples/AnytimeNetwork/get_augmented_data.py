@@ -8,9 +8,93 @@ import multiprocessing
 import tensorflow as tf
 from tensorpack import *
 
+
 # the literal value are in rgb. cv2 will read in bgr
 ilsvrc_mean = [0.485, 0.456, 0.406][::-1] 
 ilsvrc_std = [0.229, 0.224, 0.225][::-1]
+
+def get_distill_target_data(subset, options):
+    distill_target_fn = os.path.join(options.data_dir, 'distill_targets', 
+        '{}_distill_target_{}.bin'.format(options.ds_name, subset))
+    ds = BinaryData(distill_target_fn, options.num_classes)
+    return ds
+
+def join_distill_and_shuffle(ds, subset, options, buffer_size=None):
+    ds_distill = get_distill_target_data(subset, options)
+    ds = JoinData([ds, ds_distill])
+    if buffer_size is None:
+        buffer_size = ds.size()
+    ds = LocallyShuffleData(ds, buffer_size)
+    return ds
+
+def get_cifar_augmented_data(subset, options, do_multiprocess=True):
+    isTrain = subset == 'train' and do_multiprocess
+    use_distill = isTrain and options.alter_label
+    shuffle = isTrain and not options.alter_label
+    if options.num_classes == 10:
+        ds = dataset.Cifar10(subset, shuffle=shuffle)
+    elif options.num_classes == 100:
+        ds = dataset.Cifar100(subset, shuffle=shuffle)
+    else:
+        raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
+    logger.info('{} set has n_samples: {}'.format(subset, len(ds.data)))
+    pp_mean = ds.get_per_pixel_mean()
+    if use_distill:
+        ds = join_distill_and_shuffle(ds, subset, options)
+    if isTrain:
+        augmentors = [
+            imgaug.CenterPaste((40, 40)),
+            imgaug.RandomCrop((32, 32)),
+            imgaug.Flip(horiz=True),
+            imgaug.MapImage(lambda x: (x - pp_mean)/128.0),
+        ]
+    else:
+        augmentors = [
+            imgaug.MapImage(lambda x: (x - pp_mean)/128.0)
+        ]
+    ds = AugmentImageComponent(ds, augmentors)
+    ds = BatchData(ds, options.batch_size // options.nr_gpu, remainder=not isTrain)
+    if do_multiprocess:
+        ds = PrefetchData(ds, 3, 2)
+    return ds
+
+
+def get_svhn_augmented_data(subset, options, do_multiprocess=True):
+    isTrain = subset == 'train' and do_multiprocess
+    use_distill = isTrain and options.alter_label
+    shuffle = isTrain and not options.alter_label
+    pp_mean = dataset.SVHNDigit.get_per_pixel_mean()
+    if isTrain:
+        d1 = dataset.SVHNDigit('train', shuffle=shuffle)
+        d2 = dataset.SVHNDigit('extra', shuffle=shuffle)
+        if use_distill:
+            d1 = join_distill_and_shuffle(d1, 'train', options)
+            d2 = join_distill_and_shuffle(d2, 'extra', options)
+        ds = RandomMixData([d1, d2])
+    else:
+        ds = dataset.SVHNDigit(subset, shuffle=shuffle)
+
+    if isTrain:
+        augmentors = [
+            imgaug.CenterPaste((40, 40)),
+            imgaug.Brightness(10),
+            imgaug.Contrast((0.8, 1.2)),
+            imgaug.GaussianDeform(  # this is slow. without it, can only reach 1.9% error
+                [(0.2, 0.2), (0.2, 0.8), (0.8, 0.8), (0.8, 0.2)],
+                (40, 40), 0.2, 3),
+            imgaug.RandomCrop((32, 32)),
+            imgaug.MapImage(lambda x: (x - pp_mean)/128.0),
+        ]
+    else:
+        augmentors = [
+            imgaug.MapImage(lambda x: (x - pp_mean)/128.0)
+        ]
+    ds = AugmentImageComponent(ds, augmentors)
+    ds = BatchData(ds, options.batch_size // options.nr_gpu, remainder=not isTrain)
+    if do_multiprocess:
+        ds = PrefetchData(ds, 5, 5)
+    return ds
+
 
 def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
     isTrain = subset == 'train'
