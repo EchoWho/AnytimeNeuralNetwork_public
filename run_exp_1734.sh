@@ -41,6 +41,7 @@ case $key in
     ;;
     -l|--log-dir)
     LOG_DIR="$2"
+    shift
   ;;
     *)
     echo Unkown option $key
@@ -68,7 +69,7 @@ python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-msdense-ann.py \
 --load=${MODEL_DIR}/checkpoint \
 --prediction_feature=msdense \
 --msdensenet_depth=23 \
--g=64 \
+-g=16 \
 -s=4 \
 --samloss=6 \
 --num_scales=4 \
