@@ -120,7 +120,8 @@ def compute_cfg(options):
 
     elif options.num_units is not None: 
         #option.n is set
-        return NetworkConfig([options.num_units]*options.n_blocks, 'basic', 'basic')
+        return NetworkConfig([options.num_units]*options.n_blocks, 
+                             options.b_type, options.s_type)
 
 def compute_total_units(options, config=None):
     if config is None:
@@ -151,6 +152,10 @@ def parser_add_common_arguments(parser):
                         help='number of units per stack, '
                         +'i.e., number of units per prediction, or prediction period',
                         type=int, default=1)
+    parser.add_argument('--s_type', help='starting conv type',
+                        type=str, default='basic', choices=['basic', 'imagenet'])
+    parser.add_argument('--b_type', help='block type',
+                        type=str, default='basic', choices=['basic', 'bottleneck'])
     parser.add_argument('--prediction_feature', 
                         help='Type of feature processing for prediction',
                         type=str, default='none', choices=['none', '1x1', 'msdense', 'bn'])
@@ -158,7 +163,7 @@ def parser_add_common_arguments(parser):
                         help='ch_out= int( <rate> * ch_in)',
                         type=np.float32, default=1.0)
 
-    ## alternative_training_target
+    ## alternative_training_target, distillation/compression
     parser.add_argument('--alter_label', help="Type of alternative target to use",
                         default=False, action='store_true')
     parser.add_argument('--alter_loss_w', help="percentage of alter loss weight",
@@ -175,7 +180,7 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--sg_gamma', help='Gamma for partial stop_gradient',
                         type=np.float32, default=0)
 
-    ## selecting loss 
+    ## selecting loss (aka ls_method, samloss) 
     parser.add_argument('--init_select_idx', help='the loss anytime_idx to select initially',
                         type=int)
     parser.add_argument('--samloss', 
