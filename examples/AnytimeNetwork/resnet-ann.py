@@ -189,8 +189,6 @@ if __name__ == '__main__':
         max_epoch = 60
 
 
-    
-
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
