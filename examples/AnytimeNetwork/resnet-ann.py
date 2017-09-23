@@ -3,7 +3,6 @@ import argparse
 import os, sys, datetime
 
 import tensorflow as tf
-import ipdb as pdb
 import struct 
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
