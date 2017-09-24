@@ -66,6 +66,7 @@ python $CONFIG_DIR/examples/AnytimeNetwork/resnet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
+--load=${MODEL_DIR}/checkpoint \
 --ds_name=cifar100 \
 -f=4 \
 --opt_at=-1 \
