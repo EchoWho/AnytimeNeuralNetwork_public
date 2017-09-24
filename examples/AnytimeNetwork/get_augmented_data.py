@@ -97,7 +97,7 @@ def get_svhn_augmented_data(subset, options, do_multiprocess=True):
 
 
 def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
-    isTrain = subset == 'train'
+    isTrain = subset == 'train' and do_multiprocess
     lmdb_path = os.path.join(options.data_dir, 'lmdb2', 'ilsvrc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
     if isTrain:
