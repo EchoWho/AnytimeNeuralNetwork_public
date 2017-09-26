@@ -97,7 +97,7 @@ if __name__ == '__main__':
                         type=str, default='None')
     anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
-    args.ds_name="imagenet"
+    args.ds_name="ilsvrc"
     
     assert args.init_channel == 64
     assert args.num_classes == 1000
