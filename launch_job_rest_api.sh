@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {2025..2141}
+for i in {1638..1685} {1688..1711} {1714..1719} {1768..1803}
 do
 
 	USERNAME="dedey"
@@ -31,3 +31,61 @@ do
 	echo "$CMD"
 
 done
+
+
+# Exp 31
+# 1638..1685
+# Num gpus: 1
+
+# Exp 32
+# 1688..1711
+# Num gpus: 1
+
+# Exp 33
+# 1714..1719
+# Num gpus: 1
+# 1720..1722
+# Num gpus: 2
+
+# Exp 35
+# 1737..1745
+# Num gpus: 1
+# 1743..1745
+# Num gpus: 2
+
+# Exp 36
+# 1748..1765
+# Num gpus: 1
+
+# Exp 37
+# 1768..1803
+# Num gpus: 1
+
+# Exp 39:
+# 1812..1889
+# Num gpus: 1
+
+# Exp 40:
+# 1892..1969
+# Num gpus: 1
+
+# Exp 41:
+# 1972..2022
+# Num gpus: 1
+
+# Exp 42:
+# 2025..2141
+# Num gpus: 1
+
+# Exp 43:
+# 2144..2245
+# Num gpus: 1
+
+
+# Exp 44:
+# 2248..?
+# Num gpus: ?
+
+# Exp 45:
+# ?..?
+# Num gpus: ?
