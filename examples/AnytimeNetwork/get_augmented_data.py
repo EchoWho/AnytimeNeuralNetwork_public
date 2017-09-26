@@ -97,10 +97,16 @@ def get_svhn_augmented_data(subset, options, do_multiprocess=True):
 
 
 def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
-    isTrain = subset == 'train'
+    isTrain = subset == 'train' and do_multiprocess
+    use_distill = isTrain and options.alter_label
     lmdb_path = os.path.join(options.data_dir, 'lmdb2', 'ilsvrc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
     if isTrain:
+        if use_distill:
+            fn = os.path.join(options.data_dir, 'distill_targets', 
+                '{}_distill_target_{}.bin'.format(options.ds_name, subset))
+            dstl = BinaryData(fn, options.num_classes)
+            ds = JoinData([ds, dstl])
         ds = LocallyShuffleData(ds, 1024*64)  # This is 64G~80G in memory images
     ds = PrefetchData(ds, 1024*8, 1) # prefetch around 8 G
     ds = LMDBDataPoint(ds, deserialize=True)
