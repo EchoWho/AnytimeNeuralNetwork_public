@@ -23,28 +23,13 @@ import get_augmented_data
 
 args = None
 INPUT_SIZE = 224
-
-#def get_data(train_or_test):
-#    isTrain = train_or_test == 'train'
-#    ds = dataset.ILSVRC12TFRecord(args.data_dir, 
-#                                  train_or_test, 
-#                                  args.batch_size // args.nr_gpu, 
-#                                  height=INPUT_SIZE, 
-#                                  width=INPUT_SIZE)
-#    return ds
-
-def get_data(train_or_test):
-    return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
+get_data = get_augmented_data.get_ilsvrc_augmented_data
 
 
 def get_config():
     # prepare dataset
-    if args.is_toy:
-        dataset_train = get_data('toy_train')
-        dataset_val = get_data('toy_validation')
-    else:
-        dataset_train = get_data('train')
-        dataset_val = get_data('val') #val for caffe style meta input; validation for tf-slim
+    dataset_train = get_data('train', args, do_multiprocess=True)
+    dataset_val = get_data('val', args, do_multiprocess=True) 
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
     model=AnytimeResnet(INPUT_SIZE, args)
@@ -67,23 +52,35 @@ def get_config():
         max_epoch=128,
     )
 
-def eval_on_ILSVRC12(model_file, data_dir):
-    ds = get_data('val')
+def eval_on_ILSVRC12(subset):
+    ds = get_data(subset, args, do_multiprocess=False)
     model = AnytimeResnet(INPUT_SIZE, args)
+
+    output_names = []
+    for i, w in enumerate(model.weights):
+        if w > 0:
+            output_names.append('layer{:03d}.0.pred/linear/output:0'.format(i))
+
     pred_config = PredictConfig(
         model=model,
-        session_init=get_model_loader(model_file),
+        session_init=get_model_loader(args.load),
         input_names=['input', 'label'],
-        output_names=['wrong-top1', 'wrong-top5']
+        output_names=output_names[-1:]
     )
     pred = SimpleDatasetPredictor(pred_config, ds)
-    acc1, acc5 = RatioCounter(), RatioCounter()
+
+    if args.store_basename is not None:
+        store_fn = args.store_basename + "_{}.bin".format(subset)
+        f_store_out = open(store_fn, 'wb')
+
     for o in pred.get_result():
-        batch_size = o[0].shape[0]
-        acc1.feed(o[0].sum(), batch_size)
-        acc5.feed(o[1].sum(), batch_size)
-    print("Top1 Error: {}".format(acc1.ratio))
-    print("Top5 Error: {}".format(acc5.ratio))
+        if args.store_basename is not None:
+            preds = o[0]
+            f_store_out.write(preds)
+
+    if args.store_basename is not None:
+        f_store_out.close()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -94,12 +91,13 @@ if __name__ == '__main__':
                         type=int, default=128)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
-    parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
-                        type=bool, default=False)
+    parser.add_argument('--evaluate', help='a comma separated list containing [train, test]',
+                        default="", type=str)
+    parser.add_argument('--store_basename', help='basename_<train/test>.bin for storing the logits',
+                        type=str, default='None')
     anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
-    args.ds_name="imagenet"
+    args.ds_name="ilsvrc"
     
     assert args.init_channel == 64
     assert args.num_classes == 1000
@@ -121,10 +119,13 @@ if __name__ == '__main__':
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
 
-    #if args.eval:
-    #    BATCH_SIZE = 128    # something that can run on one gpu
-    #    eval_on_ILSVRC12(args.load, args.data_dir)
-    #    sys.exit()
+    args.evaluate = filter(bool, args.evaluate.split(','))
+    do_eval = len(args.evaluate) > 0
+    if do_eval:
+        for subset in args.evaluate:
+            if subset in ['train', 'val']:
+                eval_on_ILSVRC12(subset)
+        sys.exit()
 
     config = get_config()
     if args.load and os.path.exists(args.load):
