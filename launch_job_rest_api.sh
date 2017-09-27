@@ -90,3 +90,7 @@ done
 # Exp 45:
 # 2301..2324
 # Num gpus: 1
+
+# Exp 46:
+# 2327..2428
+# Num gpus: 1
