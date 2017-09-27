@@ -1027,6 +1027,7 @@ class DenseNet(AnytimeDensenet):
                 ch_in = pml.get_shape().as_list()[CHANNEL_DIM]
                 ch_out = int(ch_in * self.reduction_ratio)
                 pml = Conv2D('conv1x1', pml, ch_out, 1, nl=BNReLU)
+                pml = Dropout('dropout', pml, keep_prob=0.8)
                 pml = AvgPooling('pool', pml, 2, padding='SAME')
 
         for k in range(n_units):
@@ -1038,6 +1039,7 @@ class DenseNet(AnytimeDensenet):
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
                 l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
+                l = Dropout('dropout', l, keep_prob=0.8)
                 pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
                 pmls.append(pml)
         return pmls
@@ -1088,6 +1090,8 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                     l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU) 
+                # dense connections need drop out to regularize
+                l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
                 ml = tf.concat([ml, l], CHANNEL_DIM, name='concat_pred')
                 l_mls.append(ml)
