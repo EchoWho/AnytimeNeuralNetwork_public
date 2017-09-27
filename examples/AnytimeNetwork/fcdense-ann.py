@@ -15,6 +15,7 @@ from tensorpack.network_models.anytime_network import AnytimeFCDensenet
 
 import matplotlib.pyplot as plt
 import ipdb as pdb
+import get_augmented_data
 from sklearn.metrics import confusion_matrix
 
 """
@@ -65,6 +66,9 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
     if isTrain:
         ds = PrefetchData(ds, 5, 5)
     return ds
+
+def get_pascal_voc_data(subset, do_multiprocess=True):
+    return get_augmented_data.get_pascal_voc_augmented_data(subset, args, do_multiprocess)
 
 def label_image_to_rgb(label_img, cmap):
     H, W = (label_img.shape[0], label_img.shape[1])
@@ -205,7 +209,7 @@ if __name__ == '__main__':
     # Dataset choice 
     parser.add_argument('--ds_name', help='name of dataset',
                         type=str, 
-                        choices=['camvid'])
+                        choices=['camvid', 'pascal'])
     # other common args
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=3)
@@ -265,6 +269,28 @@ if __name__ == '__main__':
             lr *= 0.995
             lr_schedule.append((i+1, lr))
 
+    elif args.ds_name == 'pascal':
+        args.num_classes = 22
+        args.class_weight = np.ones(args.num_classes, dtype=np.float32)
+        args.class_weight[0] = 1e-3
+        INPUT_SIZE = None
+        get_data = get_pascal_voc_data
+
+        if args.eval:
+            raise Exception("Implement me")
+
+        if not args.is_test:
+            ds_train = get_data('train_extra')
+            ds_val = get_data('val')
+        else:
+            raise Exception("Implement me")
+
+        max_epoch = 750
+        lr = args.init_lr
+        lr_schedule = []
+        for i in range(max_epoch):
+            lr *= 0.995
+            lr_schedule.append((i+1, lr))
     
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
