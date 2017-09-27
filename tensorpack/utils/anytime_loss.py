@@ -42,8 +42,18 @@ def eann_sieve(N):
     weights[:N//2] = 0.0
     return weights
 
-def constant_weights(N):
-    return np.ones(N,dtype=np.float32) / N * np.log2(N)
+def constant_weights(N, normalize=True):
+    weights = np.ones(N,dtype=np.float32) 
+    if normalize:
+        weights /= N / np.log2(N)
+    return weights
+
+def linear(N, a=0.25, b=1.0, normalize=True):
+    delta = (b-a) / (N-1.0)
+    weights = np.arange(N, dtype=np.float32) * delta + a
+    if normalize:
+        weights /= np.sum(weights) / np.log2(N)
+    return weights
 
 def optimal_at(N, optimal_l):
     """ Note that optimal_l is zero-based """
@@ -89,12 +99,6 @@ def recursive_heavy_end(N):
         w = w / 2.0 
     weights[ N*3 // 4  - 1 ] += N / 8.0
     weights[-1] += N * ( 1.0 + 1.0 / 16.0 ) # make sure last layer has 1/2
-    weights /= np.sum(weights) / np.log2(N)
-    return weights
-
-def linear(N, a=0.25, b=1.0):
-    delta = (b-a) / (N-1.0)
-    weights = np.arange(N, dtype=np.float32) * delta + a
     weights /= np.sum(weights) / np.log2(N)
     return weights
 
@@ -158,6 +162,10 @@ def loss_weights(N, args):
         return stack_loss_weights(N, args.stack, recursive_heavy_end) 
     elif FUNC_TYPE == 10: # sieve v2 
         return stack_loss_weights(N, args.stack, sieve_loss_weights_v2)
+    elif FUNC_TYPE == 11: # constant = 1
+        return stack_loss_weights(N, args.stack, lambda N:constant_weights(N, normalize=False))
+    elif FUNC_TYPE == 12: # linear = 0.25...1
+        return stack_loss_weights(N, args.stack, lambda N:linear(N,normalize=False))
     else:
         raise NameError('func type must be either 0: exponential or 1: square' \
             + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
