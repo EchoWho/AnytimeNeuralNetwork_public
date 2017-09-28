@@ -200,7 +200,8 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     xy_augmentors = [
         imgaug.ResizeShortestEdge(224),
         imgaug.RotationAndCropValid(max_deg=10),
-        imgaug.Flip(horiz=True)
+        imgaug.Flip(horiz=True),
+        imgaug.GaussianBlur(max_size=3)
         # imgaug.RandomCrop((side, side)),
     ]
     if len(xy_augmentors) > 0:
