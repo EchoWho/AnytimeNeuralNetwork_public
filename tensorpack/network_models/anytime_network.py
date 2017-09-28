@@ -256,6 +256,7 @@ class AnytimeNetwork(ModelDesc):
         self.alter_loss_w = self.options.alter_loss_w
 
         self.weights = anytime_loss.loss_weights(self.total_units, args)
+        self.weights_sum = np.sum(self.weights)
         self.ls_K = np.sum(np.asarray(self.weights) > 0)
         logger.info('weights: {}'.format(self.weights))
 
@@ -514,7 +515,7 @@ class AnytimeNetwork(ModelDesc):
                     if select_idx is not None:
                         add_weight = tf.cond(tf.equal(anytime_idx, 
                                                       select_idx),
-                            lambda: tf.constant(self.weights[-1] * 2.0, 
+                            lambda: tf.constant(self.weights_sum, 
                                                 dtype=tf.float32),
                             lambda: tf.constant(0, dtype=tf.float32))
                     if self.options.sum_rand_ratio > 0:
@@ -558,8 +559,9 @@ class AnytimeNetwork(ModelDesc):
         wd_cost = tf.identity(wd_cost, name='wd_cost')
         total_cost = tf.identity(total_cost, name='sum_losses')
         add_moving_summary(total_cost, wd_cost)
-        add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([total_cost, wd_cost], name='cost') # specify training loss
+        # monitor W # Too expensive in disk space :-/
+        #add_param_summary(('.*/W', ['histogram']))   
 
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
