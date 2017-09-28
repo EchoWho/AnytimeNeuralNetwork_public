@@ -171,10 +171,6 @@ def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
     return ds
 
 
-def compute_ds_mean_and_std(ds):
-    list_of_images = list(ds.get_data())
-
-
 def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     isTrain = subset[:5] == 'train' and do_multiprocess
     lmdb_path = os.path.join(options.data_dir, 'pascal_voc_lmdb', 
@@ -198,7 +194,7 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
 
     x_augmentors = [
         # imgaug.ToUint8()
-        imgaug.MapImage(lambda x: (x - pascal_voc_mean)/pascal_voc_std),
+        # imgaug.MapImage(lambda x: (x - pascal_voc_mean)/pascal_voc_std),
     ]
     side = 224
     xy_augmentors = [
