@@ -584,7 +584,7 @@ class AnytimeNetwork(ModelDesc):
             for i in range(self.ls_K):
                 weight_i = tf.cast(tf.equal(select_idx, i), tf.float32, 
                                    name='weight_{:02d}'.format(i))
-                add_moving_summary(weight_i)
+                #add_moving_summary(weight_i)
         return select_idx
 
 
@@ -1167,6 +1167,14 @@ class AnytimeFCN(AnytimeNetwork):
     def __init__(self, args):
         super(AnytimeFCN, self).__init__(None, args)
 
+        # Class weight for fully convolutional networks
+        self.class_weight = None
+        if hasattr(args, 'class_weight'):
+            self.class_weight = args.class_weight
+        if self.class_weight is None:
+            self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
+        logger.info('Class weights: {}'.format(self.class_weight))
+
         self.is_label_one_hot = args.is_label_one_hot
         self.eval_threshold = args.eval_threshold
 
@@ -1460,22 +1468,12 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
 
     def __init__(self, args):
         # set up params from regular densenet.
-        AnytimeDensenet.__init__(self, None, args)
-
-        # Class weight for fully convolutional networks
-        self.class_weight = None
-        if hasattr(args, 'class_weight'):
-            self.class_weight = args.class_weight
-        if self.class_weight is None:
-            self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
-        logger.info('Class weights: {}'.format(self.class_weight))
-        
+        super(AnytimeFCDensenet, self).__init__(args)
+                
         # FC-dense specific
         self.n_pools = args.n_pools
-        
         # other format is not supported yet
         assert self.n_pools * 2 + 1 == self.n_blocks
-
         # FC-dense doesn't support width > 1 yet
         assert self.width == 1
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
@@ -1542,6 +1540,39 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
         opt = tf.train.RMSPropOptimizer(lr)
         return opt
+
+
+## Version 2 of anytime FCN for dense-net
+# 
+class AnytimeFCDenseV2(AnytimeFCN, AnytimeLogDensenetV2):  
+    
+    def __init__(self, args):
+        super(AnytimeFCDenseV2, self).__init__(args)
+        self.n_pools = args.n_pools
+        assert self.n_pools * 2 == self.n_blocks - 1
+        assert self.width == 1
+        assert self.network_config.s_type == 'basic'
+
+    def update_compressed_feature_up(self, layer_idx, ch_out, pls, bcml):
+        pass 
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        bcml = l_feats[0]
+        l_mls = []
+        growth = self.growth_rate
+        layer_idx = -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
+            pls, l_mls = self.compute_block(layer_idx, n_units, l_mls, bcml, growth)
+            layer_idx += n_units
+            if bi != self.n_blocks - 1: 
+                ch_out = growth * (int(np.log2(self.total_units + 1)) + 1)
+                bcml = self.update_compressed_feature(layer_idx, ch_out, pls, bcml)
+        
+        ll_feats = [ [ml] for ml in l_mls ]
+        assert len(ll_feats) == self.total_units
+        return ll_feats
+
 
 
 ###########################
