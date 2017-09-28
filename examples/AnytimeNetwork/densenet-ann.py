@@ -12,6 +12,8 @@ from tensorpack.utils import utils
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
 
+from get_augmented_data import get_cifar_augmented_data, get_svhn_augmented_data
+
 """
 """
 INPUT_SIZE=None
@@ -20,65 +22,6 @@ lr_schedule=None
 max_epoch=None
 get_data=None
 
-def get_cifar_data(train_or_test):
-    isTrain = train_or_test == 'train'
-    if args.num_classes == 10:
-        ds = dataset.Cifar10(train_or_test, do_validation=args.do_validation)
-    elif args.num_classes == 100:
-        ds = dataset.Cifar100(train_or_test, do_validation=args.do_validation)
-    else:
-        raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
-    if args.do_validation: 
-        logger.info('[Validation] {} set has n_samples: {}'.format(isTrain, len(ds.data)))
-    pp_mean = ds.get_per_pixel_mean()
-    if isTrain:
-        augmentors = [
-            imgaug.CenterPaste((40, 40)),
-            imgaug.RandomCrop((32, 32)),
-            imgaug.Flip(horiz=True),
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0),
-        ]
-    else:
-        augmentors = [
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0)
-        ]
-    ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
-    if isTrain:
-        ds = PrefetchData(ds, 3, 2)
-    return ds
-
-
-def get_svhn_data(train_or_test):
-    isTrain = train_or_test == 'train'
-    pp_mean = dataset.SVHNDigit.get_per_pixel_mean()
-    if isTrain:
-        d1 = dataset.SVHNDigit('train')
-        d2 = dataset.SVHNDigit('extra')
-        ds = RandomMixData([d1, d2])
-    else:
-        ds = dataset.SVHNDigit('test')
-
-    if isTrain:
-        augmentors = [
-            imgaug.CenterPaste((40, 40)),
-            imgaug.Brightness(10),
-            imgaug.Contrast((0.8, 1.2)),
-            imgaug.GaussianDeform(  # this is slow. without it, can only reach 1.9% error
-                [(0.2, 0.2), (0.2, 0.8), (0.8, 0.8), (0.8, 0.2)],
-                (40, 40), 0.2, 3),
-            imgaug.RandomCrop((32, 32)),
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0),
-        ]
-    else:
-        augmentors = [
-            imgaug.MapImage(lambda x: (x - pp_mean)/128.0)
-        ]
-    ds = AugmentImageComponent(ds, augmentors)
-    ds = BatchData(ds, args.batch_size // args.nr_gpu, remainder=not isTrain)
-    if isTrain:
-        ds = PrefetchData(ds, 5, 5)
-    return ds
 
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
@@ -101,30 +44,6 @@ def get_config(ds_trian, ds_val, model_cls):
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
     )
-
-
-#def eval_on_ILSVRC12(model_file, data_dir):
-#    ds = get_data('val')
-#    model = AnytimeResnet(INPUT_SIZE, args)
-#    pred_config = PredictConfig(
-#        model=model,
-#        session_init=get_model_loader(model_file),
-#        input_names=['input', 'label'],
-#        output_names=['wrong-top1', 'wrong-top5']
-#    )
-#    pred = SimpleDatasetPredictor(pred_config, ds)
-#    acc1, acc5 = RatioCounter(), RatioCounter()
-#    for o in pred.get_result():
-#        batch_size = o[0].shape[0]
-#        acc1.feed(o[0].sum(), batch_size)
-#        acc5.feed(o[1].sum(), batch_size)
-#    print("Top1 Error: {}".format(acc1.ratio))
-#    print("Top5 Error: {}".format(acc5.ratio))
-
-#if args.eval:
-#    BATCH_SIZE = 128    # something that can run on one gpu
-#    eval_on_ILSVRC12(args.load, args.data_dir)
-#    sys.exit()
 
 
 if __name__ == '__main__':
@@ -176,9 +95,9 @@ if __name__ == '__main__':
             args.num_classes = 100
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
-        get_data = get_cifar_data
-        ds_train = get_data('train')
-        ds_val = get_data('test')
+        get_data = get_cifar_augmented_data
+        ds_train = get_data('train', args, do_multiprocess=True)
+        ds_val = get_data('test', args, do_multiprocess=False)
 
         lr_schedule = [(1, 0.1), (140, 0.01), (210, 0.001)]
         lr_schedule = [ (t, v*lr_multiplier) for (t, v) in lr_schedule ] 
@@ -189,9 +108,9 @@ if __name__ == '__main__':
         args.num_classes = 10
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
-        get_data = get_svhn_data
-        ds_train = get_data('train')
-        ds_val = get_data('test')
+        get_data = get_svhn_augmented_data
+        ds_train = get_data('train', args, do_multiprocess=True)
+        ds_val = get_data('test', args, do_multiprocess=False)
 
         lr_schedule = [(1, 0.1), (20, 0.01), (30, 0.001), (45, 0.0001)]
         lr_schedule = [ (t, v*lr_multiplier) for (t, v) in lr_schedule ] 
