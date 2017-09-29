@@ -1549,7 +1549,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
                 # To check: first deconv at self.n_pools, every layer except the last block
                 # has pl of featmap-size of n_pools-1. 
                 # The second to the last block has the final upsampling, and it has 
-                # bi = 2*n_pools - 1; The featmap size matches that of l_pls[0] 
+                # bi = 2*n_pools - 1; The featmap scale matches that of l_pls[0] 
                 skip_pls = l_pls[2*self.n_pools - bi - 1]
                 growth /= self.growth_rate_multiplier
                 pls = self.compute_transition_up(pls, skip_pls, bi)
