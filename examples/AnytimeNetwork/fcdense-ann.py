@@ -12,11 +12,8 @@ from tensorpack.utils import fs
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeFCDensenet
-
-import matplotlib.pyplot as plt
-import ipdb as pdb
 import get_augmented_data
-from sklearn.metrics import confusion_matrix
+
 
 """
 """
@@ -75,6 +72,10 @@ def label_image_to_rgb(label_img, cmap):
     return np.asarray([ cmap[y] for y in label_img.reshape([-1])], dtype=np.uint8).reshape([H,W,3])
 
 def eval_on_camvid(get_data):
+
+    import matplotlib.pyplot as plt
+    import ipdb as pdb
+    from sklearn.metrics import confusion_matrix
     if args.is_test:
         which_set = 'test'
     else:
