@@ -909,7 +909,10 @@ class AnytimeDensenet(AnytimeNetwork):
             # force connect to all of first block
             indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
         if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
-            # force connect to end of each block 
+            # force connect to end of the first three blocks 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block[:3]))
+        if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
+            # force connect to end of all blocks 
             indices.extend(np.cumsum(self.network_config.n_units_per_block))
 
         indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
@@ -1474,9 +1477,13 @@ class FCDensenet(AnytimeFCN):
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr)
+        opt = None
+        if hasattr(self.options, 'optimizer'):
+            if self.options.optimizer == 'rmsprop':
+                opt = tf.train.RMSPropOptimizer(lr)
+        if opt is None:
+            opt = tf.train.MomentumOptimizer(lr, 0.9)
         return opt
-
 
 
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
@@ -1557,12 +1564,6 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         ll_feats = [ [ feat ] for feat in pmls ]
         assert len(ll_feats) == self.total_units
         return ll_feats
-
-    def _get_optimizer(self):
-        assert self.options.init_lr > 0, self.options.init_lr
-        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr)
-        return opt
 
 
 ## Version 2 of anytime FCN for dense-net

@@ -9,6 +9,7 @@ from tensorpack.tfutils.summary import *
 from tensorpack.utils import logger
 from tensorpack.utils import utils
 from tensorpack.utils import fs
+from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeFCDensenet
@@ -199,6 +200,7 @@ def get_config(ds_trian, ds_val, model_cls):
             HumanHyperParamSetter('learning_rate')
         ] + loss_select_cbs,
         model=model,
+        monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
     )
@@ -250,6 +252,7 @@ if __name__ == '__main__':
         args.num_classes = dataset.Camvid.non_void_nclasses
         # the last weight is for void
         args.class_weight = dataset.Camvid.class_weight[:-1]
+        args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_camvid_data
         if args.eval:
@@ -267,7 +270,6 @@ if __name__ == '__main__':
         lr = args.init_lr
         lr_schedule = []
         for i in range(max_epoch):
-            #lr = args.init_lr * ( 1. - i / np.float32(max_epoch))**0.9
             lr *= 0.995
             lr_schedule.append((i+1, lr))
 
@@ -291,7 +293,7 @@ if __name__ == '__main__':
         lr = args.init_lr
         lr_schedule = []
         for i in range(max_epoch):
-            lr *= 0.995
+            lr *= args.init_lr * (1.0 - i / np.float32(max_epoch))**0.9
             lr_schedule.append((i+1, lr))
     
     config = get_config(ds_train, ds_val, model_cls)
