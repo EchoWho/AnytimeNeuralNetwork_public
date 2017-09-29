@@ -267,7 +267,7 @@ if __name__ == '__main__':
         lr = args.init_lr
         lr_schedule = []
         for i in range(max_epoch):
-            lr *= 0.995
+            lr = args.init_lr * ( 1. - i / np.float32(max_epoch))**0.9
             lr_schedule.append((i+1, lr))
 
     elif args.ds_name == 'pascal':
