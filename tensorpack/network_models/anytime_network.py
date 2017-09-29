@@ -787,6 +787,8 @@ def parser_add_densenet_arguments(parser):
                         default=False, action='store_true')
     parser.add_argument('--dense_select_method', help='densenet previous feature selection choice',
                         type=int, default=0)
+    parser.add_argument('--early_connect_type', help='Type of forced early conneciton_types',
+                        type=int, default=0)
     parser.add_argument('--log_dense_coef', help='The constant multiplier of log(depth) to connect',
                         type=np.float32, default=1)
     parser.add_argument('--log_dense_base', help='base of log',
@@ -815,6 +817,7 @@ class AnytimeDensenet(AnytimeNetwork):
         self.transition_batch_size = self.options.transition_batch_size
         self.use_transition_mask = self.options.use_transition_mask
         self.bottleneck_width = self.options.bottleneck_width
+        self.early_connect_type = self.options.early_connect_type
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
@@ -896,6 +899,20 @@ class AnytimeDensenet(AnytimeNetwork):
                 diffs.append(df)
 
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
+        if self.early_connect_type == 0:
+            # default 0 does nothing
+            pass
+        if self.early_connect_type % 2 ==  1:  #e.g., 1
+            # force connection to end of first block
+            indices.append(self.network_config.n_units_per_block[0])
+        if (self.early_connect_type >> 1) % 2 == 1:  #e.g., 2
+            # force connect to all of first block
+            indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
+        if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
+            # force connect to end of each block 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block))
+
+        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
         return indices
 
     def compute_block(self, pls, pmls, n_units, growth):
