@@ -199,13 +199,19 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     x_augmentors = [
         imgaug.MapImage(lambda x: (x - pascal_voc_mean)/pascal_voc_std),
     ]
-    xy_augmentors = [
-        imgaug.ResizeShortestEdge(side),
-        imgaug.RotationAndCropValid(max_deg=10),
-        imgaug.Flip(horiz=True),
-        imgaug.GaussianBlur(max_size=3)
-        imgaug.RandomCrop((side, side)),
-    ]
+    if isTrain:
+        xy_augmentors = [
+            imgaug.RotationAndCropValid(max_deg=10),
+            imgaug.Flip(horiz=True),
+            imgaug.GaussianBlur(max_size=3),
+            imgaug.ResizeShortestEdge(256),
+            imgaug.RandomCrop((side, side)),
+        ]
+    else:
+        xy_augmentors = [
+            imgaug.ResizeShortestEdge(256),
+            imgaug.CenterCrop((side, side)),
+        ]
     if len(xy_augmentors) > 0:
         ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
     if len(x_augmentors) > 0:
