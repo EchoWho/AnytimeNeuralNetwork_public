@@ -178,8 +178,8 @@ def Deconv2D(x, out_shape, kernel_shape,
     if b_init is None:
         b_init = tf.constant_initializer()
     W = tf.get_variable('W', filter_shape, initializer=W_init)
-    W_bias = get_deconv_filter(filter_shape)
-    W_sum = W + W_bias
+    #W_bias = get_deconv_filter(filter_shape)
+    W_sum = W #+ W_bias
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
 
