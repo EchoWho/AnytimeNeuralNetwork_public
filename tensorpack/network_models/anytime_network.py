@@ -1413,7 +1413,9 @@ class FCDensenet(AnytimeFCN):
         with tf.variable_scope('TU_{}'.format(bi)) as scope:
             stack = tf.concat(l_layers, CHANNEL_DIM, name='concat_recent')
             ch_out = stack.get_shape().as_list()[CHANNEL_DIM]
-            stack = Deconv2D('deconv', stack, ch_out, 3, 2)
+            dyn_h = tf.shape(skip_stack)[HEIGHT_DIM]
+            dyn_w = tf.shape(skip_stack)[WIDTH_DIM]
+            stack = Deconv2D('deconv', stack, ch_out, 3, 2, dyn_hw=[dyn_h, dyn_w])
             stack = tf.concat([skip_stack, stack], CHANNEL_DIM, name='concat_skip')
         return stack
 
@@ -1523,8 +1525,11 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
                 ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
                 ch_out = int(ch_in * self.reduction_ratio)
+                dyn_h = tf.shape(skip_pls[0])[HEIGHT_DIM]
+                dyn_w = tf.shape(skip_pls[0])[WIDTH_DIM]
                 #kernel_shape=3, stride=2
-                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2, nl=BNReLU))
+                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
+                    dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
         return new_pls
 
 
@@ -1590,8 +1595,12 @@ class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):
             #ch_new = l.get_shape().as_list()[CHANNEL_DIM]
             #ch_old = bcml.get_shape().as_list()[CHANNEL_DIM] 
             #ch_skip = sml.get_shape().as_list()[CHANNEL_DIM] 
-            l = Deconv2D('deconv_new', l, ch_out, 3, 2, nl=BNReLU)
-            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, nl=BNReLU)
+            dyn_h = tf.shape(sml)[HEIGHT_DIM]
+            dyn_w = tf.shape(sml)[WIDTH_DIM]
+            l = Deconv2D('deconv_new', l, ch_out, 3, 2, 
+                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
+            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, 
+                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
             bcml = tf.concat([sml, l, bcml], CHANNEL_DIM, name='concat_all')
         return bcml
 
