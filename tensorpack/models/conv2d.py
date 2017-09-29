@@ -6,6 +6,7 @@
 import tensorflow as tf
 from .common import layer_register, VariableHolder
 from ..utils.argtools import shape2d, shape4d
+import numpy as np
 
 __all__ = ['Conv2D', 'Deconv2D', 'AtrousConv2D']
 
@@ -93,6 +94,27 @@ class StaticDynamicShape(object):
             return StaticDynamicShape(None, f(self.dynamic))
 
 
+def get_deconv_filter(f_shape):
+    width = f_shape[0]
+    heigh = f_shape[1]
+    f = np.ceil(width/2.0)
+    c = (2 * f - 1 - f % 2) / (2.0 * f)
+    bilinear = np.zeros([f_shape[0], f_shape[1]])
+    for x in range(width):
+        for y in range(heigh):
+            value = (1 - np.abs(x / f - c)) * (1 - np.abs(y / f - c))
+            bilinear[x, y] = value
+    weights = np.zeros(f_shape)
+    for i in range(f_shape[2]):
+        weights[:, :, i, i] = bilinear
+
+    #init = tf.constant_initializer(value=weights,
+    #                               dtype=tf.float32)
+    #return tf.get_variable(name="up_filter", initializer=init,
+    #                       shape=weights.shape)
+    return tf.constant(weights, dtype=tf.float32)
+
+
 @layer_register()
 def Deconv2D(x, out_shape, kernel_shape,
              stride, padding='SAME',
@@ -153,17 +175,17 @@ def Deconv2D(x, out_shape, kernel_shape,
         shp3_static = shp3_dyn = out_shape
     filter_shape = kernel_shape + [out_channel, in_channel]
 
-    if W_init is None:
-        W_init = tf.contrib.layers.xavier_initializer_conv2d()
     if b_init is None:
         b_init = tf.constant_initializer()
     W = tf.get_variable('W', filter_shape, initializer=W_init)
+    #W_bias = get_deconv_filter(filter_shape)
+    W_sum = W #+ W_bias
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
 
     out_shape_dyn = tf.stack([tf.shape(x)[0]] + shp3_dyn)
     conv = tf.nn.conv2d_transpose(
-        x, W, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
+        x, W_sum, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
     conv.set_shape(tf.TensorShape([None] + shp3_static))
     ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
 
