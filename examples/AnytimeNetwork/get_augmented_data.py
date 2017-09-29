@@ -13,6 +13,9 @@ from tensorpack import *
 ilsvrc_mean = [0.485, 0.456, 0.406][::-1] 
 ilsvrc_std = [0.229, 0.224, 0.225][::-1]
 
+pascal_voc_mean = [122.67891434, 116.66876762, 104.00698793]
+pascal_voc_std = [128., 128., 128.]
+
 def get_distill_target_data(subset, options):
     distill_target_fn = os.path.join(options.data_dir, 'distill_targets', 
         '{}_distill_target_{}.bin'.format(options.ds_name, subset))
@@ -184,19 +187,27 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
         assert len(y_img.shape) == 2
         y_img[y_img >= n_classes] = n_classes - 1
         h, w = y_img.shape
-        return np.eye(n_classes, dtype=np.float32)[y_img.reshape([-1])].reshape([h,w,n_classes])
+        return np.eye(n_classes, dtype=np.float32)[y_img.astype(int).reshape([-1])].reshape(
+            [h,w,n_classes])
         
     ds = MapDataComponent(ds, lambda y: one_hot(y[0]), 1)
-    
-    x_augmentors = []
+
+    x_augmentors = [
+        # imgaug.ToUint8()
+        # imgaug.MapImage(lambda x: (x - pascal_voc_mean)/pascal_voc_std),
+    ]
     side = 224
     xy_augmentors = [
-        #imgaug.RandomCrop((side, side)),
+        imgaug.ResizeShortestEdge(224),
+        imgaug.RotationAndCropValid(max_deg=10),
+        imgaug.Flip(horiz=True),
+        imgaug.GaussianBlur(max_size=3)
+        # imgaug.RandomCrop((side, side)),
     ]
-    if len(x_augmentors) > 0:
-        ds = AugmentImageComponent(ds, x_augmentors, copy=True)
     if len(xy_augmentors) > 0:
         ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
+    if len(x_augmentors) > 0:
+        ds = AugmentImageComponent(ds, x_augmentors, copy=False)
     if do_multiprocess:
         ds = PrefetchData(ds, 5, 5)
     ds = BatchData(ds, options.batch_size // options.nr_gpu, remainder=not isTrain)

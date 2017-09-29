@@ -1,4 +1,7 @@
 <<<<<<< HEAD
+# Clion indexing/config
+*.idea
+
 *.swp
 *.gz
 *.npy
