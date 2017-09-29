@@ -118,6 +118,7 @@ def get_deconv_filter(f_shape):
 @layer_register()
 def Deconv2D(x, out_shape, kernel_shape,
              stride, padding='SAME',
+             dyn_hw=None, 
              W_init=None, b_init=None,
              nl=tf.identity, use_bias=True,
              data_format='NHWC'):
@@ -132,6 +133,7 @@ def Deconv2D(x, out_shape, kernel_shape,
         kernel_shape: (h, w) tuple or a int.
         stride: (h, w) tuple or a int.
         padding (str): 'valid' or 'same'. Case insensitive.
+        dyn_hw: (h, w) both are dynamic shape for the output. e.g., dyn_h = tf.shape(OutTarget)[H], 
         W_init: initializer for W. Defaults to `variance_scaling_initializer`.
         b_init: initializer for b. Defaults to zero.
         nl: a nonlinearity function.
@@ -155,7 +157,7 @@ def Deconv2D(x, out_shape, kernel_shape,
     padding = padding.upper()
     in_shape_dyn = tf.shape(x)
 
-    if isinstance(out_shape, int):
+    if isinstance(out_shape, int) and dyn_hw is None:
         out_channel = out_shape
         if data_format == 'NHWC':
             shp3_0 = StaticDynamicShape(in_shape[1], in_shape_dyn[1]).apply(lambda x: stride2d[0] * x)
@@ -167,6 +169,14 @@ def Deconv2D(x, out_shape, kernel_shape,
             shp3_1 = StaticDynamicShape(in_shape[3], in_shape_dyn[3]).apply(lambda x: stride2d[1] * x)
             shp3_dyn = [out_channel, shp3_0.dynamic, shp3_1.dynamic]
             shp3_static = [out_channel, shp3_0.static, shp3_1.static]
+    elif isinstance(out_shape, int) and isinstance(dyn_hw, list):
+        out_channel = out_shape
+        if data_format == 'NHWC':
+            shp3_dyn = dyn_hw + [out_channel]
+            shp3_static = [None, None, out_channel]
+        else:
+            shp3_dyn = [out_channel] + dyn_hw
+            shp3_static = [out_channel, None, None]
     else:
         for k in out_shape:
             if not isinstance(k, int):
