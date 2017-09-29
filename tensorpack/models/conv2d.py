@@ -108,10 +108,11 @@ def get_deconv_filter(f_shape):
     for i in range(f_shape[2]):
         weights[:, :, i, i] = bilinear
 
-    init = tf.constant_initializer(value=weights,
-                                   dtype=tf.float32)
-    return tf.get_variable(name="up_filter", initializer=init,
-                           shape=weights.shape)
+    #init = tf.constant_initializer(value=weights,
+    #                               dtype=tf.float32)
+    #return tf.get_variable(name="up_filter", initializer=init,
+    #                       shape=weights.shape)
+    return tf.constant(weights, dtype=tf.float32)
 
 
 @layer_register()
@@ -176,14 +177,15 @@ def Deconv2D(x, out_shape, kernel_shape,
 
     if b_init is None:
         b_init = tf.constant_initializer()
-    #W = tf.get_variable('W', filter_shape, initializer=W_init)
-    W = get_deconv_filter(filter_shape)
+    W = tf.get_variable('W', filter_shape, initializer=W_init)
+    W_bias = get_deconv_filter(filter_shape)
+    W_sum = W + W_bias
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
 
     out_shape_dyn = tf.stack([tf.shape(x)[0]] + shp3_dyn)
     conv = tf.nn.conv2d_transpose(
-        x, W, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
+        x, W_sum, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
     conv.set_shape(tf.TensorShape([None] + shp3_static))
     ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
 
