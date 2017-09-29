@@ -11,7 +11,7 @@ from tensorpack.utils import utils
 from tensorpack.utils import fs
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeFCDensenet
+from tensorpack.network_models.anytime_network import AnytimeFCDensenetV2
 import get_augmented_data
 
 
@@ -89,7 +89,7 @@ def eval_on_camvid(get_data):
         void_overlap=True)
     ds_cmap = dataset.Camvid._cmap
 
-    model = AnytimeFCDensenet(args)
+    model = AnytimeFCDensenetV2(args)
 
     pred_probs = [] 
     
@@ -233,7 +233,7 @@ if __name__ == '__main__':
     parser.add_argument('--finetune',  help='whether do fine tuning',
                         default=False, action='store_true')
     anytime_network.parser_add_fcdense_arguments(parser)
-    model_cls = AnytimeFCDensenet
+    model_cls = AnytimeFCDensenetV2
     args = parser.parse_args()
 
     logger.set_log_root(log_root=args.log_dir)
