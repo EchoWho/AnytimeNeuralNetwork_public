@@ -111,6 +111,8 @@ def compute_cfg(options):
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
+        elif options.fcdense_depth == 1000:
+            n_units_per_block = [ ]
         else:
             raise ValueError('FC dense net depth {} is undefined'\
                 .format(options.fcdense_depth))
@@ -152,6 +154,9 @@ def parser_add_common_arguments(parser):
                         help='number of units per stack, '
                         +'i.e., number of units per prediction, or prediction period',
                         type=int, default=1)
+    parser.add_argument('--weights_at_block_ends', 
+                        help='Whether only have weights>0 at block ends, useful for fcn',
+                        default=False, action='store_true') 
     parser.add_argument('--s_type', help='starting conv type',
                         type=str, default='basic', choices=['basic', 'imagenet'])
     parser.add_argument('--b_type', help='block type',
@@ -255,7 +260,8 @@ class AnytimeNetwork(ModelDesc):
         self.alter_label_activate_frac = self.options.alter_label_activate_frac
         self.alter_loss_w = self.options.alter_loss_w
 
-        self.weights = anytime_loss.loss_weights(self.total_units, args)
+        self.weights = anytime_loss.loss_weights(self.total_units, args, 
+            cfg=self.network_config.n_units_per_block)
         self.weights_sum = np.sum(self.weights)
         self.ls_K = np.sum(np.asarray(self.weights) > 0)
         logger.info('weights: {}'.format(self.weights))
@@ -1544,30 +1550,50 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
 
 ## Version 2 of anytime FCN for dense-net
 # 
-class AnytimeFCDenseV2(AnytimeFCN, AnytimeLogDensenetV2):  
+class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):  
     
     def __init__(self, args):
-        super(AnytimeFCDenseV2, self).__init__(args)
+        super(AnytimeFCDensenetV2, self).__init__(args)
         self.n_pools = args.n_pools
         assert self.n_pools * 2 == self.n_blocks - 1
         assert self.width == 1
         assert self.network_config.s_type == 'basic'
 
-    def update_compressed_feature_up(self, layer_idx, ch_out, pls, bcml):
-        pass 
+    def update_compressed_feature_up(self, layer_idx, ch_out, pls, bcml, sml):
+        """
+            layer_idx :
+            pls : list of layers in the most recent block
+            bcml : context feature for the most recent block
+            sml : Final feature of the target scale on the down path 
+                (it comes from skip connection)
+        """
+        with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
+            l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
+            #ch_new = l.get_shape().as_list()[CHANNEL_DIM]
+            #ch_old = bcml.get_shape().as_list()[CHANNEL_DIM] 
+            #ch_skip = sml.get_shape().as_list()[CHANNEL_DIM] 
+            l = Deconv2D('deconv_new', l, ch_out, 3, 2, nl=BNReLU)
+            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, nl=BNReLU)
+            bcml = tf.concat([sml, l, bcml], CHANNEL_DIM, name='concat_all')
+        return bcml
 
     def _compute_ll_feats(self, image):
         l_feats = self._compute_init_l_feats(image)
-        bcml = l_feats[0]
+        bcml = l_feats[0] #block compression merged layer
         l_mls = []
         growth = self.growth_rate
         layer_idx = -1
+        l_skips = []
         for bi, n_units in enumerate(self.network_config.n_units_per_block):  
             pls, l_mls = self.compute_block(layer_idx, n_units, l_mls, bcml, growth)
             layer_idx += n_units
-            if bi != self.n_blocks - 1: 
-                ch_out = growth * (int(np.log2(self.total_units + 1)) + 1)
+            ch_out = growth * (int(np.log2(self.total_units + 1)) + 1)
+            if bi < self.n_pools: 
+                l_skips.append(l_mls[-1])
                 bcml = self.update_compressed_feature(layer_idx, ch_out, pls, bcml)
+            elif bi < self.n_blocks - 1:
+                sml = l_skips[self.n_pools * 2 - bi - 1]
+                bcml = self.update_compressed_feature_up(layer_idx, ch_out, pls, bcml, sml)
         
         ll_feats = [ [ml] for ml in l_mls ]
         assert len(ll_feats) == self.total_units
