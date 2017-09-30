@@ -457,7 +457,7 @@ class AnytimeNetwork(ModelDesc):
             if DATA_FORMAT == 'NCHW':
                 image = tf.transpose(image, [0,3,1,2])
 
-            dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
+            self.dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
             ll_feats = self._compute_ll_feats(image)
             
             if self.options.stop_gradient:
@@ -1276,21 +1276,25 @@ class AnytimeFCN(AnytimeNetwork):
 
         l_mask = []
         l_label = []
+        l_dyn_hw = []
         label_img = tf.identity(label_img, name='label_img_0')
 
         for pi in range(self.n_pools+1):
             l_mask.append(nonvoid_mask(label_img, 'eval_mask_{}'.format(pi)))
             l_label.append(flatten_label(label_img, 'label_{}'.format(pi)))
+            img_shape = tf.shape(label_img)
+            # Note that input is always NHWC. 
+            l_dyn_hw.append([img_shape[1], img_shape[2]])
             if pi == self.n_pools:
                 break
             label_img = AvgPooling('label_img_{}'.format(pi+1), label_img, 2, \
                                    padding='SAME', data_format='NHWC')
 
-        return image, [l_label, l_mask]
+        return image, [l_label, l_mask, l_dyn_hw]
 
 
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
-        l_label, l_eval_mask = label_inputs
+        l_label, l_eval_mask, l_dyn_hw = label_inputs
         # Assume all previous layers have gone through BNReLU, so conv directly
         l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
@@ -1315,6 +1319,7 @@ class AnytimeFCN(AnytimeNetwork):
 
         label = l_label[label_img_idx] # note this is a probability of label distri
         eval_mask = l_eval_mask[label_img_idx]
+        dyn_hw = l_dyn_hw[label_img_idx]
 
         n_non_void_samples = tf.reduce_sum(eval_mask)
         n_non_void_samples += tf.cast(tf.less_equal(n_non_void_samples, 1e-12), tf.float32)
@@ -1324,6 +1329,8 @@ class AnytimeFCN(AnytimeNetwork):
         # Square error between distributions. 
         # Implement our own here b/c class weighting.
         prob = tf.nn.softmax(logits, name='pred_prob')
+        prob_img_shape = tf.stack([-1,  dyn_hw[0], dyn_hw[1], self.num_classes])
+        prob_img = tf.reshape(prob, prob_img_shape, name='pred_prob_img') 
         sqr_err = tf.reduce_sum(\
             tf.multiply(tf.square(label - prob), self.class_weight), \
             axis=1, name='pixel_prob_square_err')

@@ -68,8 +68,9 @@ def label_image_to_rgb(label_img, cmap):
     return np.asarray([ cmap[y] for y in label_img.reshape([-1])], dtype=np.uint8).reshape([H,W,3])
 
 def evaluate(subset, get_data, model_cls, meta_info):
-    import ipdb
-
+    if logger.LOG_DIR is not None and args.display_period > 0:
+        import matplotlib.pyplot as plt
+        from scipy.misc import imresize
     args.batch_size = 1
     cmap = meta_info._cmap
     mean = meta_info.mean
@@ -84,7 +85,7 @@ def evaluate(subset, get_data, model_cls, meta_info):
         if weight > 0:
             l_outputs.extend(\
                 ['layer{:03d}.0.pred/confusion_matrix/SparseTensorDenseAdd:0'.format(i),
-                 'layer{:03d}.0.pred/pred_prob:0'.format(i)])
+                 'layer{:03d}.0.pred/pred_prob_img:0'.format(i)])
     
     pred_config = PredictConfig(
         model=model,
@@ -96,13 +97,13 @@ def evaluate(subset, get_data, model_cls, meta_info):
 
     l_total_confusion = [0] * n_preds
     for i, output in enumerate(pred.get_result()):
-        img = np.asarray(output[0][0] * std + mean, dtype=np.uint8)
+        img = np.asarray((output[0][0] * std + mean)*255, dtype=np.uint8)
         label = output[1][0]
         if len(label.shape) == 3: 
             mask = label.sum(axis=-1) < args.eval_threshold
         else:
-            mask = label == 255
-        label = label_image_to_rgb(label, cmap)  
+            mask = label < args.num_classes
+        label_img = label_image_to_rgb(label, cmap)  
 
         confs = output[2:][::2]
         preds = output[2:][1::2]
@@ -111,13 +112,31 @@ def evaluate(subset, get_data, model_cls, meta_info):
             conf, pred = perf
             l_total_confusion[predi] += conf
 
-        if args.display_period > 0 and i % args.display_period == 0:
-            raise Exception('Implement display pred, GT, image')
+        if args.display_period > 0 and i % args.display_period == 0 \
+                and logger.LOG_DIR is not None:
+            save_dir = logger.LOG_DIR
+            
+            select_indices = [ int(np.round(n_preds * fraci / 4.0)) - 1 \
+                            for fraci in range(1,5) ]
+            preds_to_display = [ preds[idx] for idx in select_indices]
+            fig, axarr = plt.subplots(1, 2+4, figsize=(1+6*6, 5))
+            axarr[0].imshow(img)
+            axarr[1].imshow(label_img) 
+            for predi, pred in enumerate(preds_to_display):
+                pred_img = pred[0].argmax(axis=-1)
+                pred_img = label_image_to_rgb(pred_img, cmap)
+                pred_img = imresize(pred_img, (img.shape[0], img.shape[1]))
+                axarr[2+predi].imshow(pred_img) 
+
+            plt.savefig(os.path.join(logger.LOG_DIR, 'img_{}.png'.format(i)),
+                dpi=fig.dpi, bbox_inches='tight')
+
     #for each sample
     
     l_ret = []
     for i, total_confusion in enumerate(l_total_confusion):
         ret = dict()
+        ret['subset'] = subset
         ret['confmat'] = total_confusion
         I = np.diag(total_confusion)
         n_true = np.sum(total_confusion, axis=1)
@@ -128,9 +147,11 @@ def evaluate(subset, get_data, model_cls, meta_info):
         mIoU = np.mean(IoUs)
         ret['IoUs'] = IoUs
         ret['mIoU'] = mIoU
-        l_ret.append(ret)
-    ipdb.set_trace()
-         
+        logger.info("ret info: {}".format(ret))
+
+    if logger.LOG_DIR:
+        npzfn = os.path.join(logger.LOG_DIR, 'evaluation.npz') 
+        np.savez(npzfn, evalution_ret=ret)
 
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
@@ -204,7 +225,7 @@ if __name__ == '__main__':
         get_data = get_camvid_data
         if args.eval:
             subset = 'test' if args.is_test else 'val'
-            evaluate(subset, get_data, model_cls, Camvid)
+            evaluate(subset, get_data, model_cls, dataset.Camvid)
             sys.exit()
 
         if not args.is_test:
