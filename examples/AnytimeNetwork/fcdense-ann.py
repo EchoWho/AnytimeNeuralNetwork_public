@@ -9,14 +9,12 @@ from tensorpack.tfutils.summary import *
 from tensorpack.utils import logger
 from tensorpack.utils import utils
 from tensorpack.utils import fs
+from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import AnytimeFCDensenet
-
-import matplotlib.pyplot as plt
-import ipdb as pdb
 import get_augmented_data
-from sklearn.metrics import confusion_matrix
+
 
 """
 """
@@ -38,26 +36,19 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         slide_window_size=side,
         void_overlap=not isTrain)
     if isTrain:
-        if args.is_label_one_hot:
-            x_augmentors = [
+        x_augmentors = [
 #                imgaug.GaussianBlur(2)
-            ]
-            xy_augmentors = [
+        ]
+        xy_augmentors = [
 #                imgaug.RotationAndCropValid(7),
 #                imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-                imgaug.RandomCrop((side, side)),
-                imgaug.Flip(horiz=True),
-            ]
-        else:
-            x_augmentors = []
-            xy_augmentors = [ 
-                imgaug.RandomCrop((side, side)),
-                imgaug.Flip(horiz=True),
-            ]
+        #    imgaug.RandomCrop((side, side)),
+            imgaug.Flip(horiz=True),
+        ]
     else:
         x_augmentors = []
         xy_augmentors = [
-            imgaug.RandomCrop((side, side)),
+            #imgaug.RandomCrop((side, side)),
         ]
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)
@@ -75,6 +66,10 @@ def label_image_to_rgb(label_img, cmap):
     return np.asarray([ cmap[y] for y in label_img.reshape([-1])], dtype=np.uint8).reshape([H,W,3])
 
 def eval_on_camvid(get_data):
+
+    import matplotlib.pyplot as plt
+    import ipdb as pdb
+    from sklearn.metrics import confusion_matrix
     if args.is_test:
         which_set = 'test'
     else:
@@ -198,6 +193,7 @@ def get_config(ds_trian, ds_val, model_cls):
             HumanHyperParamSetter('learning_rate')
         ] + loss_select_cbs,
         model=model,
+        monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
     )
@@ -249,6 +245,7 @@ if __name__ == '__main__':
         args.num_classes = dataset.Camvid.non_void_nclasses
         # the last weight is for void
         args.class_weight = dataset.Camvid.class_weight[:-1]
+        args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_camvid_data
         if args.eval:
@@ -289,7 +286,7 @@ if __name__ == '__main__':
         lr = args.init_lr
         lr_schedule = []
         for i in range(max_epoch):
-            lr *= 0.995
+            lr *= args.init_lr * (1.0 - i / np.float32(max_epoch))**0.9
             lr_schedule.append((i+1, lr))
     
     config = get_config(ds_train, ds_val, model_cls)
