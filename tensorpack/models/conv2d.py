@@ -6,6 +6,7 @@
 import tensorflow as tf
 from .common import layer_register, VariableHolder
 from ..utils.argtools import shape2d, shape4d
+import numpy as np
 
 __all__ = ['Conv2D', 'Deconv2D', 'AtrousConv2D']
 
@@ -93,9 +94,31 @@ class StaticDynamicShape(object):
             return StaticDynamicShape(None, f(self.dynamic))
 
 
+def get_deconv_filter(f_shape):
+    width = f_shape[0]
+    heigh = f_shape[1]
+    f = np.ceil(width/2.0)
+    c = (2 * f - 1 - f % 2) / (2.0 * f)
+    bilinear = np.zeros([f_shape[0], f_shape[1]])
+    for x in range(width):
+        for y in range(heigh):
+            value = (1 - np.abs(x / f - c)) * (1 - np.abs(y / f - c))
+            bilinear[x, y] = value
+    weights = np.zeros(f_shape)
+    for i in range(f_shape[2]):
+        weights[:, :, i, i] = bilinear
+
+    #init = tf.constant_initializer(value=weights,
+    #                               dtype=tf.float32)
+    #return tf.get_variable(name="up_filter", initializer=init,
+    #                       shape=weights.shape)
+    return tf.constant(weights, dtype=tf.float32)
+
+
 @layer_register()
 def Deconv2D(x, out_shape, kernel_shape,
              stride, padding='SAME',
+             dyn_hw=None, 
              W_init=None, b_init=None,
              nl=tf.identity, use_bias=True,
              data_format='NHWC'):
@@ -110,6 +133,7 @@ def Deconv2D(x, out_shape, kernel_shape,
         kernel_shape: (h, w) tuple or a int.
         stride: (h, w) tuple or a int.
         padding (str): 'valid' or 'same'. Case insensitive.
+        dyn_hw: (h, w) both are dynamic shape for the output. e.g., dyn_h = tf.shape(OutTarget)[H], 
         W_init: initializer for W. Defaults to `variance_scaling_initializer`.
         b_init: initializer for b. Defaults to zero.
         nl: a nonlinearity function.
@@ -133,7 +157,7 @@ def Deconv2D(x, out_shape, kernel_shape,
     padding = padding.upper()
     in_shape_dyn = tf.shape(x)
 
-    if isinstance(out_shape, int):
+    if isinstance(out_shape, int) and dyn_hw is None:
         out_channel = out_shape
         if data_format == 'NHWC':
             shp3_0 = StaticDynamicShape(in_shape[1], in_shape_dyn[1]).apply(lambda x: stride2d[0] * x)
@@ -145,6 +169,14 @@ def Deconv2D(x, out_shape, kernel_shape,
             shp3_1 = StaticDynamicShape(in_shape[3], in_shape_dyn[3]).apply(lambda x: stride2d[1] * x)
             shp3_dyn = [out_channel, shp3_0.dynamic, shp3_1.dynamic]
             shp3_static = [out_channel, shp3_0.static, shp3_1.static]
+    elif isinstance(out_shape, int) and isinstance(dyn_hw, list):
+        out_channel = out_shape
+        if data_format == 'NHWC':
+            shp3_dyn = dyn_hw + [out_channel]
+            shp3_static = [None, None, out_channel]
+        else:
+            shp3_dyn = [out_channel] + dyn_hw
+            shp3_static = [out_channel, None, None]
     else:
         for k in out_shape:
             if not isinstance(k, int):
@@ -153,17 +185,17 @@ def Deconv2D(x, out_shape, kernel_shape,
         shp3_static = shp3_dyn = out_shape
     filter_shape = kernel_shape + [out_channel, in_channel]
 
-    if W_init is None:
-        W_init = tf.contrib.layers.xavier_initializer_conv2d()
     if b_init is None:
         b_init = tf.constant_initializer()
     W = tf.get_variable('W', filter_shape, initializer=W_init)
+    #W_bias = get_deconv_filter(filter_shape)
+    W_sum = W #+ W_bias
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
 
     out_shape_dyn = tf.stack([tf.shape(x)[0]] + shp3_dyn)
     conv = tf.nn.conv2d_transpose(
-        x, W, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
+        x, W_sum, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
     conv.set_shape(tf.TensorShape([None] + shp3_static))
     ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
 
