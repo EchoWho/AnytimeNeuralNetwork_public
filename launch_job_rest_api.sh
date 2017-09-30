@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {2327..2428} {2431..2450}  # {2453..2503}
+for i in {2453..2503}
 do
 
 	USERNAME="dedey"
@@ -9,7 +9,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="2"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
