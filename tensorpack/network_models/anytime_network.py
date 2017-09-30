@@ -111,6 +111,8 @@ def compute_cfg(options):
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
+        elif options.fcdense_depth == 1000:
+            n_units_per_block = [ ]
         else:
             raise ValueError('FC dense net depth {} is undefined'\
                 .format(options.fcdense_depth))
@@ -152,6 +154,9 @@ def parser_add_common_arguments(parser):
                         help='number of units per stack, '
                         +'i.e., number of units per prediction, or prediction period',
                         type=int, default=1)
+    parser.add_argument('--weights_at_block_ends', 
+                        help='Whether only have weights>0 at block ends, useful for fcn',
+                        default=False, action='store_true') 
     parser.add_argument('--s_type', help='starting conv type',
                         type=str, default='basic', choices=['basic', 'imagenet'])
     parser.add_argument('--b_type', help='block type',
@@ -255,7 +260,9 @@ class AnytimeNetwork(ModelDesc):
         self.alter_label_activate_frac = self.options.alter_label_activate_frac
         self.alter_loss_w = self.options.alter_loss_w
 
-        self.weights = anytime_loss.loss_weights(self.total_units, args)
+        self.weights = anytime_loss.loss_weights(self.total_units, args, 
+            cfg=self.network_config.n_units_per_block)
+        self.weights_sum = np.sum(self.weights)
         self.ls_K = np.sum(np.asarray(self.weights) > 0)
         logger.info('weights: {}'.format(self.weights))
 
@@ -514,7 +521,7 @@ class AnytimeNetwork(ModelDesc):
                     if select_idx is not None:
                         add_weight = tf.cond(tf.equal(anytime_idx, 
                                                       select_idx),
-                            lambda: tf.constant(self.weights[-1] * 2.0, 
+                            lambda: tf.constant(self.weights_sum, 
                                                 dtype=tf.float32),
                             lambda: tf.constant(0, dtype=tf.float32))
                     if self.options.sum_rand_ratio > 0:
@@ -558,8 +565,9 @@ class AnytimeNetwork(ModelDesc):
         wd_cost = tf.identity(wd_cost, name='wd_cost')
         total_cost = tf.identity(total_cost, name='sum_losses')
         add_moving_summary(total_cost, wd_cost)
-        add_param_summary(('.*/W', ['histogram']))   # monitor W
         self.cost = tf.add_n([total_cost, wd_cost], name='cost') # specify training loss
+        # monitor W # Too expensive in disk space :-/
+        #add_param_summary(('.*/W', ['histogram']))   
 
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
@@ -582,7 +590,7 @@ class AnytimeNetwork(ModelDesc):
             for i in range(self.ls_K):
                 weight_i = tf.cast(tf.equal(select_idx, i), tf.float32, 
                                    name='weight_{:02d}'.format(i))
-                add_moving_summary(weight_i)
+                #add_moving_summary(weight_i)
         return select_idx
 
 
@@ -779,6 +787,8 @@ def parser_add_densenet_arguments(parser):
                         default=False, action='store_true')
     parser.add_argument('--dense_select_method', help='densenet previous feature selection choice',
                         type=int, default=0)
+    parser.add_argument('--early_connect_type', help='Type of forced early conneciton_types',
+                        type=int, default=0)
     parser.add_argument('--log_dense_coef', help='The constant multiplier of log(depth) to connect',
                         type=np.float32, default=1)
     parser.add_argument('--log_dense_base', help='base of log',
@@ -807,6 +817,7 @@ class AnytimeDensenet(AnytimeNetwork):
         self.transition_batch_size = self.options.transition_batch_size
         self.use_transition_mask = self.options.use_transition_mask
         self.bottleneck_width = self.options.bottleneck_width
+        self.early_connect_type = self.options.early_connect_type
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
@@ -888,6 +899,23 @@ class AnytimeDensenet(AnytimeNetwork):
                 diffs.append(df)
 
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
+        if self.early_connect_type == 0:
+            # default 0 does nothing
+            pass
+        if self.early_connect_type % 2 ==  1:  #e.g., 1
+            # force connection to end of first block
+            indices.append(self.network_config.n_units_per_block[0])
+        if (self.early_connect_type >> 1) % 2 == 1:  #e.g., 2
+            # force connect to all of first block
+            indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
+        if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
+            # force connect to end of the first three blocks 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block[:3]))
+        if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
+            # force connect to end of all blocks 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block))
+
+        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
         return indices
 
     def compute_block(self, pls, pmls, n_units, growth):
@@ -1165,6 +1193,14 @@ class AnytimeFCN(AnytimeNetwork):
     def __init__(self, args):
         super(AnytimeFCN, self).__init__(None, args)
 
+        # Class weight for fully convolutional networks
+        self.class_weight = None
+        if hasattr(args, 'class_weight'):
+            self.class_weight = args.class_weight
+        if self.class_weight is None:
+            self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
+        logger.info('Class weights: {}'.format(self.class_weight))
+
         self.is_label_one_hot = args.is_label_one_hot
         self.eval_threshold = args.eval_threshold
 
@@ -1377,7 +1413,9 @@ class FCDensenet(AnytimeFCN):
         with tf.variable_scope('TU_{}'.format(bi)) as scope:
             stack = tf.concat(l_layers, CHANNEL_DIM, name='concat_recent')
             ch_out = stack.get_shape().as_list()[CHANNEL_DIM]
-            stack = Deconv2D('deconv', stack, ch_out, 3, 2)
+            dyn_h = tf.shape(skip_stack)[HEIGHT_DIM]
+            dyn_w = tf.shape(skip_stack)[WIDTH_DIM]
+            stack = Deconv2D('deconv', stack, ch_out, 3, 2, dyn_hw=[dyn_h, dyn_w])
             stack = tf.concat([skip_stack, stack], CHANNEL_DIM, name='concat_skip')
         return stack
 
@@ -1441,9 +1479,13 @@ class FCDensenet(AnytimeFCN):
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr)
+        opt = None
+        if hasattr(self.options, 'optimizer'):
+            if self.options.optimizer == 'rmsprop':
+                opt = tf.train.RMSPropOptimizer(lr)
+        if opt is None:
+            opt = tf.train.MomentumOptimizer(lr, 0.9)
         return opt
-
 
 
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
@@ -1458,22 +1500,12 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
 
     def __init__(self, args):
         # set up params from regular densenet.
-        AnytimeDensenet.__init__(self, None, args)
-
-        # Class weight for fully convolutional networks
-        self.class_weight = None
-        if hasattr(args, 'class_weight'):
-            self.class_weight = args.class_weight
-        if self.class_weight is None:
-            self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
-        logger.info('Class weights: {}'.format(self.class_weight))
-        
+        super(AnytimeFCDensenet, self).__init__(args)
+                
         # FC-dense specific
         self.n_pools = args.n_pools
-        
         # other format is not supported yet
         assert self.n_pools * 2 + 1 == self.n_blocks
-
         # FC-dense doesn't support width > 1 yet
         assert self.width == 1
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
@@ -1493,8 +1525,11 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
                 ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
                 ch_out = int(ch_in * self.reduction_ratio)
+                dyn_h = tf.shape(skip_pls[0])[HEIGHT_DIM]
+                dyn_w = tf.shape(skip_pls[0])[WIDTH_DIM]
                 #kernel_shape=3, stride=2
-                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2, nl=BNReLU))
+                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
+                    dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
         return new_pls
 
 
@@ -1526,7 +1561,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
                 # To check: first deconv at self.n_pools, every layer except the last block
                 # has pl of featmap-size of n_pools-1. 
                 # The second to the last block has the final upsampling, and it has 
-                # bi = 2*n_pools - 1; The featmap size matches that of l_pls[0] 
+                # bi = 2*n_pools - 1; The featmap scale matches that of l_pls[0] 
                 skip_pls = l_pls[2*self.n_pools - bi - 1]
                 growth /= self.growth_rate_multiplier
                 pls = self.compute_transition_up(pls, skip_pls, bi)
@@ -1535,11 +1570,62 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         assert len(ll_feats) == self.total_units
         return ll_feats
 
-    def _get_optimizer(self):
-        assert self.options.init_lr > 0, self.options.init_lr
-        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr)
-        return opt
+
+## Version 2 of anytime FCN for dense-net
+# 
+class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):  
+    
+    def __init__(self, args):
+        super(AnytimeFCDensenetV2, self).__init__(args)
+        self.n_pools = args.n_pools
+        assert self.n_pools * 2 == self.n_blocks - 1
+        assert self.width == 1
+        assert self.network_config.s_type == 'basic'
+
+    def update_compressed_feature_up(self, layer_idx, ch_out, pls, bcml, sml):
+        """
+            layer_idx :
+            pls : list of layers in the most recent block
+            bcml : context feature for the most recent block
+            sml : Final feature of the target scale on the down path 
+                (it comes from skip connection)
+        """
+        with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
+            l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
+            #ch_new = l.get_shape().as_list()[CHANNEL_DIM]
+            #ch_old = bcml.get_shape().as_list()[CHANNEL_DIM] 
+            #ch_skip = sml.get_shape().as_list()[CHANNEL_DIM] 
+            dyn_h = tf.shape(sml)[HEIGHT_DIM]
+            dyn_w = tf.shape(sml)[WIDTH_DIM]
+            l = Deconv2D('deconv_new', l, ch_out, 3, 2, 
+                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
+            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, 
+                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
+            bcml = tf.concat([sml, l, bcml], CHANNEL_DIM, name='concat_all')
+        return bcml
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        bcml = l_feats[0] #block compression merged layer
+        l_mls = []
+        growth = self.growth_rate
+        layer_idx = -1
+        l_skips = []
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
+            pls, l_mls = self.compute_block(layer_idx, n_units, l_mls, bcml, growth)
+            layer_idx += n_units
+            ch_out = growth * (int(np.log2(self.total_units + 1)) + 1)
+            if bi < self.n_pools: 
+                l_skips.append(l_mls[-1])
+                bcml = self.update_compressed_feature(layer_idx, ch_out, pls, bcml)
+            elif bi < self.n_blocks - 1:
+                sml = l_skips[self.n_pools * 2 - bi - 1]
+                bcml = self.update_compressed_feature_up(layer_idx, ch_out, pls, bcml, sml)
+        
+        ll_feats = [ [ml] for ml in l_mls ]
+        assert len(ll_feats) == self.total_units
+        return ll_feats
+
 
 
 ###########################

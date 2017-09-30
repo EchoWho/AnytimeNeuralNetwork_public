@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/densenet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---densenet_version=dense -n=52 -g=24 -s=26 --ds_name=cifar100 --batch_size=32 --nr_gpu=2 -f=10 --opt_at=-1 --samloss=6 --log_dense_base=2.0 --transition_batch_size=1 --growth_rate_multiplier=1 --bottleneck_width=4.0 --reduction_ratio=0.5 --b_type=bottleneck 
+--densenet_version=dense -n=52 -g=24 -s=26 --ds_name=cifar100 --batch_size=16 --nr_gpu=2 -f=10 --opt_at=-1 --samloss=6 --log_dense_base=2.0 --transition_batch_size=1 --growth_rate_multiplier=1 --bottleneck_width=4.0 --reduction_ratio=0.5 --b_type=bottleneck 

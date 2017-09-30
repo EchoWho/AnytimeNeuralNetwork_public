@@ -138,36 +138,47 @@ def stack_loss_weights(N, stack, method=sieve_loss_weights):
     weights[(N-1)%stack:N:stack] = method(1+(N-1)//stack)
     return weights
 
-def loss_weights(N, args):
+
+def loss_weights(N, args, cfg=None):
+    if hasattr(args, "weights_at_block_ends") and args.weights_at_block_ends:
+        N = len(cfg)
+
     FUNC_TYPE = args.func_type
     if FUNC_TYPE == 0: # exponential spacing
-        return at_func(N, func=lambda x:2**x)
+        weights = at_func(N, func=lambda x:2**x)
     elif FUNC_TYPE == 1: # square spacing
-        return at_func(N, func=lambda x:x**2)
+        weights = at_func(N, func=lambda x:x**2)
     elif FUNC_TYPE == 2: #optimal at ?
-        return optimal_at(N, args.opt_at)
+        weights = optimal_at(N, args.opt_at)
     elif FUNC_TYPE == 3: #exponential weights
-        return exponential_weights(N, base=args.exponential_base)
+        weights = exponential_weights(N, base=args.exponential_base)
     elif FUNC_TYPE == 4: #constant weights
-        return stack_loss_weights(N, args.stack, constant_weights)
+        weights = stack_loss_weights(N, args.stack, constant_weights)
     elif FUNC_TYPE == 5: # sieve with stack
-        return stack_loss_weights(N, args.stack, sieve_loss_weights)
+        weights = stack_loss_weights(N, args.stack, sieve_loss_weights)
     elif FUNC_TYPE == 6: # linear
-        return stack_loss_weights(N, args.stack, linear)
+        weights = stack_loss_weights(N, args.stack, linear)
     elif FUNC_TYPE == 7: # half constant, half optimal at -1
-        return stack_loss_weights(N, args.stack, half_constant_half_optimal)
+        weights = stack_loss_weights(N, args.stack, half_constant_half_optimal)
     elif FUNC_TYPE == 8: # quater constant, half optimal
-        return stack_loss_weights(N, args.stack, quater_constant_half_optimal)
+        weights = stack_loss_weights(N, args.stack, quater_constant_half_optimal)
     elif FUNC_TYPE == 9: # recursive heavy end
-        return stack_loss_weights(N, args.stack, recursive_heavy_end) 
+        weights = stack_loss_weights(N, args.stack, recursive_heavy_end) 
     elif FUNC_TYPE == 10: # sieve v2 
-        return stack_loss_weights(N, args.stack, sieve_loss_weights_v2)
+        weights = stack_loss_weights(N, args.stack, sieve_loss_weights_v2)
     elif FUNC_TYPE == 11: # constant = 1
-        return stack_loss_weights(N, args.stack, lambda N:constant_weights(N, normalize=False))
+        weights = stack_loss_weights(N, args.stack, lambda N:constant_weights(N, normalize=False))
     elif FUNC_TYPE == 12: # linear = 0.25...1
-        return stack_loss_weights(N, args.stack, lambda N:linear(N,normalize=False))
+        weights = stack_loss_weights(N, args.stack, lambda N:linear(N,normalize=False))
     else:
         raise NameError('func type must be either 0: exponential or 1: square' \
             + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
+        
+    if hasattr(args, "weights_at_block_ends") and args.weights_at_block_ends:
+        weights_tmp = np.zeros(np.sum(cfg))
+        weights_tmp[np.cumsum(cfg)-1] = weights
+        weights = weights_tmp
+
+    return weights
 
 
