@@ -1,12 +1,12 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 # Note that $s need to be adjusted as well. (d, s):
 # (14, 1), (26, 2), (50, 2), (101, 3), (18, 2), (34, 2), (152, 5)
 d=26  
 s=2
 DATA_DIR=${GLOBAL_DATA_DIR}
-LOG_DIR=${GLOBAL_LOG_DIR}/imagenet-ann$d/
-MODEL_DIR=${GLOBAL_MODEL_DIR}/imagenet_model/ann$d/
+LOG_DIR=${GLOBAL_LOG_DIR}/imagenet-ann${d}-f${f}
+MODEL_DIR=${GLOBAL_MODEL_DIR}/imagenet_model/ann${d}-f${f}
 CONFIG_DIR=.
 
 mkdir -p $MODEL_DIR
