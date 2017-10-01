@@ -14,10 +14,6 @@ from tensorpack import *
 ilsvrc_mean = [0.485, 0.456, 0.406][::-1] 
 ilsvrc_std = [0.229, 0.224, 0.225][::-1]
 
-## Pascal mean std info
-# std was not actually computed, just some reasonable number
-pascal_voc_mean = [122.67891434, 116.66876762, 104.00698793]
-pascal_voc_std = [96., 96., 96.]
 
 def get_distill_target_data(subset, options):
     distill_target_fn = os.path.join(options.data_dir, 'distill_targets', 
@@ -182,8 +178,8 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
         'pascal_voc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
     if isTrain:
-       ds = LocallyShuffleData(ds, 2048)
-    ds = PrefetchData(ds, 1024*8, 1)
+       ds = LocallyShuffleData(ds, 1024*7)
+    ds = PrefetchData(ds, 1024*7, 1)
     ds = LMDBDataPoint(ds, deserialize=True)
     ds = MapDataComponent(ds, lambda x: x[0].astype(np.float32), 0)
 
@@ -199,6 +195,8 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
         
     ds = MapDataComponent(ds, lambda y: one_hot(y[0]), 1)
 
+    pascal_voc_mean = dataset.PascalVOC.mean
+    pascal_voc_std = dataset.PascalVOC.std
     x_augmentors = [
         imgaug.MapImage(lambda x: (x - pascal_voc_mean)/pascal_voc_std),
     ]
