@@ -262,8 +262,7 @@ if __name__ == '__main__':
 
     elif args.ds_name == 'pascal':
         args.num_classes = 21
-        args.class_weight = np.ones(args.num_classes, dtype=np.float32)
-        args.class_weight[0] = 1e-3
+        args.class_weight = dataset.PascalVOC.class_weight[:-1]
         args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_pascal_voc_data
