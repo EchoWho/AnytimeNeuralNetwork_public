@@ -1,4 +1,5 @@
 from ..base import RNGDataFlow
+import numpy as np
 
 class PascalVOC(RNGDataFlow):
     name = 'pascal_voc'
@@ -7,6 +8,14 @@ class PascalVOC(RNGDataFlow):
 
     mean = [122.67891434, 116.66876762, 104.00698793]
     std = [96., 96., 96.]
+
+    class_weight = np.asarray([\
+        0.01564238,  1.27773941,  1.42356741,  1.14417922,  1.60704982,
+        2.1443634 ,  0.80881667,  0.55887061,  0.34558904,  0.85274589,
+        1.7184062 ,  1.03832972,  0.41796997,  1.15941226,  0.90510136,
+        0.16320343,  1.71444452,  1.56673861,  0.86603409,  0.77613521,
+        1.45208943,  0.96439946], dtype=np.float32)
+
     GTclasses = range(21) + [255]
     _cmap = {
         0: (0, 0, 0),           # background
