@@ -111,8 +111,6 @@ def compute_cfg(options):
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
-        elif options.fcdense_depth == 1000:
-            n_units_per_block = [ ]
         else:
             raise ValueError('FC dense net depth {} is undefined'\
                 .format(options.fcdense_depth))
@@ -1518,16 +1516,46 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
         assert self.network_config.s_type == 'basic'
 
+        # Precommpute the connection graph to figure out scales of each layer
+        tmp = np.zeros(self.total_units + 1, dtype=int)
+        cfg_cumsum = 1 + np.cumsum(self.network_config.n_units_per_block)
+        tmp[cfg_cumsum[:self.n_pools]] = 1
+        tmp[cfg_cumsum[self.n_pools:-1]] = -1
+        l_natural_scale = np.cumsum(tmp)
+        l_min_scale = l_natural_scale.copy()
+        l_max_scale = l_natural_scale.copy()
+        ui= -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            for k in range(n_units):
+                ui += 1
+                indices = self.dense_select_indices(ui)
+                scale_ui = l_natural_scale[ui + 1]
+                for idx in indices:
+                    if l_min_scale[idx] > scale_ui:
+                        l_min_scale[idx] = scale_ui
+                    if l_max_scale[idx] < scale_ui:
+                        l_max_scale[idx] = scale_ui
+        self.l_natural_scale = l_natural_scale
+        self.l_min_scale = l_min_scale
+        self.l_max_scale = l_max_scale
+        for i in range(self.total_units+1):
+            logger.info("{} natural: {}  min : {}  max : {}".format(i, l_natural_scale[i],
+                l_min_scale[i], l_max_scale[i]))
+
 
     def compute_transition_up(self, pls, skip_pls, trans_idx):
         """ for each previous layer, transition it up with deconv2d i.e., 
             conv2d_transpose
         """
+        scale_bi = self.n_pools * 2 - 1 - trans_idx
         new_pls = []
         for pli, pl in enumerate(pls):
             if pli < len(skip_pls):
                 new_pls.append(skip_pls[pli])
                 continue 
+            if self.l_min_scale[pli] > scale_bi:
+                new_pls.append(None)
+                continue
             # implied that skip_pls is exhausted
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
                 ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
