@@ -176,7 +176,7 @@ def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
 
 def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     side = 224
-    n_classes = 22 # include 0 : background ; 21 : void
+    n_classes = 21 # include 0 : background ; 21 : void
     isTrain = subset[:5] == 'train' and do_multiprocess
     lmdb_path = os.path.join(options.data_dir, 'pascal_voc_lmdb', 
         'pascal_voc2012_{}.lmdb'.format(subset))
@@ -187,12 +187,15 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     ds = LMDBDataPoint(ds, deserialize=True)
     ds = MapDataComponent(ds, lambda x: x[0].astype(np.float32), 0)
 
-    def one_hot(y_img, n_classes=n_classes):
+    def one_hot(y_img, n_classes=n_classes, last_is_void=True):
         assert len(y_img.shape) == 2
-        y_img[y_img >= n_classes] = n_classes - 1
+        y_img[y_img >= n_classes] = n_classes
         h, w = y_img.shape
-        return np.eye(n_classes, dtype=np.float32)[y_img.astype(int).reshape([-1])]\
-            .reshape([h,w,n_classes])
+        y_one_hot = np.eye(n_classes + int(last_is_void), dtype=np.float32)
+        y_one_hot = y_one_hot[y_img.astype(int).reshape([-1])].reshape([h,w,-1])
+        if last_is_void:
+            y_one_hot = y_one_hot[:,:,:-1]
+        return y_one_hot
         
     ds = MapDataComponent(ds, lambda y: one_hot(y[0]), 1)
 
