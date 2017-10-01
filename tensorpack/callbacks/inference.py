@@ -182,14 +182,11 @@ class MeanIoUFromConfusionMatrix(Inferencer):
         return [self.cm_name]
 
     def _before_inference(self):
-        self.total_cm = None 
+        self.total_cm = 0 
 
     def _datapoint(self, output):
         cm = output[0]
-        if self.total_cm is None:
-            self.total_cm = cm
-        else:
-            self.total_cm += cm
+        self.total_cm += cm
 
     def _after_inference(self):
         n_classes = self.total_cm.shape[0]
@@ -212,6 +209,7 @@ class MeanIoUFromConfusionMatrix(Inferencer):
         pixel_accu = np.sum(inter) / np.sum(self.total_cm)
 
         ret = dict()
+        ret[self.prefix + 'n_samples'] = n_samples
         ret[self.prefix + 'mean_iou'] = mean_iou
         ret[self.prefix + 'pixel_accu'] = pixel_accu 
         for ci, iou in enumerate(l_iou):
