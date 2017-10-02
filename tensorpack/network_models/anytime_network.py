@@ -111,8 +111,6 @@ def compute_cfg(options):
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
-        elif options.fcdense_depth == 1000:
-            n_units_per_block = [ ]
         else:
             raise ValueError('FC dense net depth {} is undefined'\
                 .format(options.fcdense_depth))
@@ -457,7 +455,7 @@ class AnytimeNetwork(ModelDesc):
             if DATA_FORMAT == 'NCHW':
                 image = tf.transpose(image, [0,3,1,2])
 
-            dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
+            self.dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
             ll_feats = self._compute_ll_feats(image)
             
             if self.options.stop_gradient:
@@ -909,7 +907,10 @@ class AnytimeDensenet(AnytimeNetwork):
             # force connect to all of first block
             indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
         if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
-            # force connect to end of each block 
+            # force connect to end of the first three blocks 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block[:3]))
+        if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
+            # force connect to end of all blocks 
             indices.extend(np.cumsum(self.network_config.n_units_per_block))
 
         indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
@@ -1273,21 +1274,25 @@ class AnytimeFCN(AnytimeNetwork):
 
         l_mask = []
         l_label = []
+        l_dyn_hw = []
         label_img = tf.identity(label_img, name='label_img_0')
 
         for pi in range(self.n_pools+1):
             l_mask.append(nonvoid_mask(label_img, 'eval_mask_{}'.format(pi)))
             l_label.append(flatten_label(label_img, 'label_{}'.format(pi)))
+            img_shape = tf.shape(label_img)
+            # Note that input is always NHWC. 
+            l_dyn_hw.append([img_shape[1], img_shape[2]])
             if pi == self.n_pools:
                 break
             label_img = AvgPooling('label_img_{}'.format(pi+1), label_img, 2, \
                                    padding='SAME', data_format='NHWC')
 
-        return image, [l_label, l_mask]
+        return image, [l_label, l_mask, l_dyn_hw]
 
 
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
-        l_label, l_eval_mask = label_inputs
+        l_label, l_eval_mask, l_dyn_hw = label_inputs
         # Assume all previous layers have gone through BNReLU, so conv directly
         l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
@@ -1312,6 +1317,7 @@ class AnytimeFCN(AnytimeNetwork):
 
         label = l_label[label_img_idx] # note this is a probability of label distri
         eval_mask = l_eval_mask[label_img_idx]
+        dyn_hw = l_dyn_hw[label_img_idx]
 
         n_non_void_samples = tf.reduce_sum(eval_mask)
         n_non_void_samples += tf.cast(tf.less_equal(n_non_void_samples, 1e-12), tf.float32)
@@ -1321,6 +1327,8 @@ class AnytimeFCN(AnytimeNetwork):
         # Square error between distributions. 
         # Implement our own here b/c class weighting.
         prob = tf.nn.softmax(logits, name='pred_prob')
+        prob_img_shape = tf.stack([-1,  dyn_hw[0], dyn_hw[1], self.num_classes])
+        prob_img = tf.reshape(prob, prob_img_shape, name='pred_prob_img') 
         sqr_err = tf.reduce_sum(\
             tf.multiply(tf.square(label - prob), self.class_weight), \
             axis=1, name='pixel_prob_square_err')
@@ -1410,7 +1418,9 @@ class FCDensenet(AnytimeFCN):
         with tf.variable_scope('TU_{}'.format(bi)) as scope:
             stack = tf.concat(l_layers, CHANNEL_DIM, name='concat_recent')
             ch_out = stack.get_shape().as_list()[CHANNEL_DIM]
-            stack = Deconv2D('deconv', stack, ch_out, 3, 2)
+            dyn_h = tf.shape(skip_stack)[HEIGHT_DIM]
+            dyn_w = tf.shape(skip_stack)[WIDTH_DIM]
+            stack = Deconv2D('deconv', stack, ch_out, 3, 2, dyn_hw=[dyn_h, dyn_w])
             stack = tf.concat([skip_stack, stack], CHANNEL_DIM, name='concat_skip')
         return stack
 
@@ -1474,9 +1484,13 @@ class FCDensenet(AnytimeFCN):
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr)
+        opt = None
+        if hasattr(self.options, 'optimizer'):
+            if self.options.optimizer == 'rmsprop':
+                opt = tf.train.RMSPropOptimizer(lr)
+        if opt is None:
+            opt = tf.train.MomentumOptimizer(lr, 0.9)
         return opt
-
 
 
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
@@ -1502,22 +1516,55 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
         assert self.network_config.s_type == 'basic'
 
+        # Precommpute the connection graph to figure out scales of each layer
+        tmp = np.zeros(self.total_units + 1, dtype=int)
+        cfg_cumsum = 1 + np.cumsum(self.network_config.n_units_per_block)
+        tmp[cfg_cumsum[:self.n_pools]] = 1
+        tmp[cfg_cumsum[self.n_pools:-1]] = -1
+        l_natural_scale = np.cumsum(tmp)
+        l_min_scale = l_natural_scale.copy()
+        l_max_scale = l_natural_scale.copy()
+        ui= -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            for k in range(n_units):
+                ui += 1
+                indices = self.dense_select_indices(ui)
+                scale_ui = l_natural_scale[ui + 1]
+                for idx in indices:
+                    if l_min_scale[idx] > scale_ui:
+                        l_min_scale[idx] = scale_ui
+                    if l_max_scale[idx] < scale_ui:
+                        l_max_scale[idx] = scale_ui
+        self.l_natural_scale = l_natural_scale
+        self.l_min_scale = l_min_scale
+        self.l_max_scale = l_max_scale
+        for i in range(self.total_units+1):
+            logger.info("{} natural: {}  min : {}  max : {}".format(i, l_natural_scale[i],
+                l_min_scale[i], l_max_scale[i]))
+
 
     def compute_transition_up(self, pls, skip_pls, trans_idx):
         """ for each previous layer, transition it up with deconv2d i.e., 
             conv2d_transpose
         """
+        scale_bi = self.n_pools * 2 - 1 - trans_idx
         new_pls = []
         for pli, pl in enumerate(pls):
             if pli < len(skip_pls):
                 new_pls.append(skip_pls[pli])
                 continue 
+            if self.l_min_scale[pli] > scale_bi:
+                new_pls.append(None)
+                continue
             # implied that skip_pls is exhausted
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
                 ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
                 ch_out = int(ch_in * self.reduction_ratio)
+                dyn_h = tf.shape(skip_pls[0])[HEIGHT_DIM]
+                dyn_w = tf.shape(skip_pls[0])[WIDTH_DIM]
                 #kernel_shape=3, stride=2
-                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2, nl=BNReLU))
+                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
+                    dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
         return new_pls
 
 
@@ -1558,12 +1605,6 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         assert len(ll_feats) == self.total_units
         return ll_feats
 
-    def _get_optimizer(self):
-        assert self.options.init_lr > 0, self.options.init_lr
-        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.RMSPropOptimizer(lr)
-        return opt
-
 
 ## Version 2 of anytime FCN for dense-net
 # 
@@ -1589,8 +1630,12 @@ class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):
             #ch_new = l.get_shape().as_list()[CHANNEL_DIM]
             #ch_old = bcml.get_shape().as_list()[CHANNEL_DIM] 
             #ch_skip = sml.get_shape().as_list()[CHANNEL_DIM] 
-            l = Deconv2D('deconv_new', l, ch_out, 3, 2, nl=BNReLU)
-            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, nl=BNReLU)
+            dyn_h = tf.shape(sml)[HEIGHT_DIM]
+            dyn_w = tf.shape(sml)[WIDTH_DIM]
+            l = Deconv2D('deconv_new', l, ch_out, 3, 2, 
+                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
+            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, 
+                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
             bcml = tf.concat([sml, l, bcml], CHANNEL_DIM, name='concat_all')
         return bcml
 
