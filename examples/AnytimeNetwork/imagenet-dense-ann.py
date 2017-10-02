@@ -24,18 +24,12 @@ import get_augmented_data
 args = None
 INPUT_SIZE = 224
 
-def get_data(train_or_test):
-    return get_augmented_data.get_ilsvrc_augmented_data(train_or_test, args)
-
+get_data = get_augmented_data.get_ilsvrc_augmented_data
 
 def get_config(model_cls):
     # prepare dataset
-    if args.is_toy:
-        dataset_train = get_data('toy_train')
-        dataset_val = get_data('toy_validation')
-    else:
-        dataset_train = get_data('train')
-        dataset_val = get_data('val') #val for caffe style meta input; validation for tf-slim
+    dataset_train = get_data('train', args, do_multiprocess=True)
+    dataset_val = get_data('val', args, do_multiprocess=True)
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
     model=model_cls(INPUT_SIZE, args)
@@ -44,7 +38,7 @@ def get_config(model_cls):
     #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
 
     lr_rate = args.lr_divider
-    lr_schedule = [(1, 1e-1 / lr_rate), (60, 1e-2 / lr_rate ), (90, 1e-3 / lr_rate), (105, 1e-4 / lr_rate)]
+    lr_schedule = [(1, 1e-1 / lr_rate), (30, 1e-2 / lr_rate ), (60, 1e-3 / lr_rate) ]
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
@@ -55,7 +49,7 @@ def get_config(model_cls):
         ] + loss_select_cbs,
         model=model,
         steps_per_epoch=steps_per_epoch,
-        max_epoch=128,
+        max_epoch=90,
     )
 
 def eval_on_ILSVRC12(model_file, data_dir):
@@ -111,18 +105,14 @@ if __name__ == '__main__':
     assert args.mean is not None and args.std is not None
 
     # Scale learning rate with the batch size linearly 
-    args.lr_divider = 2.0 * 256.0 / args.batch_size 
+    divider_at_256 = 1.0
+    args.lr_divider = divider_at_256 * 256.0 / args.batch_size 
     args.init_lr = 1e-1 / args.lr_divider
-    args.batch_norm_decay=0.9**(2.0/args.lr_divider)  # according to Torch blog
+    args.batch_norm_decay=0.9**(divider_at_256 / args.lr_divider)  # according to Torch blog
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
-
-    #if args.eval:
-    #    BATCH_SIZE = 128    # something that can run on one gpu
-    #    eval_on_ILSVRC12(args.load, args.data_dir)
-    #    sys.exit()
 
     config = get_config(model_cls)
     if args.load and os.path.exists(args.load):
