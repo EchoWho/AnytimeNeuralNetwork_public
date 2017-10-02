@@ -1,6 +1,5 @@
 #!/bin/bash
 
-#for i in {2327..2428} {2431..2450} {2453..2503} {2498..2500}
 for i in {2498..2500}
 do
 
@@ -10,7 +9,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="2"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -81,7 +80,6 @@ done
 # Exp 43:
 # 2144..2245
 # Num gpus: 1
-
 
 # Exp 44:
 # 2248..2298
