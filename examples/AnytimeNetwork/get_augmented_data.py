@@ -14,10 +14,6 @@ from tensorpack import *
 ilsvrc_mean = [0.485, 0.456, 0.406][::-1] 
 ilsvrc_std = [0.229, 0.224, 0.225][::-1]
 
-## Pascal mean std info
-# std was not actually computed, just some reasonable number
-pascal_voc_mean = [122.67891434, 116.66876762, 104.00698793]
-pascal_voc_std = [96., 96., 96.]
 
 ## Cityscapes mean std info
 # std was not actually computed, just some reasonable number
@@ -181,36 +177,47 @@ def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
 
 def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     side = 224
-    n_classes = 22 # include 0 : background ; 21 : void
+    n_classes = 21 # include 0 : background ; 21 : void
     isTrain = subset[:5] == 'train' and do_multiprocess
     lmdb_path = os.path.join(options.data_dir, 'pascal_voc_lmdb', 
         'pascal_voc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
     if isTrain:
-       ds = LocallyShuffleData(ds, 2048)
-    ds = PrefetchData(ds, 1024*8, 1)
+       ds = LocallyShuffleData(ds, 1024*7)
+    ds = PrefetchData(ds, 1024*7, 1)
     ds = LMDBDataPoint(ds, deserialize=True)
     ds = MapDataComponent(ds, lambda x: x[0].astype(np.float32), 0)
 
-    def one_hot(y_img, n_classes=n_classes):
+    def one_hot(y_img, n_classes=n_classes, last_is_void=True):
         assert len(y_img.shape) == 2
-        y_img[y_img >= n_classes] = n_classes - 1
+        y_img[y_img >= n_classes] = n_classes
         h, w = y_img.shape
-        return np.eye(n_classes, dtype=np.float32)[y_img.astype(int).reshape([-1])]\
-            .reshape([h,w,n_classes])
+        y_one_hot = np.eye(n_classes + int(last_is_void), dtype=np.float32)
+        y_one_hot = y_one_hot[y_img.astype(int).reshape([-1])].reshape([h,w,-1])
+        if last_is_void:
+            y_one_hot = y_one_hot[:,:,:-1]
+        return y_one_hot
         
     ds = MapDataComponent(ds, lambda y: one_hot(y[0]), 1)
 
+    pascal_voc_mean = dataset.PascalVOC.mean
+    pascal_voc_std = dataset.PascalVOC.std
     x_augmentors = [
         imgaug.MapImage(lambda x: (x - pascal_voc_mean)/pascal_voc_std),
     ]
-    xy_augmentors = [
-        imgaug.ResizeShortestEdge(side),
-        imgaug.RotationAndCropValid(max_deg=10),
-        imgaug.Flip(horiz=True),
-        imgaug.GaussianBlur(max_size=3)
-        imgaug.RandomCrop((side, side)),
-    ]
+    if isTrain:
+        xy_augmentors = [
+            imgaug.RotationAndCropValid(max_deg=10),
+            imgaug.Flip(horiz=True),
+            imgaug.GaussianBlur(max_size=3),
+            imgaug.ResizeShortestEdge(256),
+            imgaug.RandomCrop((side, side)),
+        ]
+    else:
+        xy_augmentors = [
+            imgaug.ResizeShortestEdge(256),
+            imgaug.CenterCrop((side, side)),
+        ]
     if len(xy_augmentors) > 0:
         ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
     if len(x_augmentors) > 0:
