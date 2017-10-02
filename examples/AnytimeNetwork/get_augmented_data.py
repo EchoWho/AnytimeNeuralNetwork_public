@@ -19,6 +19,11 @@ ilsvrc_std = [0.229, 0.224, 0.225][::-1]
 pascal_voc_mean = [122.67891434, 116.66876762, 104.00698793]
 pascal_voc_std = [96., 96., 96.]
 
+## Cityscapes mean std info
+# std was not actually computed, just some reasonable number
+cityscapes_mean = [ 72.02736664,  81.89767456,  71.22579956]  # From 100 imgs
+cityscapes_std = [96., 96., 96.]  # From 100 imgs: [ 45.83293352,  46.73820686,  45.81782445]
+
 def get_distill_target_data(subset, options):
     distill_target_fn = os.path.join(options.data_dir, 'distill_targets', 
         '{}_distill_target_{}.bin'.format(options.ds_name, subset))
@@ -205,6 +210,48 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
         imgaug.Flip(horiz=True),
         imgaug.GaussianBlur(max_size=3)
         imgaug.RandomCrop((side, side)),
+    ]
+    if len(xy_augmentors) > 0:
+        ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
+    if len(x_augmentors) > 0:
+        ds = AugmentImageComponent(ds, x_augmentors, copy=False)
+    if do_multiprocess:
+        ds = PrefetchData(ds, 5, 5)
+    ds = BatchData(ds, options.batch_size // options.nr_gpu, remainder=not isTrain)
+    return ds
+
+
+def get_cityscapes_augmented_data(subset, options, do_multiprocess=True):
+    side = 224
+    n_classes = 35 # include 0 : background ; -1 : license plate
+    isTrain = subset[:5] == 'train' and do_multiprocess
+    lmdb_path = os.path.join(options.data_dir, 'cityscapes_lmdb',
+                             'cityscapes_{}.lmdb'.format(subset))
+    ds = LMDBData(lmdb_path, shuffle=False)
+    if isTrain:
+        ds = LocallyShuffleData(ds, 2048)
+    ds = PrefetchData(ds, 1024*8, 1)
+    ds = LMDBDataPoint(ds, deserialize=True)
+    ds = MapDataComponent(ds, lambda x: x[0].astype(np.float32), 0)
+
+    def one_hot(y_img, n_classes=n_classes):
+        assert len(y_img.shape) == 2
+        # y_img[y_img >= n_classes] = n_classes - 1
+        h, w = y_img.shape
+        return np.eye(n_classes, dtype=np.float32)[y_img.astype(int).reshape([-1])] \
+            .reshape([h,w,n_classes])
+
+    ds = MapDataComponent(ds, lambda y: one_hot(y[0]), 1)
+
+    x_augmentors = [
+        imgaug.MapImage(lambda x: (x - cityscapes_mean)/cityscapes_std),
+    ]
+    xy_augmentors = [
+        imgaug.ResizeShortestEdge(side),
+        imgaug.RotationAndCropValid(max_deg=10),
+        imgaug.Flip(horiz=True),
+        imgaug.RandomCrop((side, side)),
+        imgaug.GaussianBlur(max_size=3)
     ]
     if len(xy_augmentors) > 0:
         ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
