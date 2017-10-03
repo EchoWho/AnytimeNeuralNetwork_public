@@ -38,7 +38,7 @@ def get_config(model_cls):
     #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
 
     lr_rate = args.lr_divider
-    lr_schedule = [(1, 1e-1 / lr_rate), (30, 1e-2 / lr_rate ), (60, 1e-3 / lr_rate) ]
+    lr_schedule = [(1, 1e-1 / lr_rate), (50, 1e-2 / lr_rate ), (75, 1e-3 / lr_rate) ]
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
@@ -49,7 +49,7 @@ def get_config(model_cls):
         ] + loss_select_cbs,
         model=model,
         steps_per_epoch=steps_per_epoch,
-        max_epoch=90,
+        max_epoch=102,
     )
 
 def eval_on_ILSVRC12(model_file, data_dir):
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     assert args.mean is not None and args.std is not None
 
     # Scale learning rate with the batch size linearly 
-    divider_at_256 = 1.0
+    divider_at_256 = 2.0
     args.lr_divider = divider_at_256 * 256.0 / args.batch_size 
     args.init_lr = 1e-1 / args.lr_divider
     args.batch_norm_decay=0.9**(divider_at_256 / args.lr_divider)  # according to Torch blog
