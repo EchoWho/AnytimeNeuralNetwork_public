@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {2498..2500}
+for i in {2506..2556}
 do
 
 	USERNAME="dedey"
@@ -100,3 +100,7 @@ done
 # Exp 48:
 # 2453..2503
 # Num gpus: 2
+
+# Exp 49:
+# 2506..2556
+# Num gpus: 1
