@@ -35,10 +35,25 @@ def get_config(model_cls):
     model=model_cls(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
-    #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
 
     lr_rate = args.lr_divider
     lr_schedule = [(1, 1e-1 / lr_rate), (30, 1e-2 / lr_rate ), (60, 1e-3 / lr_rate) ]
+    max_epoch = 90
+    def populate_lr_schedule(lr_schedule, max_epoch):
+        lr_schedule.append((max_epoch+1, lr_schedule[-1][1]))
+        change_iter = iter(lr_schedule)
+        change = next(change_iter)
+        assert change[0] == 1
+        populated_schedule = []
+        for i in range(1,max_epoch+1):
+            if change[0] <= i:
+                lr = change[1]
+                change = next(change_iter)
+            populated_schedule.append((i, lr))
+        return populated_schedule
+    lr_schedule = populate_lr_schedule(lr_schedule, max_epoch)
+
+            
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
@@ -49,7 +64,7 @@ def get_config(model_cls):
         ] + loss_select_cbs,
         model=model,
         steps_per_epoch=steps_per_epoch,
-        max_epoch=90,
+        max_epoch=max_epoch,
     )
 
 def eval_on_ILSVRC12(model_file, data_dir):
