@@ -51,7 +51,7 @@ def get_config(model_cls):
                 change = next(change_iter)
             populated_schedule.append((i, lr))
         return populated_schedule
-    lr_schedule = populated_schedule(lr_schedule, max_epoch)
+    lr_schedule = populate_lr_schedule(lr_schedule, max_epoch)
 
             
     return TrainConfig(
