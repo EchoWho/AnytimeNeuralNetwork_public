@@ -42,12 +42,13 @@ def get_config():
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
+            ModelSaver(checkpoint_dir=args.model_dir, keep_freq=10000),
             InferenceRunner(dataset_val, classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate'),
         ] + loss_select_cbs,
         model=model,
+        monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=128,
     )
