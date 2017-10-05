@@ -65,6 +65,6 @@ export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-dense-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
---model_dir=$MODEL_DIR \
+--model_dir=$LOG_DIR \
 --load=${MODEL_DIR}/checkpoint \
 --densenet_version=atv2 --densenet_depth=265 -s=30 -g=40 --batch_size=128 --nr_gpu=4 -f=10 --opt_at=-1 --samloss=6 --num_classes=1000 --dense_select_method=0 --log_dense_base=2.0 --reduction_ratio=0.5 --transition_batch_size=1 --growth_rate_multiplier=1 --bottleneck_width=4.0 --b_type=bottleneck 
