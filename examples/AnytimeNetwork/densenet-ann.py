@@ -34,13 +34,14 @@ def get_config(ds_trian, ds_val, model_cls):
     return TrainConfig(
         dataflow=ds_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
+            ModelSaver(checkpoint_dir=args.model_dir, keep_freq=10000),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate')
         ] + loss_select_cbs,
         model=model,
+        monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
     )
