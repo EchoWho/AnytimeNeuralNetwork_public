@@ -1,22 +1,16 @@
 #!/bin/bash
 
-# Exp 49:
-# 2506..2556
-# Num gpus: 1
 
-# Exp 50:
-# 2559..2561
-# Num gpus: 4
 for i in {2506..2556}
 do
 
 	USERNAME="dedey"
-	PASSWORD="Valar2god?"
-	CLUSTER="gcr"
+	PASSWORD="Will2god?"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="2"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"

@@ -8,7 +8,7 @@ sudo mount -t cifs //storage.gcr.philly.selfhost.corp.microsoft.com/msrlabs_scra
 # Copy AnytimeNeuralNetwork contents to /mnt/msrlabs_scratch_dedey/AnytimeNeuralNetwork
 sudo cp -r /home/dedey/AnytimeNeuralNetwork/* /mnt/msrlabs_scratch_dedey/AnytimeNeuralNetwork_master
 
-# Unmount the /mnt/pnrsy_scratch_dedey folder
+# Unmount the /mnt/msrlabs_scratch_dedey folder
 sudo umount /mnt/msrlabs_scratch_dedey
 
 echo "Copying code to cam"
@@ -19,5 +19,5 @@ sudo mount -t cifs //storage.cam.philly.selfhost.corp.microsoft.com/msrlabs_scra
 # Copy AnytimeNeuralNetwork contents to /mnt/msrlabs_scratch_dedey/AnytimeNeuralNetwork
 sudo cp -r /home/dedey/AnytimeNeuralNetwork/* /mnt/msrlabs_scratch_dedey/AnytimeNeuralNetwork_master
 
-# Unmount the /mnt/pnrsy_scratch_dedey folder
+# Unmount the /mnt/msrlabs_scratch_dedey folder
 sudo umount /mnt/msrlabs_scratch_dedey
