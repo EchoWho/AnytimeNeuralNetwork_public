@@ -42,13 +42,13 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         xy_augmentors = [
             #imgaug.RotationAndCropValid(7),
             #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-            #imgaug.RandomCrop((side, side)),
+            imgaug.RandomCrop((side, side)),
             imgaug.Flip(horiz=True),
         ]
     else:
         x_augmentors = []
         xy_augmentors = [
-            #imgaug.RandomCrop((side, side)),
+            imgaug.RandomCrop((side, side)),
         ]
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)

@@ -110,7 +110,8 @@ if __name__ == '__main__':
 
     print model_cls
 
-    assert args.num_classes == 1000
+    # ilsvrc has 1000 classes
+    args.num_classes = 1000
 
     # GPU will handle mean std transformation to save CPU-GPU communication
     args.do_mean_std_gpu_process = True
