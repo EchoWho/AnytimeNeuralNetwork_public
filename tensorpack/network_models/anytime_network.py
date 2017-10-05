@@ -1186,13 +1186,18 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
         l_adj = [ [i-1] for i in range(self.total_units+1) ]
 
         ## update l_adj connecitono on interval [a, b)
-        def loglog_connect(a, b):
+        def loglog_connect(a, b, force_connect=[]):
             if b-a <= 2:
                 return None
                 
             seg_len = b-a
             step_len = int(np.sqrt(b-a))
             key_indices = list(range(a, b, step_len))
+            if len(force_connect) > 0:
+                for fc_key in force_connect:
+                    if not fc_key in key_indices:
+                        key_indices.append(fc_key)
+                key_indices = sorted(key_indices)
             if key_indices[-1] != b-1:
                 key_indices.append(b-1)
 
@@ -1207,7 +1212,9 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                 loglog_connect(prev_key, key+1)
             return None
         
-        loglog_connect(0, self.total_units+1)
+        
+        force_connect_locs = np.cumsum(self.network_config.n_units_per_block)
+        loglog_connect(0, self.total_units+1, force_connect_locs)
         ## since the first conv is init conv that we don't count for pred.
         for i in range(self.total_units):
             l_adj[i+1] = filter(lambda x: x >= 0 and x < self.total_units, 
