@@ -101,7 +101,7 @@ if __name__ == '__main__':
     args.ds_name="ilsvrc"
     
     assert args.init_channel == 64
-    assert args.num_classes == 1000
+    args.num_classes = 1000
 
     # GPU will handle mean std transformation to save CPU-GPU communication
     args.do_mean_std_gpu_process = True
