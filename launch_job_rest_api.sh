@@ -7,12 +7,12 @@ for i in {2564..2587}
 do
 
 	USERNAME="dedey"
-	PASSWORD="Valar2god?"
-	CLUSTER="gcr"
+	PASSWORD="Will2god?"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="2"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
