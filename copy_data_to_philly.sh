@@ -1,7 +1,7 @@
 
 export PHILLY_VC=msrlabs
 
-local_folder=/home/dedey/DATADRIVE1/ann_data_dir/pascal_voc_lmdb
+local_folder=/home/dedey/DATADRIVE1/ann_data_dir/camvid
 remote_folder_gcr=hdfs://gcr/msrlabs/dedey/ann_data_dir/
 remote_folder_cam=hdfs://cam/msrlabs/dedey/ann_data_dir/
 
