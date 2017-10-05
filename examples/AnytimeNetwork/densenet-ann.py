@@ -10,7 +10,9 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
+from tensorpack.network_models.anytime_network import \
+AnytimeDensenet, DenseNet, AnytimeLogDensenetV2, AnytimeLogLogDenseNet
+
 
 from get_augmented_data import get_cifar_augmented_data, get_svhn_augmented_data
 
@@ -79,6 +81,9 @@ if __name__ == '__main__':
         lr_multiplier *= 2.0
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
+        lr_multiplier *= 1
+    elif args.densenet_version == 'loglog':
+        model_cls = AnytimeLogLogDenseNet
         lr_multiplier *= 1
 
     logger.set_log_root(log_root=args.log_dir)

@@ -770,7 +770,7 @@ def parser_add_densenet_arguments(parser):
                              help='depth of densenet for predefined networks',
                              type=int)
     parser.add_argument('--densenet_version', help='specify the version of densenet to use',
-                        type=str, default='atv1', choices=['atv1', 'atv2', 'dense'])
+                        type=str, default='atv1', choices=['atv1', 'atv2', 'dense', 'loglog'])
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
     parser.add_argument('--bottleneck_width', help='multiplier of growth for width of bottleneck',
@@ -835,6 +835,26 @@ class AnytimeDensenet(AnytimeNetwork):
             self.options.ls_method = BEST_AANN_METHOD
             self.options.samloss = BEST_AANN_METHOD
 
+    def dense_select_early_connect(self, ui, indices):
+        if self.early_connect_type == 0:
+            # default 0 does nothing
+            pass
+        if self.early_connect_type % 2 ==  1:  #e.g., 1
+            # force connection to end of first block
+            indices.append(self.network_config.n_units_per_block[0])
+        if (self.early_connect_type >> 1) % 2 == 1:  #e.g., 2
+            # force connect to all of first block
+            indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
+        if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
+            # force connect to end of the first three blocks 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block[:3]))
+        if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
+            # force connect to end of all blocks 
+            indices.extend(np.cumsum(self.network_config.n_units_per_block))
+
+        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
+        return indices
+
 
     def dense_select_indices(self, ui):
         """
@@ -879,7 +899,7 @@ class AnytimeDensenet(AnytimeNetwork):
                     diffs.append(int_df)
                 df += delta
         elif self.dense_select_method == 4: 
-            #actual dense net
+            # select all
             diffs = list(range(ui+1))
         elif self.dense_select_method == 5: 
             # mini dense (only close to the last layer) 
@@ -897,23 +917,6 @@ class AnytimeDensenet(AnytimeNetwork):
                 diffs.append(df)
 
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
-        if self.early_connect_type == 0:
-            # default 0 does nothing
-            pass
-        if self.early_connect_type % 2 ==  1:  #e.g., 1
-            # force connection to end of first block
-            indices.append(self.network_config.n_units_per_block[0])
-        if (self.early_connect_type >> 1) % 2 == 1:  #e.g., 2
-            # force connect to all of first block
-            indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
-        if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
-            # force connect to end of the first three blocks 
-            indices.extend(np.cumsum(self.network_config.n_units_per_block[:3]))
-        if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
-            # force connect to end of all blocks 
-            indices.extend(np.cumsum(self.network_config.n_units_per_block))
-
-        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
         return indices
 
     def compute_block(self, pls, pmls, n_units, growth):
@@ -931,6 +934,7 @@ class AnytimeDensenet(AnytimeNetwork):
             scope_name = self.compute_scope_basename(unit_idx)
             with tf.variable_scope(scope_name+'.feat'):
                 sl_indices = self.dense_select_indices(unit_idx)
+                sl_indices = self.dense_select_early_connect(unit_idx, sl_indices)
                 logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     unit_idx, len(pls), sl_indices))
                 
@@ -941,6 +945,8 @@ class AnytimeDensenet(AnytimeNetwork):
                 #ml = BNReLU('bnrelu_merged', ml)
                 if self.network_config.b_type == 'bottleneck':
                     bottleneck_width = int(self.options.bottleneck_width * growth)
+                    ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
+                    bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
@@ -1160,6 +1166,58 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
         assert len(ll_feats) == self.total_units
         return ll_feats
 
+############################
+# The craziness of Log-Log dense
+############################
+class AnytimeLogLogDenseNet(AnytimeDensenet):
+    def __init__(self, input_size, args):
+        super(AnytimeLogLogDenseNet, self).__init__(input_size, args)
+        self.connections = self.pre_compute_connections()
+
+
+    ## pre compute connections for log-log dense as it is rather complicated
+    # construct connection adjacency list for backprop
+    # The pls starts with the initial conv which has index 0, so that it is 1-based. 
+    # The input ui is 0-based. Hence, e.g., ui (input) always connects to 
+    # pls[ui], which is the previous layer of input[ui]. 
+    def pre_compute_connections(self):
+        # Everything is connected to the previous layer
+        # l_adj[0] is a placeholder, so ignore that it connects to -1.
+        l_adj = [ [i-1] for i in range(self.total_units+1) ]
+
+        ## update l_adj connecitono on interval [a, b)
+        def loglog_connect(a, b):
+            if b-a <= 2:
+                return None
+                
+            seg_len = b-a
+            step_len = int(np.sqrt(b-a))
+            key_indices = list(range(a, b, step_len))
+            if key_indices[-1] != b-1:
+                key_indices.append(b-1)
+
+            # connection at the current recursion depth
+            for ki, key in enumerate(key_indices):
+                if ki == 0:
+                     continue
+                for prev_key in key_indices[:ki]:
+                    if not prev_key in l_adj[key]:
+                        l_adj[key].append(prev_key)
+                prev_key = key_indices[ki-1]
+                loglog_connect(prev_key, key+1)
+            return None
+        
+        loglog_connect(0, self.total_units+1)
+        ## since the first conv is init conv that we don't count for pred.
+        for i in range(self.total_units):
+            l_adj[i+1] = filter(lambda x: x >= 0 and x < self.total_units, 
+                np.unique(l_adj[i+1]))
+        return l_adj[1:]
+            
+        
+    def dense_select_indices(self, ui): 
+        return self.connections[ui]
+    
 
 ################################################
 # FCN for semantic labeling
