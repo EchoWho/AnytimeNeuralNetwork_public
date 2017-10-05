@@ -198,6 +198,10 @@ if __name__ == '__main__':
                         default=False, action='store_true')
     parser.add_argument('--eval',  help='whether do evaluation only',
                         default=False, action='store_true')
+    parser.add_argument('--is_philly', help='Whether the script is running in a phily script',
+                        default=False, action='store_true')
+    parser.add_argument('--operation', help='Current operation',
+                        default='train', choices=['finetune', 'evaluate'])
     parser.add_argument('--finetune',  help='whether do fine tuning',
                         default=False, action='store_true')
     parser.add_argument('--display_period', help='Display at eval every # of image; 0 means no display',
@@ -212,10 +216,24 @@ if __name__ == '__main__':
     logger.info("TF version: {}".format(tf.__version__))
     fs.set_dataset_path(args.data_dir)
 
+
+    ## 
+    # Store a philly_operation.txt in root log dir
+    # every run will check it if the script is run on philly
+    # philly_operation.txt  should contain the same step that is current running
+    # if it does not exit, the default is written there (train)
+    if args.is_philly:
+        philly_operation_fn = os.path.join(args.log_dir, 'philly_operation.txt')
+        if not os.path.exists(philly_operation_fn):
+            with open(philly_operation_fn, 'wt') as fout:
+                fout.write(args.operation)
+        else:
+            with open(philly_operation_fn, 'rt') as fin:
+                philly_operation = fin.read().strip()
+            if philly_operation != args.operation:
+                sys.exit()
+
     ## Set dataset-network specific assert/info
-    #
-    # Make sure the input images have H/W that are divisible by
-    # 2**n_pools; see tensorpack/network_models/anytime_network.py
     if args.ds_name == 'camvid':
         args.num_classes = dataset.Camvid.non_void_nclasses
         # the last weight is for void
@@ -243,9 +261,9 @@ if __name__ == '__main__':
             lr_schedule.append((i+1, lr))
 
     elif args.ds_name == 'pascal':
-        args.num_classes = 22
-        args.class_weight = np.ones(args.num_classes, dtype=np.float32)
-        args.class_weight[0] = 1e-3
+        args.num_classes = 21
+        args.class_weight = dataset.PascalVOC.class_weight[:-1]
+        args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_pascal_voc_data
 
@@ -257,11 +275,12 @@ if __name__ == '__main__':
         ds_train = get_data('train_extra')
         ds_val = get_data('val')
 
-        max_epoch = 40
+        max_epoch = 100
         lr = args.init_lr
         lr_schedule = []
         for i in range(max_epoch):
-            lr *= args.init_lr * (1.0 - i / np.float32(max_epoch))**0.9
+            #lr *= args.init_lr * (1.0 - i / np.float32(max_epoch))**0.9
+            lr *= 0.995
             lr_schedule.append((i+1, lr))
     
     config = get_config(ds_train, ds_val, model_cls)
@@ -269,3 +288,15 @@ if __name__ == '__main__':
         config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
     SyncMultiGPUTrainer(config).train()
+
+    ## Since the current operation is done, we write the next operation to the operation.txt
+    if args.is_philly:
+        def get_next_operation(op):
+            if op == 'train':
+                return 'finetune'
+            if op == 'finetune':
+                return 'evaluate'
+            return 'done'
+        next_operation = get_next_operation(args.operation)
+        with open(philly_operation_fn, 'wt') as fout:
+            fout.write(next_operation)
