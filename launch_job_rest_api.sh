@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Exp 51:
-# 2564..2587
+# Exp 52:
+# 2590..2640
 # Num gpus: 2
-for i in {2564..2587}
+for i in {2590..2640}
 do
 
 	USERNAME="dedey"
@@ -114,4 +114,8 @@ done
 
 # Exp 51:
 # 2564..2587
+# Num gpus: 2
+
+# Exp 52:
+# 2590..2640
 # Num gpus: 2
