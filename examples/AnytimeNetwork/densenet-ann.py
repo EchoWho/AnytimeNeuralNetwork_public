@@ -84,7 +84,7 @@ if __name__ == '__main__':
         lr_multiplier *= 1
     elif args.densenet_version == 'loglog':
         model_cls = AnytimeLogLogDenseNet
-        lr_multiplier *= 1
+        lr_multiplier *= 1.0
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
