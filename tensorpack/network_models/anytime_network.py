@@ -567,11 +567,20 @@ class AnytimeNetwork(ModelDesc):
         # monitor W # Too expensive in disk space :-/
         #add_param_summary(('.*/W', ['histogram']))   
 
+
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.MomentumOptimizer(lr, 0.9)
+        opt = None
+        if hasattr(self.options, 'optimizer'):
+            if self.options.optimizer == 'rmsprop':
+                logger.info('RMSPropOptimizer')
+                opt = tf.train.RMSPropOptimizer(lr)
+        if opt is None:
+            logger.info('No optimizer was specified, using default MomentumOptimizer')
+            opt = tf.train.MomentumOptimizer(lr, 0.9)
         return opt
+
 
     def _get_select_idx(self):
         select_idx = None
@@ -1546,16 +1555,6 @@ class FCDensenet(AnytimeFCN):
         ll_feats[-1] = [stack]
         return ll_feats
 
-    def _get_optimizer(self):
-        assert self.options.init_lr > 0, self.options.init_lr
-        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = None
-        if hasattr(self.options, 'optimizer'):
-            if self.options.optimizer == 'rmsprop':
-                opt = tf.train.RMSPropOptimizer(lr)
-        if opt is None:
-            opt = tf.train.MomentumOptimizer(lr, 0.9)
-        return opt
 
 
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
