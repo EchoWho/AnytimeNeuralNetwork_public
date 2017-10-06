@@ -336,6 +336,7 @@ class AnytimeNetwork(ModelDesc):
         return vcs
 
     def compute_loss_select_callbacks(self):
+        logger.info("AANN samples with method {}".format(self.options.ls_method))
         if self.options.ls_method > 0:
             reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(self.ls_K)]
             select_idx_name = '{}:0'.format(self.select_idx_name)
@@ -567,11 +568,20 @@ class AnytimeNetwork(ModelDesc):
         # monitor W # Too expensive in disk space :-/
         #add_param_summary(('.*/W', ['histogram']))   
 
+
     def _get_optimizer(self):
         assert self.options.init_lr > 0, self.options.init_lr
         lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = tf.train.MomentumOptimizer(lr, 0.9)
+        opt = None
+        if hasattr(self.options, 'optimizer'):
+            if self.options.optimizer == 'rmsprop':
+                logger.info('RMSPropOptimizer')
+                opt = tf.train.RMSPropOptimizer(lr)
+        if opt is None:
+            logger.info('No optimizer was specified, using default MomentumOptimizer')
+            opt = tf.train.MomentumOptimizer(lr, 0.9)
         return opt
+
 
     def _get_select_idx(self):
         select_idx = None
@@ -835,7 +845,13 @@ class AnytimeDensenet(AnytimeNetwork):
             self.options.ls_method = BEST_AANN_METHOD
             self.options.samloss = BEST_AANN_METHOD
 
-    def dense_select_early_connect(self, ui, indices):
+    def dense_select_indices(self, ui):
+        indices = self._dense_select_indices(ui)
+        indices = self._dense_select_early_connect(ui, indices)
+        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
+        return indices
+
+    def _dense_select_early_connect(self, ui, indices):
         if self.early_connect_type == 0:
             # default 0 does nothing
             pass
@@ -856,7 +872,7 @@ class AnytimeDensenet(AnytimeNetwork):
         return indices
 
 
-    def dense_select_indices(self, ui):
+    def _dense_select_indices(self, ui):
         """
             ui : unit_idx
         """
@@ -934,7 +950,6 @@ class AnytimeDensenet(AnytimeNetwork):
             scope_name = self.compute_scope_basename(unit_idx)
             with tf.variable_scope(scope_name+'.feat'):
                 sl_indices = self.dense_select_indices(unit_idx)
-                sl_indices = self.dense_select_early_connect(unit_idx, sl_indices)
                 logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     unit_idx, len(pls), sl_indices))
                 
@@ -949,9 +964,11 @@ class AnytimeDensenet(AnytimeNetwork):
                     bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
+                        .Dropout('dropout', keep_prob=0.8)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
+                l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1070,6 +1087,7 @@ class DenseNet(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
+                    l = Dropout('dropout', l, keep_prob=0.8)
                 l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
                 l = Dropout('dropout', l, keep_prob=0.8)
                 pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
@@ -1119,6 +1137,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
+                    l = Dropout('dropout', l, keep_prob=0.8)
                     l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU) 
@@ -1139,10 +1158,12 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
             l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
             ch_new = l.get_shape().as_list()[CHANNEL_DIM]
             l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=BNReLU) 
+            l = Dropout('dropout_new', l, keep_prob=0.8)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
 
             ch_old = bcml.get_shape().as_list()[CHANNEL_DIM]
             bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=BNReLU) 
+            bcml = Dropout('dropout_old', bcml, keep_prob=0.8)
             bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
             
             bcml = tf.concat([bcml, l], CHANNEL_DIM, name='concat_all')
@@ -1222,7 +1243,7 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
         return l_adj[1:]
             
         
-    def dense_select_indices(self, ui): 
+    def _dense_select_indices(self, ui): 
         return self.connections[ui]
     
 
@@ -1546,16 +1567,6 @@ class FCDensenet(AnytimeFCN):
         ll_feats[-1] = [stack]
         return ll_feats
 
-    def _get_optimizer(self):
-        assert self.options.init_lr > 0, self.options.init_lr
-        lr = get_scalar_var('learning_rate', self.options.init_lr, summary=True)
-        opt = None
-        if hasattr(self.options, 'optimizer'):
-            if self.options.optimizer == 'rmsprop':
-                opt = tf.train.RMSPropOptimizer(lr)
-        if opt is None:
-            opt = tf.train.MomentumOptimizer(lr, 0.9)
-        return opt
 
 
 class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
