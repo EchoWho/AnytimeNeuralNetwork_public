@@ -8,11 +8,11 @@ do
 
 	USERNAME="dedey"
 	PASSWORD="Will2god?"
-	CLUSTER="cam"
+	CLUSTER="gcr"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="2"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
