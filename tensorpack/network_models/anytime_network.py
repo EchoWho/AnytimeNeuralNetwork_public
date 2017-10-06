@@ -964,9 +964,11 @@ class AnytimeDensenet(AnytimeNetwork):
                     bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
+                        .Dropout('dropout', keep_prob=0.8)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
+                l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1085,6 +1087,7 @@ class DenseNet(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
+                    l = Dropout('dropout', l, keep_prob=0.8)
                 l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
                 l = Dropout('dropout', l, keep_prob=0.8)
                 pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
@@ -1134,6 +1137,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
+                    l = Dropout('dropout', l, keep_prob=0.8)
                     l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU) 
@@ -1154,10 +1158,12 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
             l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
             ch_new = l.get_shape().as_list()[CHANNEL_DIM]
             l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=BNReLU) 
+            l = Dropout('dropout_new', l, keep_prob=0.8)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
 
             ch_old = bcml.get_shape().as_list()[CHANNEL_DIM]
             bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=BNReLU) 
+            bcml = Dropout('dropout_old', bcml, keep_prob=0.8)
             bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
             
             bcml = tf.concat([bcml, l], CHANNEL_DIM, name='concat_all')
