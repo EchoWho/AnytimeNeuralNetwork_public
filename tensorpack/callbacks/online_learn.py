@@ -184,7 +184,6 @@ class FixedDistributionCPU(Callback):
         self._select_readable_name, self.select_var_name = get_op_tensor_name(select_name)
 
         self._select=self.K-1
-        self.is_active=False
 
     def _setup_graph(self):
         all_vars = tf.global_variables()
@@ -202,12 +201,11 @@ class FixedDistributionCPU(Callback):
 
     def _after_run(self, ctx, run_values):
         select = run_values.results[0]
-        if self.is_active:
-            self._select = np.int32(np.argmax(np.random.multinomial(1, self.w)))
-            self.assign_selection.eval(feed_dict={self.select_holder : self._select})
+        self._select = np.int32(np.argmax(np.random.multinomial(1, self.w)))
+        self.assign_selection.eval(feed_dict={self.select_holder : self._select})
 
     def _trigger_epoch(self):
-        self.is_active = True
+        pass
  
     def _before_run(self, _):
         #print "fetch name: {}".format(self.rewards[self._select].name)
