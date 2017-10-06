@@ -960,15 +960,13 @@ class AnytimeDensenet(AnytimeNetwork):
                 #ml = BNReLU('bnrelu_merged', ml)
                 if self.network_config.b_type == 'bottleneck':
                     bottleneck_width = int(self.options.bottleneck_width * growth)
-                    ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
-                    bottleneck_width = min(ch_in, bottleneck_width)
+                    #ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
+                    #bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
-                        .Dropout('dropout', keep_prob=0.8)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
-                l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1204,11 +1202,11 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
     def pre_compute_connections(self):
         # Everything is connected to the previous layer
         # l_adj[0] is a placeholder, so ignore that it connects to -1.
-        l_adj = [ [i-1] for i in range(self.total_units+1) ]
+        l_adj = [ [i-1, i-2, i-3, i-4] for i in range(self.total_units+1) ]
 
         ## update l_adj connecitono on interval [a, b)
         def loglog_connect(a, b, force_connect=[]):
-            if b-a <= 2:
+            if b-a <= 5:
                 return None
                 
             seg_len = b-a
