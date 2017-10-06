@@ -3,7 +3,11 @@
 # Exp 52:
 # 2590..2640
 # Num gpus: 2
-for i in {2590..2640}
+
+# Exp 53:
+# 2643..2666
+# Num gpus: 2
+for i in {2590..2640} {2643..2666}
 do
 
 	USERNAME="dedey"
@@ -118,4 +122,8 @@ done
 
 # Exp 52:
 # 2590..2640
+# Num gpus: 2
+
+# Exp 53:
+# 2643..2666
 # Num gpus: 2
