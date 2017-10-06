@@ -336,6 +336,7 @@ class AnytimeNetwork(ModelDesc):
         return vcs
 
     def compute_loss_select_callbacks(self):
+        logger.info("AANN samples with method {}".format(self.options.ls_method))
         if self.options.ls_method > 0:
             reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(self.ls_K)]
             select_idx_name = '{}:0'.format(self.select_idx_name)
@@ -844,7 +845,13 @@ class AnytimeDensenet(AnytimeNetwork):
             self.options.ls_method = BEST_AANN_METHOD
             self.options.samloss = BEST_AANN_METHOD
 
-    def dense_select_early_connect(self, ui, indices):
+    def dense_select_indices(self, ui):
+        indices = self._dense_select_indices(ui)
+        indices = self._dense_select_early_connect(ui, indices)
+        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
+        return indices
+
+    def _dense_select_early_connect(self, ui, indices):
         if self.early_connect_type == 0:
             # default 0 does nothing
             pass
@@ -865,7 +872,7 @@ class AnytimeDensenet(AnytimeNetwork):
         return indices
 
 
-    def dense_select_indices(self, ui):
+    def _dense_select_indices(self, ui):
         """
             ui : unit_idx
         """
@@ -943,7 +950,6 @@ class AnytimeDensenet(AnytimeNetwork):
             scope_name = self.compute_scope_basename(unit_idx)
             with tf.variable_scope(scope_name+'.feat'):
                 sl_indices = self.dense_select_indices(unit_idx)
-                sl_indices = self.dense_select_early_connect(unit_idx, sl_indices)
                 logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     unit_idx, len(pls), sl_indices))
                 
@@ -1231,7 +1237,7 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
         return l_adj[1:]
             
         
-    def dense_select_indices(self, ui): 
+    def _dense_select_indices(self, ui): 
         return self.connections[ui]
     
 
