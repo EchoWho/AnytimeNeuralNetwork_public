@@ -1220,7 +1220,6 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
     def __init__(self, input_size, args):
         super(AnytimeLogLogDenseNet, self).__init__(input_size, args)
 
-
     ## pre compute connections for log-log dense as it is rather complicated
     # construct connection adjacency list for backprop
     # The pls starts with the initial conv which has index 0, so that it is 1-based. 
@@ -1229,18 +1228,23 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
     def _pre_compute_connections(self):
         # Everything is connected to the previous layer
         # l_adj[0] is a placeholder, so ignore that it connects to -1.
-        l_adj = [ [i-1, i-2, i-3, i-4] for i in range(self.total_units+1) ]
+        l_adj = [ [i-1] for i in range(self.total_units+1) ]
 
+        ## padding connection offset to ensure at least bn_width connections are used.
+        # i - offset is the input index
+        padding_offsets = [1, 2, 4, 8, 16, 32]
+
+        
         ## update l_adj connecitono on interval [a, b)
-        def loglog_connect(a, b, force_connect=[]):
-            if b-a <= 5:
+        def loglog_connect(a, b, force_connect_locs=[]):
+            if b-a <= 2:
                 return None
                 
             seg_len = b-a
             step_len = int(np.sqrt(b-a))
             key_indices = list(range(a, b, step_len))
-            if len(force_connect) > 0:
-                for fc_key in force_connect:
+            if len(force_connect_locs) > 0:
+                for fc_key in force_connect_locs:
                     if not fc_key in key_indices:
                         key_indices.append(fc_key)
                 key_indices = sorted(key_indices)
@@ -1255,6 +1259,9 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                     if not prev_key in l_adj[key]:
                         l_adj[key].append(prev_key)
                 prev_key = key_indices[ki-1]
+                for li in range(prev_key + 1, key):
+                    if not prev_key in l_adj[li]:
+                        l_adj[li].append(prev_key)
                 loglog_connect(prev_key, key+1)
             return None
         
@@ -1263,8 +1270,17 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
         loglog_connect(0, self.total_units+1, force_connect_locs)
         ## since the first conv is init conv that we don't count for pred.
         for i in range(self.total_units):
-            l_adj[i+1] = filter(lambda x: x >= 0 and x < self.total_units, 
-                np.unique(l_adj[i+1]))
+            l_adj[i+1] = filter(lambda x: x >= 0 and x <= i, np.unique(l_adj[i+1]))
+            if len(l_adj[i+1]) < self.bottleneck_width:
+                for offset in padding_offsets:
+                    idx = i + 1 - offset
+                    if idx < 0:
+                        break
+                    if not idx in l_adj[i+1]:
+                        l_adj[i+1].append(idx)
+                        if len(l_adj[i+1]) >= self.bottleneck_width:
+                            break
+                
         self._connections = l_adj[1:]
         
     
