@@ -87,6 +87,10 @@ def compute_cfg(options):
             n_units_per_block = [6, 12, 64, 48]
         elif options.densenet_depth == 409:
             n_units_per_block = [6, 12, 120, 64] 
+        elif options.densenet_depth == 197:
+            n_units_per_block = [16, 16, 32, 32]
+        elif options.densenet_depth == 229:
+            n_units_per_block = [16, 16, 48, 32]
         else:
             raise ValueError('densenet depth {} is undefined'\
                 .format(options.densenet_depth))
@@ -107,7 +111,7 @@ def compute_cfg(options):
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
         return NetworkConfig(n_units_per_block, b_type, s_type)
-
+ 
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
