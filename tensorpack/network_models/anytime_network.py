@@ -87,6 +87,12 @@ def compute_cfg(options):
             n_units_per_block = [6, 12, 64, 48]
         elif options.densenet_depth == 409:
             n_units_per_block = [6, 12, 120, 64] 
+        elif options.densenet_depth == 197:
+            n_units_per_block = [16, 16, 32, 32]
+        elif options.densenet_depth == 229:
+            n_units_per_block = [16, 16, 48, 32]
+        elif options.densenet_depth == 369:
+            n_units_per_block = [8, 16, 80, 80]
         else:
             raise ValueError('densenet depth {} is undefined'\
                 .format(options.densenet_depth))
@@ -107,7 +113,7 @@ def compute_cfg(options):
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
         return NetworkConfig(n_units_per_block, b_type, s_type)
-
+ 
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.fcdense_depth == 103:
             n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
@@ -246,12 +252,14 @@ class AnytimeNetwork(ModelDesc):
         self.network_config = compute_cfg(self.options)
         self.total_units = compute_total_units(self.options, self.network_config)
 
+
         # Warn user if they are using imagenet but doesn't have the right channel
         self.init_channel = args.init_channel
         if self.network_config.s_type == 'imagenet' and self.init_channel != 64:
             logger.warn('Resnet imagenet requires 64 initial channels')
 
         self.n_blocks = len(self.network_config.n_units_per_block) 
+        self.cumsum_blocks = np.cumsum(self.network_config.n_units_per_block)
         self.width = args.width
         self.num_classes = self.options.num_classes
         self.alter_label = self.options.alter_label
@@ -822,10 +830,12 @@ class AnytimeDensenet(AnytimeNetwork):
         self.reduction_ratio = self.options.reduction_ratio
         self.growth_rate = self.options.growth_rate
         self.growth_rate_multiplier = self.options.growth_rate_multiplier
-        self.transition_batch_size = self.options.transition_batch_size
-        self.use_transition_mask = self.options.use_transition_mask
         self.bottleneck_width = self.options.bottleneck_width
         self.early_connect_type = self.options.early_connect_type
+
+        ## deprecated. don't use
+        self.transition_batch_size = self.options.transition_batch_size
+        self.use_transition_mask = self.options.use_transition_mask
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
@@ -845,11 +855,58 @@ class AnytimeDensenet(AnytimeNetwork):
             self.options.ls_method = BEST_AANN_METHOD
             self.options.samloss = BEST_AANN_METHOD
 
+        ## pre-compute connection 
+        self._connections = None
+        self.connections = None # For each ui, an input list
+        self.l_max_scale = None # exists for each pls, including the init conv
+        self.pre_compute_connections()
+
+
+    ## whether pls[x] should be included for computing ui,
+    # given that pls[x] is selected already by DSM, early forcement.
+    # e.g., log-dense-v2 uses this to cut early connections to do block
+    # compression
+    def special_filter(self, ui, x):
+        return True
+
+
+    ## Some connections methods requrie some recursion or complex 
+    # functions to set all the connection together first.
+    # this will be set in self._connections.
+    # it will then be used by pre_compute_connections and 
+    # dense_select_method to be augmented with forced connections
+    # and special_filter
+    def _pre_compute_connections(self):
+        self._connections = None
+
+
+    def pre_compute_connections(self):
+        self._pre_compute_connections()
+        self.connections = []
+        self.l_max_scale = [ 0 for _ in range(self.total_units + 1) ]
+        curr_bi = 0
+        for ui in range(self.total_units):
+            if self.cumsum_blocks[curr_bi] == ui:
+                curr_bi += 1
+            self.connections.append(self.dense_select_indices(ui))
+            for i in self.connections[-1]:
+                self.l_max_scale[i] = max(self.l_max_scale[i], curr_bi)
+
+
     def dense_select_indices(self, ui):
-        indices = self._dense_select_indices(ui)
+        if self._connections is not None:
+            # the selections are precomputed. 
+            # get them for the stored list
+            indices = self._connections[ui]
+        else:
+            # the selection is not defined yet. 
+            # compute dynamically right now
+            indices = self._dense_select_indices(ui)
         indices = self._dense_select_early_connect(ui, indices)
-        indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
+        indices = filter(lambda x, ui=ui: x <=ui and x >=0 and \
+            self.special_filter(ui, x), np.unique(indices))
         return indices
+
 
     def _dense_select_early_connect(self, ui, indices):
         if self.early_connect_type == 0:
@@ -863,10 +920,10 @@ class AnytimeDensenet(AnytimeNetwork):
             indices.extend(list(range(self.network_config.n_units_per_block[0]+1))) 
         if (self.early_connect_type >> 2) % 2 == 1:  #e.g., 4
             # force connect to end of the first three blocks 
-            indices.extend(np.cumsum(self.network_config.n_units_per_block[:3]))
+            indices.extend(self.cumsum_blocks[:3])
         if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
             # force connect to end of all blocks 
-            indices.extend(np.cumsum(self.network_config.n_units_per_block))
+            indices.extend(self.cumsum_blocks)
 
         indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
         return indices
@@ -874,12 +931,18 @@ class AnytimeDensenet(AnytimeNetwork):
 
     def _dense_select_indices(self, ui):
         """
+            Given ui, return the list of indices i's such that 
+            pls[i] contribute to forming layer[ui] i.e. pls[ui+1].
+
+            For methods that can be computed directly using ui, and other
+            args, use this method to do so. 
+
+            If the computation is too complex or it is easy to pre-compute
+            all connections before hand, see loglogdense as an example, and
+            use _pre_compute_connections.
+
             ui : unit_idx
         """
-        #if ui == self.total_units - 1:
-        #    # special cast for the last, which selects all
-        #    return list(range(self.total_units))
-
         if self.dense_select_method == 0:
             # log dense
             if not hasattr(self, 'exponential_diffs'):
@@ -935,6 +998,7 @@ class AnytimeDensenet(AnytimeNetwork):
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
         return indices
 
+
     def compute_block(self, pls, pmls, n_units, growth):
         """
             pls : previous layers. including the init_feat. Hence pls[i] is from 
@@ -949,7 +1013,7 @@ class AnytimeDensenet(AnytimeNetwork):
             unit_idx += 1
             scope_name = self.compute_scope_basename(unit_idx)
             with tf.variable_scope(scope_name+'.feat'):
-                sl_indices = self.dense_select_indices(unit_idx)
+                sl_indices = self.connections[unit_idx]
                 logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     unit_idx, len(pls), sl_indices))
                 
@@ -978,69 +1042,27 @@ class AnytimeDensenet(AnytimeNetwork):
         return pls, pmls
 
 
+    ##
+    # pls (list) : list of previous layers including the init conv
+    # trans_idx (int) : curret block index bi, (the one just finished)
     def compute_transition(self, pls, trans_idx):
-        """
-            Note that this is not the same as the original densenet, 
-            which 1x1 conv the whole merged feats. Here we 1x1 each 
-            layer individually to prevent the mix.
-
-            However, since each transition (conv+pool) has overhead, 
-            transiting each layer individually is actually slow. 
-            Instead we batch self.transition_batch_size number of layers
-            together and transit them togther, and then split them
-            in order to speed up the transition. We can still 
-            enforce the independency during transition using W_mask, 
-            a mask on the transition conv weight W.
-        """
         new_pls = []
+        for pli, pl in enumerate(pls):
+            if self.l_max_scale[pli] <= trans_idx: 
+                new_pls.append(None)
+                continue
 
-        pli = 0
-        l_ch_in = [ pl.get_shape().as_list()[CHANNEL_DIM] for pl in pls]
-        l_ch_out = [ int(ch_in * self.growth_rate_multiplier * self.reduction_ratio) \
-            for ch_in in l_ch_in ]
-        while pli < len(pls):
+            ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
+            ch_out = int(ch_in * self.growth_rate_multiplier * self.reduction_ratio)
+
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
-                if self.transition_batch_size == -1:
-                    split_size = len(pls) - pli
-                else:
-                    split_size = min(len(pls) - pli, self.transition_batch_size)
-                pli_end = split_size + pli
-                if split_size == 1:
-                    pl = pls[pli]
-                    ch_in = l_ch_in[pli]
-                    ch_out = l_ch_out[pli]
-                    W_mask = None
-                else: 
-                    pl = tf.concat(pls[pli:pli_end], CHANNEL_DIM, name='concat') 
-                    ch_ins = l_ch_in[pli:pli_end]
-                    ch_outs = l_ch_out[pli:pli_end]
-                    ch_in = np.sum(ch_ins)
-                    ch_out = np.sum(ch_outs)
-                    W_mask = None
-                    if self.use_transition_mask:
-                        W_mask = np.zeros((1,1,ch_in,ch_out),dtype=np.float32) 
-                        in_start = 0
-                        out_start = 0
-                        for split in range(split_size):
-                            in_end = in_start + ch_ins[split]
-                            out_end = out_start + ch_outs[split] 
-                            # W is [kernel, kernel, in, out], so mask is the same shape
-                            W_mask[:, :, in_start:in_end, out_start:out_end] = 1.0
-                            in_start = in_end
-                            out_start = out_end
-
                 new_pl = (LinearWrap(pl)
-                    .Conv2D('conv', ch_out, 1, nl=BNReLU, W_mask=W_mask)
+                    .Conv2D('conv', ch_out, 1, nl=BNReLU)
                     .AvgPooling('pool', 2, padding='SAME')())
-                if split_size == 1:
-                    new_pls.append(new_pl)
-                else:
-                    new_pls.extend(tf.split(new_pl, ch_outs, CHANNEL_DIM, name='split'))
-            pli = pli_end
-        # end while pli < len(pls)
+                new_pls.append(new_pl)
         return new_pls
 
-
+            
     def _compute_ll_feats(self, image):
         l_feats = self._compute_init_l_feats(image)
         pls = [l_feats[0]]
@@ -1115,22 +1137,28 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
     def __init__(self, input_size, args):
         super(AnytimeLogDensenetV2, self).__init__(input_size, args)
 
+    
+    def special_filter(self, ui, x):
+        if ui == 0: 
+            return False
+        bi = bisect.bisect_right(self.cumsum_blocks, ui)
+        bi_x = bisect.bisect_right(self.cumsum_blocks, x-1)
+        return bi == bi_x
+
     def compute_block(self, layer_idx, n_units, l_mls, bcml, growth):
-        unit_idx = -1
         pls = []
+        # offset is the first layer_idx that in this block. 
+        # layer_idx+1 now contains the last of the last block
+        pli_offset = layer_idx + 2
         for k in range(n_units):
             layer_idx += 1
-            unit_idx += 1
             scope_name = self.compute_scope_basename(layer_idx)
             with tf.variable_scope(scope_name):
-                if unit_idx == 0:
-                    sl_indices = []
-                else:
-                    sl_indices = self.dense_select_indices(unit_idx-1)
+                sl_indices = self.connections[layer_idx]
                 logger.info("layer_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     layer_idx, len(pls), sl_indices))
 
-                ml = tf.concat([bcml] + [pls[sli] for sli in sl_indices], \
+                ml = tf.concat([bcml] + [pls[sli - pli_offset] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
@@ -1191,29 +1219,32 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 class AnytimeLogLogDenseNet(AnytimeDensenet):
     def __init__(self, input_size, args):
         super(AnytimeLogLogDenseNet, self).__init__(input_size, args)
-        self.connections = self.pre_compute_connections()
-
 
     ## pre compute connections for log-log dense as it is rather complicated
     # construct connection adjacency list for backprop
     # The pls starts with the initial conv which has index 0, so that it is 1-based. 
     # The input ui is 0-based. Hence, e.g., ui (input) always connects to 
     # pls[ui], which is the previous layer of input[ui]. 
-    def pre_compute_connections(self):
+    def _pre_compute_connections(self):
         # Everything is connected to the previous layer
         # l_adj[0] is a placeholder, so ignore that it connects to -1.
-        l_adj = [ [i-1, i-2, i-3, i-4] for i in range(self.total_units+1) ]
+        l_adj = [ [i-1] for i in range(self.total_units+1) ]
 
+        ## padding connection offset to ensure at least bn_width connections are used.
+        # i - offset is the input index
+        padding_offsets = [1, 2, 4, 8, 16, 32]
+
+        
         ## update l_adj connecitono on interval [a, b)
-        def loglog_connect(a, b, force_connect=[]):
-            if b-a <= 5:
+        def loglog_connect(a, b, force_connect_locs=[]):
+            if b-a <= 2:
                 return None
                 
             seg_len = b-a
             step_len = int(np.sqrt(b-a))
             key_indices = list(range(a, b, step_len))
-            if len(force_connect) > 0:
-                for fc_key in force_connect:
+            if len(force_connect_locs) > 0:
+                for fc_key in force_connect_locs:
                     if not fc_key in key_indices:
                         key_indices.append(fc_key)
                 key_indices = sorted(key_indices)
@@ -1228,21 +1259,30 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                     if not prev_key in l_adj[key]:
                         l_adj[key].append(prev_key)
                 prev_key = key_indices[ki-1]
+                for li in range(prev_key + 1, key):
+                    if not prev_key in l_adj[li]:
+                        l_adj[li].append(prev_key)
                 loglog_connect(prev_key, key+1)
             return None
         
         
-        force_connect_locs = np.cumsum(self.network_config.n_units_per_block)
+        force_connect_locs = self.cumsum_blocks
         loglog_connect(0, self.total_units+1, force_connect_locs)
         ## since the first conv is init conv that we don't count for pred.
         for i in range(self.total_units):
-            l_adj[i+1] = filter(lambda x: x >= 0 and x < self.total_units, 
-                np.unique(l_adj[i+1]))
-        return l_adj[1:]
-            
+            l_adj[i+1] = filter(lambda x: x >= 0 and x <= i, np.unique(l_adj[i+1]))
+            if len(l_adj[i+1]) < self.bottleneck_width:
+                for offset in padding_offsets:
+                    idx = i + 1 - offset
+                    if idx < 0:
+                        break
+                    if not idx in l_adj[i+1]:
+                        l_adj[i+1].append(idx)
+                        if len(l_adj[i+1]) >= self.bottleneck_width:
+                            break
+                
+        self._connections = l_adj[1:]
         
-    def _dense_select_indices(self, ui): 
-        return self.connections[ui]
     
 
 ################################################
@@ -1387,9 +1427,8 @@ class AnytimeFCN(AnytimeNetwork):
 
         # compute  block idx
         layer_idx = unit_idx // self.width
-        csum = np.cumsum(self.network_config.n_units_per_block)
         # first idx that is > layer_idx
-        bi = bisect.bisect_right(csum, layer_idx)
+        bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
 
         # Case downsample check: n_pool uses label_idx=n_pool
         #   0 uses 0
@@ -1592,7 +1631,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
 
         # Precommpute the connection graph to figure out scales of each layer
         tmp = np.zeros(self.total_units + 1, dtype=int)
-        cfg_cumsum = 1 + np.cumsum(self.network_config.n_units_per_block)
+        cfg_cumsum = 1 + self.cumsum_blocks
         tmp[cfg_cumsum[:self.n_pools]] = 1
         tmp[cfg_cumsum[self.n_pools:-1]] = -1
         l_natural_scale = np.cumsum(tmp)
@@ -1602,7 +1641,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         for bi, n_units in enumerate(self.network_config.n_units_per_block):
             for k in range(n_units):
                 ui += 1
-                indices = self.dense_select_indices(ui)
+                indices = self.connections[ui]
                 scale_ui = l_natural_scale[ui + 1]
                 for idx in indices:
                     if l_min_scale[idx] > scale_ui:
