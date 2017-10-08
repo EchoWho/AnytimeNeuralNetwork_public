@@ -255,7 +255,7 @@ class AnytimeNetwork(ModelDesc):
 
         # Warn user if they are using imagenet but doesn't have the right channel
         self.init_channel = args.init_channel
-        if self.network_config.s_type == 'imagenet' and self.init_channel != 64:
+        if self.network_config.s_type == 'imagenet' and self.init_channel < 64:
             logger.warn('Resnet imagenet requires 64 initial channels')
 
         self.n_blocks = len(self.network_config.n_units_per_block) 
