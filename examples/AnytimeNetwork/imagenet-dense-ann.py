@@ -17,7 +17,8 @@ from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
+from tensorpack.network_models.anytime_network import \
+    AnytimeDensenet, DenseNet, AnytimeLogDensenetV2, AnytimeLogLogDenseNet
 
 import get_augmented_data
 
@@ -107,8 +108,10 @@ if __name__ == '__main__':
         model_cls = AnytimeLogDensenetV2
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
+    elif args.densenet_version == 'loglog':
+        model_cls = AnytimeLogLogDenseNet
 
-    print model_cls
+    logger.info("Model class is {}".format(model_cls))
 
     # ilsvrc has 1000 classes
     args.num_classes = 1000
