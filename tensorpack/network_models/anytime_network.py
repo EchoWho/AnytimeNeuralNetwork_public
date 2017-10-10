@@ -85,14 +85,16 @@ def compute_cfg(options):
             n_units_per_block = [6, 12, 48, 32]
         elif options.densenet_depth == 265:
             n_units_per_block = [6, 12, 64, 48]
-        elif options.densenet_depth == 409:
-            n_units_per_block = [6, 12, 120, 64] 
         elif options.densenet_depth == 197:
             n_units_per_block = [16, 16, 32, 32]
+        elif options.densenet_depth == 217:
+            n_units_per_block = [6, 12, 56, 32]
         elif options.densenet_depth == 229:
             n_units_per_block = [16, 16, 48, 32]
         elif options.densenet_depth == 369:
             n_units_per_block = [8, 16, 80, 80]
+        elif options.densenet_depth == 409:
+            n_units_per_block = [6, 12, 120, 64] 
         else:
             raise ValueError('densenet depth {} is undefined'\
                 .format(options.densenet_depth))
