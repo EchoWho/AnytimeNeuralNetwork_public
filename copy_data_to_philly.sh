@@ -8,7 +8,7 @@ remote_folder_rr1=hdfs://rr1/msrlabs/dedey/
 
 # Copy to rr1
 echo "Copying data to rr1"
-python /home/dedey/Dropbox/philly/philly_tool/tool_04_19_17_python_2.7/philly-fs.pyc -cp -r $local_folder $remote_folder_gcr
+python /home/dedey/Dropbox/philly/philly_tool/tool_04_19_17_python_2.7/philly-fs.pyc -cp -r $local_folder $remote_folder_rr1
 echo "Finished copying data to rr1"
 
 

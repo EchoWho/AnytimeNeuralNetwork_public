@@ -6,10 +6,9 @@ import os
 import pdb
 
 
-def collect_info():
+def collect_info(cluster=None):
     user = 'dedey'
     password = 'Will2god?'
-    cluster = 'gcr'
     vc = 'msrlabs'
     status = 'Passed'
     num_finished_jobs = '2000'
@@ -62,7 +61,11 @@ def copy_passed_logs_from_json(json_data=None):
 
 
 def main():
-    json_data = collect_info()
+    # From gcr
+    json_data = collect_info(cluster='gcr')
+    copy_passed_logs_from_json(json_data=json_data)
+    # From rr1
+    json_data = collect_info(cluster='rr1')
     copy_passed_logs_from_json(json_data=json_data)
 
 
