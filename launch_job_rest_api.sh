@@ -25,7 +25,7 @@ do
 
 	USERNAME="dedey"
 	PASSWORD="Will2god?"
-	CLUSTER="gcr"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
