@@ -17,7 +17,8 @@ from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeDensenet, DenseNet, AnytimeLogDensenetV2
+from tensorpack.network_models.anytime_network import \
+    AnytimeDensenet, DenseNet, AnytimeLogDensenetV2, AnytimeLogLogDenseNet
 
 import get_augmented_data
 
@@ -37,8 +38,8 @@ def get_config(model_cls):
     loss_select_cbs = model.compute_loss_select_callbacks()
 
     lr_rate = args.lr_divider
-    lr_schedule = [(1, 1e-1 / lr_rate), (36, 1e-2 / lr_rate ), (72, 1e-3 / lr_rate) ]
-    max_epoch = 98
+    lr_schedule = [(1, 1e-1 / lr_rate), (45, 1e-2 / lr_rate ), (70, 1e-3 / lr_rate) ]
+    max_epoch = 90
     def populate_lr_schedule(lr_schedule, max_epoch):
         lr_schedule.append((max_epoch+1, lr_schedule[-1][1]))
         change_iter = iter(lr_schedule)
@@ -107,8 +108,10 @@ if __name__ == '__main__':
         model_cls = AnytimeLogDensenetV2
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
+    elif args.densenet_version == 'loglog':
+        model_cls = AnytimeLogLogDenseNet
 
-    print model_cls
+    logger.info("Model class is {}".format(model_cls))
 
     # ilsvrc has 1000 classes
     args.num_classes = 1000
@@ -122,7 +125,7 @@ if __name__ == '__main__':
     assert args.mean is not None and args.std is not None
 
     # Scale learning rate with the batch size linearly 
-    divider_at_256 = 1.0
+    divider_at_256 = 2.0
     args.lr_divider = divider_at_256 * 256.0 / args.batch_size 
     args.init_lr = 1e-1 / args.lr_divider
     args.batch_norm_decay=0.9**(divider_at_256 / args.lr_divider)  # according to Torch blog

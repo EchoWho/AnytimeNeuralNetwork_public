@@ -85,14 +85,18 @@ def compute_cfg(options):
             n_units_per_block = [6, 12, 48, 32]
         elif options.densenet_depth == 265:
             n_units_per_block = [6, 12, 64, 48]
-        elif options.densenet_depth == 409:
-            n_units_per_block = [6, 12, 120, 64] 
         elif options.densenet_depth == 197:
             n_units_per_block = [16, 16, 32, 32]
+        elif options.densenet_depth == 217:
+            n_units_per_block = [6, 12, 56, 32]
         elif options.densenet_depth == 229:
             n_units_per_block = [16, 16, 48, 32]
         elif options.densenet_depth == 369:
             n_units_per_block = [8, 16, 80, 80]
+        elif options.densenet_depth == 409:
+            n_units_per_block = [6, 12, 120, 64] 
+        elif options.densenet_depth == 205:
+            n_units_per_block = [6, 12, 66, 16]
         else:
             raise ValueError('densenet depth {} is undefined'\
                 .format(options.densenet_depth))
@@ -255,7 +259,7 @@ class AnytimeNetwork(ModelDesc):
 
         # Warn user if they are using imagenet but doesn't have the right channel
         self.init_channel = args.init_channel
-        if self.network_config.s_type == 'imagenet' and self.init_channel != 64:
+        if self.network_config.s_type == 'imagenet' and self.init_channel < 64:
             logger.warn('Resnet imagenet requires 64 initial channels')
 
         self.n_blocks = len(self.network_config.n_units_per_block) 
@@ -1028,9 +1032,11 @@ class AnytimeDensenet(AnytimeNetwork):
                     #bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
+                        .Dropout('dropout', keep_prob=0.8)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
+                l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1058,6 +1064,7 @@ class AnytimeDensenet(AnytimeNetwork):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=BNReLU)
+                    .Dropout('dropout', keep_prob=0.8)
                     .AvgPooling('pool', 2, padding='SAME')())
                 new_pls.append(new_pl)
         return new_pls
