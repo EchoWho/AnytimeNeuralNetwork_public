@@ -1,21 +1,4 @@
 #!/bin/bash
-
-# Exp 52:
-# 2590..2640
-# Num gpus: 2
-
-# Exp 53:
-# 2643..2666
-# Num gpus: 2
-
-# Exp 54:
-# 2669..2692
-# Num gpus: 2
-
-# Exp 55:
-# 2695..2718
-# Num gpus: 2
-
 # Exp 56:
 # 2721..2744
 # Num gpus: 2
