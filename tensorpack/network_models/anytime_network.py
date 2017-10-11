@@ -1266,7 +1266,7 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                 for li in range(prev_key + 1, key):
                     if not prev_key in l_adj[li]:
                         l_adj[li].append(prev_key)
-                loglog_connect(prev_key, key+1)
+                loglog_connect(prev_key+1, key+1)
             return None
         
         
