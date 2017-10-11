@@ -1032,9 +1032,11 @@ class AnytimeDensenet(AnytimeNetwork):
                     #bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
+                        .Dropout('dropout', keep_prob=0.8)
                         .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
+                l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1062,6 +1064,7 @@ class AnytimeDensenet(AnytimeNetwork):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=BNReLU)
+                    .Dropout('dropout', keep_prob=0.8)
                     .AvgPooling('pool', 2, padding='SAME')())
                 new_pls.append(new_pl)
         return new_pls
