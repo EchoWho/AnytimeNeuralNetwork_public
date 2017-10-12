@@ -220,7 +220,7 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--normalize_weights',
                         help='method to normalize the weights.'\
                         +' last: last one will have 1. all : sum to 1. log : sum to log(N)'\
-                        +' Last seems to work the best. default log for back-compatibility',
+                        +' Last seems to work the best. log for back-compatibility for f=5,9,10',
                         type=str, default='last', choices=['last', 'all', 'log'])
 
     ## misc: training params, data-set params, speed/memory params
