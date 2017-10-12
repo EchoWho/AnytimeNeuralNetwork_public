@@ -9,7 +9,7 @@ __all__ = ['sieve_loss_weights',  'eann_sieve',
     'quater_constant_half_optimal',
     'loss_weights']
 
-def _normalize_weights(normalize):
+def _normalize_weights(weights, normalize):
     sum_weights = np.sum(weights)
     if normalize == 'log':
         weights /= sum_weights / np.log2(len(weights)+1)
@@ -193,7 +193,7 @@ def loss_weights(N, args, cfg=None):
             + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
     
     if hasattr(args, 'normalize_weights') and FUNC_TYPE in [5,9,10]:
-        weights = _normalize_weights(args.normalize_weights)
+        weights = _normalize_weights(weights, args.normalize_weights)
         
     if hasattr(args, "weights_at_block_ends") and args.weights_at_block_ends:
         weights_tmp = np.zeros(np.sum(cfg))
