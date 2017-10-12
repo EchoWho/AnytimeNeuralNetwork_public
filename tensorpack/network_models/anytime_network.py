@@ -1033,7 +1033,8 @@ class AnytimeDensenet(AnytimeNetwork):
                 # The current version saves the after-bnrelue to save mem/computation
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
-                #ml = BNReLU('bnrelu_merged', ml)
+                # pre activation
+                ml = BNReLU('bnrelu_merged', ml)
                 if self.network_config.b_type == 'bottleneck':
                     bottleneck_width = int(self.options.bottleneck_width * growth)
                     #ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
@@ -1049,7 +1050,7 @@ class AnytimeDensenet(AnytimeNetwork):
 
                 # If the feature is used for prediction, store it.
                 if self.weights[unit_idx] > 0:
-                    #l = BNReLU('bnrlu_local', l)
+                    #l = tf.nn.relu('relu_local', l)
                     pmls.append(tf.concat([ml, l], CHANNEL_DIM, name='concat_pred'))
                 else:
                     pmls.append(None)
@@ -1070,6 +1071,7 @@ class AnytimeDensenet(AnytimeNetwork):
             ch_out = int(ch_in * self.growth_rate_multiplier * self.reduction_ratio)
 
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
+                pl = tf.nn.relu(pl)
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=BNReLU)
                     .Dropout('dropout', keep_prob=0.8)
@@ -1175,6 +1177,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
                 ml = tf.concat([bcml] + [pls[sli - pli_offset] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
+                ml = BNReLU('bnrelu_merged', ml) 
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
@@ -1198,6 +1201,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
         with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
             l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
             ch_new = l.get_shape().as_list()[CHANNEL_DIM]
+            l = BNReLU('pre_bnrelu', l)
             l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=BNReLU) 
             l = Dropout('dropout_new', l, keep_prob=0.8)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
