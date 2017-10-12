@@ -217,6 +217,11 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--last_weight_to_early_sum',
                         help='Final prediction  weight divided by sum of early weights',
                         type=np.float32, default=1.0)
+    parser.add_argument('--normalize_weights',
+                        help='method to normalize the weights.'\
+                        +' last: last one will have 1. all : sum to 1. log : sum to log(N)'\
+                        +' Last seems to work the best. default log for back-compatibility',
+                        type=str, default='log', choices=['last', 'all', 'log'])
 
     ## misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',

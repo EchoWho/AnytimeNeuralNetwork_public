@@ -9,6 +9,17 @@ __all__ = ['sieve_loss_weights',  'eann_sieve',
     'quater_constant_half_optimal',
     'loss_weights']
 
+def _normalize_weights(normalize):
+    sum_weights = np.sum(weights)
+    if normalize == 'log':
+        weights /= sum_weights / np.log2(len(weights)+1)
+    elif normalize == 'all':
+        weights /= sum_weights
+    elif normalize == 'last':
+        weights /= weights[-1]
+    return weights
+
+
 def sieve_loss_weights(N, last_weight_to_early_sum=1.0):
     if N == 1:
         return np.ones(1)
@@ -21,8 +32,9 @@ def sieve_loss_weights(N, last_weight_to_early_sum=1.0):
         step *= 2
         num_steps += 1
     weights[0] = np.sum(weights[1:]) * last_weight_to_early_sum
-    weights /= (np.sum(weights) / num_steps)
-    return np.flipud(weights)
+    weights = np.flipud(weights)
+    weights /= np.sum(weights) / np.log2(N+1)
+    return weights
 
 def sieve_loss_weights_v2(N, last_weight_to_early_sum=1.0):
     if N == 1:
@@ -179,6 +191,9 @@ def loss_weights(N, args, cfg=None):
     else:
         raise NameError('func type must be either 0: exponential or 1: square' \
             + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
+    
+    if hasattr(args, 'normalize_weights') and FUNC_TYPE in [5,9,10]:
+        weights = _normalize_weights(args.normalize_weights)
         
     if hasattr(args, "weights_at_block_ends") and args.weights_at_block_ends:
         weights_tmp = np.zeros(np.sum(cfg))
@@ -186,5 +201,3 @@ def loss_weights(N, args, cfg=None):
         weights = weights_tmp
 
     return weights
-
-
