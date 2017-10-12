@@ -221,7 +221,7 @@ def parser_add_common_arguments(parser):
                         help='method to normalize the weights.'\
                         +' last: last one will have 1. all : sum to 1. log : sum to log(N)'\
                         +' Last seems to work the best. default log for back-compatibility',
-                        type=str, default='log', choices=['last', 'all', 'log'])
+                        type=str, default='last', choices=['last', 'all', 'log'])
 
     ## misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',
