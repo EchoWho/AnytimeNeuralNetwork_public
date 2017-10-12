@@ -9,7 +9,7 @@ __all__ = ['sieve_loss_weights',  'eann_sieve',
     'quater_constant_half_optimal',
     'loss_weights']
 
-def sieve_loss_weights(N):
+def sieve_loss_weights(N, last_weight_to_early_sum=1.0):
     if N == 1:
         return np.ones(1)
     num_steps = 0
@@ -20,11 +20,11 @@ def sieve_loss_weights(N):
         weights[0:N:step] += delt_weight
         step *= 2
         num_steps += 1
-    weights[0] = np.sum(weights[1:])
+    weights[0] = np.sum(weights[1:]) * last_weight_to_early_sum
     weights /= (np.sum(weights) / num_steps)
     return np.flipud(weights)
 
-def sieve_loss_weights_v2(N):
+def sieve_loss_weights_v2(N, last_weight_to_early_sum=1.0):
     if N == 1:
         return np.ones(1)
     weights = np.ones(N, dtype=np.float32)
@@ -33,7 +33,7 @@ def sieve_loss_weights_v2(N):
         for i in np.arange(step, N, step):
             weights[int(i)] += 1
         step /= 2.0
-    weights[-1] = np.sum(weights[:-1])
+    weights[-1] = np.sum(weights[:-1]) * last_weight_to_early_sum
     weights /= np.sum(weights) / np.log2(N+1)
     return weights
 
@@ -80,7 +80,7 @@ def quater_constant_half_optimal(N):
     weights /= np.float(4 * N - 8)
     return weights
 
-def recursive_heavy_end(N):
+def recursive_heavy_end(N, last_weight_to_early_sum=1.0):
     """
     N, N/2, N/4,... are set to have 1/3 of the total weights up to
     its depth. 
@@ -98,7 +98,7 @@ def recursive_heavy_end(N):
         i = i // 2
         w = w / 2.0 
     weights[ N*3 // 4  - 1 ] += N / 8.0
-    weights[-1] += N * ( 1.0 + 1.0 / 16.0 ) # make sure last layer has 1/2
+    weights[-1] = np.sum(weights[:-1]) * last_weight_to_early_sum
     weights /= np.sum(weights) / np.log2(N)
     return weights
 
@@ -142,6 +142,9 @@ def stack_loss_weights(N, stack, method=sieve_loss_weights):
 def loss_weights(N, args, cfg=None):
     if hasattr(args, "weights_at_block_ends") and args.weights_at_block_ends:
         N = len(cfg)
+    lwtes = 1
+    if hasattr(args, 'last_weight_to_early_sum'):
+        lwtes = args.last_weight_to_early_sum
 
     FUNC_TYPE = args.func_type
     if FUNC_TYPE == 0: # exponential spacing
@@ -155,7 +158,8 @@ def loss_weights(N, args, cfg=None):
     elif FUNC_TYPE == 4: #constant weights
         weights = stack_loss_weights(N, args.stack, constant_weights)
     elif FUNC_TYPE == 5: # sieve with stack
-        weights = stack_loss_weights(N, args.stack, sieve_loss_weights)
+        weights = stack_loss_weights(N, args.stack, 
+            lambda N : sieve_loss_weights(N, last_weight_to_early_sum=lwtes))
     elif FUNC_TYPE == 6: # linear
         weights = stack_loss_weights(N, args.stack, linear)
     elif FUNC_TYPE == 7: # half constant, half optimal at -1
@@ -163,9 +167,11 @@ def loss_weights(N, args, cfg=None):
     elif FUNC_TYPE == 8: # quater constant, half optimal
         weights = stack_loss_weights(N, args.stack, quater_constant_half_optimal)
     elif FUNC_TYPE == 9: # recursive heavy end
-        weights = stack_loss_weights(N, args.stack, recursive_heavy_end) 
+        weights = stack_loss_weights(N, args.stack, 
+            lambda N : recursive_heavy_end(N, last_weight_to_early_sum=lwtes)) 
     elif FUNC_TYPE == 10: # sieve v2 
-        weights = stack_loss_weights(N, args.stack, sieve_loss_weights_v2)
+        weights = stack_loss_weights(N, args.stack, 
+            lambda N: sieve_loss_weights_v2(N, last_weight_to_early_sum=lwtes))
     elif FUNC_TYPE == 11: # constant = 1
         weights = stack_loss_weights(N, args.stack, lambda N:constant_weights(N, normalize=False))
     elif FUNC_TYPE == 12: # linear = 0.25...1
