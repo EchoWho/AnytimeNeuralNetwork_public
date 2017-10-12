@@ -1042,15 +1042,15 @@ class AnytimeDensenet(AnytimeNetwork):
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
                         .Dropout('dropout', keep_prob=0.8)
-                        .Conv2D('conv3x3', growth, 3, nl=BNReLU)())
+                        .Conv2D('conv3x3', growth, 3)())
                 else:
-                    l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU)
+                    l = Conv2D('conv3x3', ml, growth, 3)
                 l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
                 if self.weights[unit_idx] > 0:
-                    #l = tf.nn.relu('relu_local', l)
+                    l = BNReLU('bnrelu_local', l)
                     pmls.append(tf.concat([ml, l], CHANNEL_DIM, name='concat_pred'))
                 else:
                     pmls.append(None)
@@ -1071,7 +1071,7 @@ class AnytimeDensenet(AnytimeNetwork):
             ch_out = int(ch_in * self.growth_rate_multiplier * self.reduction_ratio)
 
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
-                pl = tf.nn.relu(pl)
+                pl = BNReLU('bnrelu_transit', pl)
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=BNReLU)
                     .Dropout('dropout', keep_prob=0.8)
@@ -1182,14 +1182,19 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
                     l = Dropout('dropout', l, keep_prob=0.8)
-                    l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
+                    l = Conv2D('conv3x3', l, growth, 3)
                 else:
-                    l = Conv2D('conv3x3', ml, growth, 3, nl=BNReLU) 
+                    l = Conv2D('conv3x3', ml, growth, 3) 
                 # dense connections need drop out to regularize
                 l = Dropout('dropout', l, keep_prob=0.8)
                 pls.append(l)
-                ml = tf.concat([ml, l], CHANNEL_DIM, name='concat_pred')
-                l_mls.append(ml)
+
+                if self.weights[layer_idx] > 0:
+                    l = BNReLU('bnrelu_local', l)
+                    ml = tf.concat([ml, l], CHANNEL_DIM, name='concat_pred')
+                    l_mls.append(ml)
+                else:
+                    l_mls.append(None) 
         return pls, l_mls
 
 
