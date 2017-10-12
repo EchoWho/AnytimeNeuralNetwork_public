@@ -2,6 +2,7 @@
 # Exp 56:
 # 2721..2744
 # Num gpus: 2
+
 for i in {2721..2744}
 do
 
@@ -11,7 +12,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="2"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
