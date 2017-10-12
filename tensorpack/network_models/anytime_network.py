@@ -214,6 +214,9 @@ def parser_add_common_arguments(parser):
                         type=np.float32)
     parser.add_argument('--opt_at', help='Optimal at', 
                         type=int, default=-1)
+    parser.add_argument('--last_weight_to_early_sum',
+                        help='Final prediction  weight divided by sum of early weights',
+                        type=np.float32, default=1.0)
 
     ## misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',
