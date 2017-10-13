@@ -1073,7 +1073,7 @@ class AnytimeDensenet(AnytimeNetwork):
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
                 pl = BNReLU('bnrelu_transit', pl)
                 new_pl = (LinearWrap(pl)
-                    .Conv2D('conv', ch_out, 1, nl=BNReLU)
+                    .Conv2D('conv', ch_out, 1)
                     .Dropout('dropout', keep_prob=0.8)
                     .AvgPooling('pool', 2, padding='SAME')())
                 new_pls.append(new_pl)
@@ -1207,12 +1207,13 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
             l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
             ch_new = l.get_shape().as_list()[CHANNEL_DIM]
             l = BNReLU('pre_bnrelu', l)
-            l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=BNReLU) 
+            l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1) 
             l = Dropout('dropout_new', l, keep_prob=0.8)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
 
             ch_old = bcml.get_shape().as_list()[CHANNEL_DIM]
-            bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=BNReLU) 
+            bcml = BNReLU('pre_bnrelu_old', bcml)
+            bcml = Conv2D('conv1x1_old', bcml, ch_old, 1) 
             bcml = Dropout('dropout_old', bcml, keep_prob=0.8)
             bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
             
