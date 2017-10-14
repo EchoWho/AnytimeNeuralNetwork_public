@@ -1169,7 +1169,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
     
     def special_filter(self, ui, x):
-        if ui == 0: 
+        if ui == 0 or x == 0: 
             return False
         bi = bisect.bisect_right(self.cumsum_blocks, ui)
         bi_x = bisect.bisect_right(self.cumsum_blocks, x-1)
