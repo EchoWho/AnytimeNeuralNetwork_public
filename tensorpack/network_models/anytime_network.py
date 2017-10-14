@@ -1224,7 +1224,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
         with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
             l = tf.concat(pls, CHANNEL_DIM, name='concat_new')
             ch_new = l.get_shape().as_list()[CHANNEL_DIM]
-            if pre_activate:
+            if self.pre_activate:
                 l = BNReLU('pre_bnrelu', l)
                 bcml = BNReLU('pre_bnrelu_old', bcml)
                 nl = tf.identity
