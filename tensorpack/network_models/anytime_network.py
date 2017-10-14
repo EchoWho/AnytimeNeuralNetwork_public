@@ -830,7 +830,7 @@ def parser_add_densenet_arguments(parser):
     parser.add_argument('--use_transition_mask',
                         help='When transition together, whether use W_mask to force indepence',
                         default=False, action='store_true')
-    parser.add_argument('pre_activate', help='whether BNReLU pre conv or after',
+    parser.add_argument('--pre_activate', help='whether BNReLU pre conv or after',
                         default=False, action='store_true')
     return parser, depth_group
 
@@ -1169,7 +1169,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
     
     def special_filter(self, ui, x):
-        if ui == 0 or x == 0: 
+        if ui == 0: # or x == 0:  ### TODO fix this. 
             return False
         bi = bisect.bisect_right(self.cumsum_blocks, ui)
         bi_x = bisect.bisect_right(self.cumsum_blocks, x-1)
