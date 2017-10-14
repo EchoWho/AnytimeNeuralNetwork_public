@@ -125,7 +125,7 @@ if __name__ == '__main__':
     assert args.mean is not None and args.std is not None
 
     # Scale learning rate with the batch size linearly 
-    divider_at_256 = 1.0
+    divider_at_256 = 2.0
     args.lr_divider = divider_at_256 * 256.0 / args.batch_size 
     args.init_lr = 1e-1 / args.lr_divider
     args.batch_norm_decay=0.9**(divider_at_256 / args.lr_divider)  # according to Torch blog
