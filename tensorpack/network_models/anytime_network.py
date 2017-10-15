@@ -833,6 +833,8 @@ def parser_add_densenet_arguments(parser):
                         default=False, action='store_true')
     parser.add_argument('--pre_activate', help='whether BNReLU pre conv or after',
                         default=False, action='store_true')
+    parser.add_argument('--dropout_kp', help='Dropout probability',
+                        type=np.float32, default=0.8)
     return parser, depth_group
 
 
@@ -851,8 +853,8 @@ class AnytimeDensenet(AnytimeNetwork):
         ## deprecated. don't use
         self.transition_batch_size = self.options.transition_batch_size
         self.use_transition_mask = self.options.use_transition_mask
-
         self.pre_activate = self.options.pre_activate
+        self.dropout_kp = self.options.dropout_kp
 
         if not self.options.use_init_ch:
             default_ch = self.growth_rate * 2
@@ -889,7 +891,8 @@ class AnytimeDensenet(AnytimeNetwork):
 
     ## Some connections methods requrie some recursion or complex 
     # functions to set all the connection together first.
-    # this will be set in self._connections.
+    # this will be set in 
+    #               self._connections.
     # it will then be used by pre_compute_connections and 
     # dense_select_method to be augmented with forced connections
     # and special_filter
@@ -897,6 +900,8 @@ class AnytimeDensenet(AnytimeNetwork):
         self._connections = None
 
 
+    ## Pre-compute connections that include all forced connects 
+    # such as _dense_select_early_connect
     def pre_compute_connections(self):
         self._pre_compute_connections()
         self.connections = []
@@ -910,6 +915,8 @@ class AnytimeDensenet(AnytimeNetwork):
                 self.l_max_scale[i] = max(self.l_max_scale[i], curr_bi)
 
 
+    ## Check whether _connections is filled first;
+    # if not then use _dense_select_indices to actually comput connections.
     def dense_select_indices(self, ui):
         if self._connections is not None:
             # the selections are precomputed. 
@@ -925,6 +932,10 @@ class AnytimeDensenet(AnytimeNetwork):
         return indices
 
 
+    ## Multiple ways to force connections to early layers.
+    # e.g.,
+    # 0: connect to nothing;
+    # 1: the end of the first block
     def _dense_select_early_connect(self, ui, indices):
         if self.early_connect_type == 0:
             # default 0 does nothing
@@ -1050,11 +1061,11 @@ class AnytimeDensenet(AnytimeNetwork):
                     #bottleneck_width = min(ch_in, bottleneck_width)
                     l = (LinearWrap(ml)
                         .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
-                        .Dropout('dropout', keep_prob=0.8)
+                        .Dropout('dropout', keep_prob=self.dropout_kp)
                         .Conv2D('conv3x3', growth, 3, nl=nl)())
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=nl)
-                l = Dropout('dropout', l, keep_prob=0.8)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1088,7 +1099,7 @@ class AnytimeDensenet(AnytimeNetwork):
                     nl = BNReLU
                 new_pl = (LinearWrap(pl)
                     .Conv2D('conv', ch_out, 1, nl=nl)
-                    .Dropout('dropout', keep_prob=0.8)
+                    .Dropout('dropout', keep_prob=self.dropout_kp)
                     .AvgPooling('pool', 2, padding='SAME')())
                 new_pls.append(new_pl)
         return new_pls
@@ -1110,7 +1121,6 @@ class AnytimeDensenet(AnytimeNetwork):
         return ll_feats
 
 
-
 class DenseNet(AnytimeDensenet):
     """
         This class is for reproducing densenet results. 
@@ -1127,7 +1137,7 @@ class DenseNet(AnytimeDensenet):
                 ch_in = pml.get_shape().as_list()[CHANNEL_DIM]
                 ch_out = int(ch_in * self.reduction_ratio)
                 pml = Conv2D('conv1x1', pml, ch_out, 1, nl=BNReLU)
-                pml = Dropout('dropout', pml, keep_prob=0.8)
+                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
                 pml = AvgPooling('pool', pml, 2, padding='SAME')
 
         for k in range(n_units):
@@ -1138,9 +1148,9 @@ class DenseNet(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
-                    l = Dropout('dropout', l, keep_prob=0.8)
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
-                l = Dropout('dropout', l, keep_prob=0.8)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
                 pmls.append(pml)
         return pmls
@@ -1199,12 +1209,12 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
-                    l = Dropout('dropout', l, keep_prob=0.8)
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     l = Conv2D('conv3x3', l, growth, 3, nl=nl)
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=nl) 
                 # dense connections need drop out to regularize
-                l = Dropout('dropout', l, keep_prob=0.8)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
 
                 if self.weights[layer_idx] > 0:
@@ -1232,12 +1242,12 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
             else:
                 nl = BNReLU
             l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=nl)
-            l = Dropout('dropout_new', l, keep_prob=0.8)
+            l = Dropout('dropout_new', l, keep_prob=self.dropout_kp)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
 
             ch_old = bcml.get_shape().as_list()[CHANNEL_DIM]
             bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=nl)
-            bcml = Dropout('dropout_old', bcml, keep_prob=0.8)
+            bcml = Dropout('dropout_old', bcml, keep_prob=self.dropout_kp)
             bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
             
             bcml = tf.concat([bcml, l], CHANNEL_DIM, name='concat_all')
@@ -1260,6 +1270,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
         ll_feats = [ [ml] for ml in l_mls ]
         assert len(ll_feats) == self.total_units
         return ll_feats
+
 
 ############################
 # The craziness of Log-Log dense
@@ -1356,10 +1367,21 @@ def parser_add_fcn_arguments(parser):
         type=int, default=None)
     return parser
 
+
 class AnytimeFCN(AnytimeNetwork):
     """
-        Overload AnytimeNetwork from classification set-up to semantic labeling.
+    Overload AnytimeNetwork from classification set-up to semantic labeling:
+    (1) the input now accept image and image labels;
+    (2) prediction and loss are on image of prediction probs; 
+    (3) parse input label to various sizes of label distributions for ANN;
+    (4) scene parsing callbacks. 
+    (5) TODO introduce transition_up and compute_ll_feats 
     """
+
+    # NOTE
+    # label_img is always NHWC or NHW
+    # If label_img is NHWC, the distribution doesn't include void. 
+    # Furthermore, label_img is 0-vec for void labels
     def __init__(self, args):
         super(AnytimeFCN, self).__init__(None, args)
 
@@ -1371,15 +1393,11 @@ class AnytimeFCN(AnytimeNetwork):
             self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
         logger.info('Class weights: {}'.format(self.class_weight))
 
+        self.n_pools = args.n_pools
         self.is_label_one_hot = args.is_label_one_hot
         self.eval_threshold = args.eval_threshold
-
-       
-        # NOTE
-        # label_img is always NHWC or NHW
-        # If label_img is NHWC, the distribution doesn't include void. 
-        # Furthermore, label_img is 0-vec for void labels
                 
+
     def compute_classification_callbacks(self):
         vcs = []
         total_units = self.total_units
@@ -1442,7 +1460,6 @@ class AnytimeFCN(AnytimeNetwork):
         l_label = []
         l_dyn_hw = []
         label_img = tf.identity(label_img, name='label_img_0')
-
         for pi in range(self.n_pools+1):
             l_mask.append(nonvoid_mask(label_img, 'eval_mask_{}'.format(pi)))
             l_label.append(flatten_label(label_img, 'label_{}'.format(pi)))
@@ -1453,7 +1470,6 @@ class AnytimeFCN(AnytimeNetwork):
                 break
             label_img = AvgPooling('label_img_{}'.format(pi+1), label_img, 2, \
                                    padding='SAME', data_format='NHWC')
-
         return image, [l_label, l_mask, l_dyn_hw]
 
 
@@ -1472,7 +1488,7 @@ class AnytimeFCN(AnytimeNetwork):
         # first idx that is > layer_idx
         bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
 
-        # Case downsample check: n_pool uses label_idx=n_pool
+        # Case downsample check: n_pools uses label_idx=n_pools
         #   0 uses 0
         # Case upsample check: bi == n_pools uses label_idx=n_pools. 
         #   the final bi == n_pools * 2 uses 0
@@ -1536,9 +1552,31 @@ class AnytimeFCN(AnytimeNetwork):
 
         return logits, cross_entropy
 
+    
+    def _init_extra_info(self):
+        return None
+
+    def _compute_block_and_transition(self, pls, pmls, n_units, bi, extra_info):
+        return pls, pmls
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        pls = [l_feats[0]]
+        pmls = []
+        extra_info = self._init_extra_info()
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            pls, pmls, extra_info = self._compute_block_and_transition(\
+                pls, pmls, n_units, bi, extra_info)
+
+        ll_feats = [ [ feat ] for feat in pmls ]
+        assert len(ll_feats) == self.total_units
+        return ll_feats
+
 
 ###########
 ## FCDense
+# This class reproduces tiramisu FC-Densenet for scene parsing. 
+# It is meant for a comparison against anytime FCN 
 def parser_add_fcdense_arguments(parser):
     parser = parser_add_fcn_arguments(parser)
     parser, depth_group = parser_add_densenet_arguments(parser)
@@ -1548,7 +1586,7 @@ def parser_add_fcdense_arguments(parser):
     return parser, depth_group
 
 
-## 
+## FCDense 
 # This class reproduces tiramisu FC-Densenet for scene parsing. 
 # It is meant for a comparison against anytime FCN 
 class FCDensenet(AnytimeFCN):
@@ -1564,9 +1602,6 @@ class FCDensenet(AnytimeFCN):
         if self.class_weight is None:
             self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
         logger.info('Class weights: {}'.format(self.class_weight))
-        
-        # FC-dense specific
-        self.n_pools = args.n_pools
         
         # other format is not supported yet
         assert self.n_pools * 2 + 1 == self.n_blocks
@@ -1594,7 +1629,7 @@ class FCDensenet(AnytimeFCN):
             stack = BNReLU('bnrelu', stack)
             ch_in = stack.get_shape().as_list()[CHANNEL_DIM]
             stack = Conv2D('conv1x1', stack, ch_in, 1, use_bias=True)
-            stack = Dropout('dropout', stack, keep_prob=0.8)
+            stack = Dropout('dropout', stack, keep_prob=self.dropout_kp)
             stack = MaxPooling('pool', stack, 2, padding='SAME')
         return stack
 
@@ -1607,7 +1642,7 @@ class FCDensenet(AnytimeFCN):
             with tf.variable_scope(scope_name+'.feat'):
                 stack = BNReLU('bnrelu', stack)
                 l = Conv2D('conv3x3', stack, self.growth_rate, 3, use_bias=True)
-                l = Dropout('dropout', l, keep_prob=0.8)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 stack = tf.concat([stack, l], CHANNEL_DIM, name='concat_feat')
                 l_layers.append(l)
         return stack, unit_idx, l_layers
@@ -1661,9 +1696,8 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
     def __init__(self, args):
         # set up params from regular densenet.
         super(AnytimeFCDensenet, self).__init__(args)
-                
-        # FC-dense specific
-        self.n_pools = args.n_pools
+        self.dropout_kp = 1.0
+
         # other format is not supported yet
         assert self.n_pools * 2 + 1 == self.n_blocks
         # FC-dense doesn't support width > 1 yet
@@ -1671,6 +1705,14 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
         assert self.network_config.s_type == 'basic'
 
+        self.l_natural_scale = None
+        self.l_min_scale = None
+        self.l_max_scale = None
+        ## fill up l_min/max scale
+        self._pre_compute_scales()
+                
+
+    def _pre_compute_scales(self)
         # Precommpute the connection graph to figure out scales of each layer
         tmp = np.zeros(self.total_units + 1, dtype=int)
         cfg_cumsum = 1 + self.cumsum_blocks
@@ -1698,7 +1740,7 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
                 l_min_scale[i], l_max_scale[i]))
 
 
-    def compute_transition_up(self, pls, skip_pls, trans_idx):
+    def _compute_transition_up(self, pls, skip_pls, trans_idx):
         """ for each previous layer, transition it up with deconv2d i.e., 
             conv2d_transpose
         """
@@ -1722,43 +1764,62 @@ class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
                     dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
         return new_pls
 
+    ## Extra info for anytime FC (log)DenseNets:
+    # growth (float32) : which can technically change over time
+    # l_pls  (list) : store the list of pls at different scales.  
+    def _init_extra_info(self):
+        extra_info = (self.growth_rate, [])
+        return extra_info
 
-    def _compute_ll_feats(self, image):
-        """
-            This section transcribe SimJeg's FCdensnet construction to the 
-            tensorflow framework. https://github.com/SimJeg/FC-DenseNet
+    def _compute_block_and_transition(self, pls, pmls, n_units, bi, extra_info):
+        growth, l_pls = extra_info
+        pls, pmls = AnytimeDensenet.compute_block(self, pls, pmls, n_units, growth)
+        if bi < self.n_pools:
+            l_pls.append(pls)
+            growth *= self.growth_rate_multiplier
+            pls = AnytimeDensenet.compute_transition(self, pls, bi)
+        elif bi < self.n_blocks - 1: 
+            growth /= self.growth_rate_multiplier
+            skip_pls = l_pls[2*self.n_pools - bi - 1]
+            pls = self._compute_transition_up(pls, skip_pls, bi)
+        return pls, pmls, (growth, l_pls)
 
-            It also changes how TD/TU layers work, since
-            log-dense computes TD/TU for each individual layer instead of all 
-            previous layers.
-
-            BNReLUConv in the original. ConvBNReLU here. 
-
-        """
-        l_feats = self._compute_init_l_feats(image)
-        pls = [l_feats[0]]
-        l_pls = []
-        pmls = []
-        growth = self.growth_rate
-        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
-            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
-            if bi < self.n_pools: 
-                # downsampling
-                l_pls.append(pls)
-                growth *= self.growth_rate_multiplier
-                pls = self.compute_transition(pls, bi)
-            elif bi < self.n_blocks - 1:
-                # To check: first deconv at self.n_pools, every layer except the last block
-                # has pl of featmap-size of n_pools-1. 
-                # The second to the last block has the final upsampling, and it has 
-                # bi = 2*n_pools - 1; The featmap scale matches that of l_pls[0] 
-                skip_pls = l_pls[2*self.n_pools - bi - 1]
-                growth /= self.growth_rate_multiplier
-                pls = self.compute_transition_up(pls, skip_pls, bi)
-        
-        ll_feats = [ [ feat ] for feat in pmls ]
-        assert len(ll_feats) == self.total_units
-        return ll_feats
+#    def _compute_ll_feats(self, image):
+#        """
+#            This section transcribe SimJeg's FCdensnet construction to the 
+#            tensorflow framework. https://github.com/SimJeg/FC-DenseNet
+#
+#            It also changes how TD/TU layers work, since
+#            log-dense computes TD/TU for each individual layer instead of all 
+#            previous layers.
+#
+#            BNReLUConv in the original. ConvBNReLU here. 
+#
+#        """
+#        l_feats = self._compute_init_l_feats(image)
+#        pls = [l_feats[0]]
+#        l_pls = []
+#        pmls = []
+#        growth = self.growth_rate
+#        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
+#            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
+#            if bi < self.n_pools: 
+#                # downsampling
+#                l_pls.append(pls)
+#                growth *= self.growth_rate_multiplier
+#                pls = self.compute_transition(pls, bi)
+#            elif bi < self.n_blocks - 1:
+#                # To check: first deconv at self.n_pools, every layer except the last block
+#                # has pl of featmap-size of n_pools-1. 
+#                # The second to the last block has the final upsampling, and it has 
+#                # bi = 2*n_pools - 1; The featmap scale matches that of l_pls[0] 
+#                skip_pls = l_pls[2*self.n_pools - bi - 1]
+#                growth /= self.growth_rate_multiplier
+#                pls = self._compute_transition_up(pls, skip_pls, bi)
+#        
+#        ll_feats = [ [ feat ] for feat in pmls ]
+#        assert len(ll_feats) == self.total_units
+#        return ll_feats
 
 
 ## Version 2 of anytime FCN for dense-net
@@ -1831,6 +1892,7 @@ def parser_add_msdensenet_arguments(parser):
                         type=float, default=4.0)
     parser.add_argument('--num_scales', help='number of scales',
                         type=int, default=3)
+
 
 class AnytimeMultiScaleDenseNet(AnytimeNetwork):
     
