@@ -1374,13 +1374,7 @@ class AnytimeFCN(AnytimeNetwork):
         self.is_label_one_hot = args.is_label_one_hot
         self.eval_threshold = args.eval_threshold
 
-        # TODO
-        # args should contain the size of the image, so that deconv can decide 
-        # whether to crop based on the sizes.
-        # Do not use these shape to set the input size though, because this
-        # would limit the input size, and make the batch-norm info void for
-        # different size of inputs
-        
+       
         # NOTE
         # label_img is always NHWC or NHW
         # If label_img is NHWC, the distribution doesn't include void. 
