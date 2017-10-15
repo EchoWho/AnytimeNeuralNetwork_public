@@ -323,6 +323,7 @@ class AnytimeNetwork(ModelDesc):
         return "layer{:03d}".format(layer_idx)
 
     ###
+    #   NOTE
     #   Important annoyance alert:
     #   Since this method is called typically before the _build_graph is called,
     #   we cannot know the var/tensor names dynamically during cb construction.
@@ -330,7 +331,7 @@ class AnytimeNetwork(ModelDesc):
     #
     #   To fix this, we need _build_graph to know it's in test mode and construct
     #   right initialization, cbs, and surpress certain cbs/summarys. 
-    #   (TODO)
+    #   NOTE
     def compute_classification_callbacks(self):
         """
         """
