@@ -38,7 +38,7 @@ def get_config(model_cls):
     loss_select_cbs = model.compute_loss_select_callbacks()
 
     lr_rate = args.lr_divider
-    lr_schedule = [(1, 1e-1 / lr_rate), (30, 1e-2 / lr_rate ), (60, 1e-3 / lr_rate) ]
+    lr_schedule = [(1, 1e-1 / lr_rate), (43, 1e-2 / lr_rate ), (70, 1e-3 / lr_rate) ]
     max_epoch = 90
     def populate_lr_schedule(lr_schedule, max_epoch):
         lr_schedule.append((max_epoch+1, lr_schedule[-1][1]))
