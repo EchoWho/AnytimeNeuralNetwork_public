@@ -311,6 +311,7 @@ class AnytimeNetwork(ModelDesc):
             if not hasattr(self.options, 'std'):
                 raise Exception('gpu_graph expects std, but it is not in the options')
     
+
     def _get_inputs(self):
         additional_input = []
         if self.is_model_training() and self.alter_label:
@@ -319,8 +320,17 @@ class AnytimeNetwork(ModelDesc):
                     [None, self.input_size, self.input_size, 3],'input'),
                 InputDesc(tf.int32, [None], 'label')] + additional_input
 
+
     def compute_scope_basename(self, layer_idx):
         return "layer{:03d}".format(layer_idx)
+
+
+    ## Given the index (0based) of a block, return its scale. 
+    # This is overloaded by FCDenseNets. 
+    # Large scale_idx means smaller feature map.
+    def bi_to_scale_idx(self, bi):
+        return bi
+
 
     ###
     #   NOTE
@@ -874,11 +884,15 @@ class AnytimeDensenet(AnytimeNetwork):
             self.options.ls_method = BEST_AANN_METHOD
             self.options.samloss = BEST_AANN_METHOD
 
-        ## pre-compute connection 
+        ## pre-compute connection; without connection augmentations.
         self._connections = None
-        self.connections = None # For each ui, an input list
-        self.l_max_scale = None # exists for each pls, including the init conv
-        self.pre_compute_connections()
+        # For each ui, an input list; this contains forced connections
+        self.connections = None 
+        # Used for determine whether a layer needs transition
+        # exists for each pls, including the init conv
+        # scale 0 means input image; large scale (idx) means smaller feature map
+        self.l_max_scale = None 
+        self.l_min_scale = None
 
 
     ## whether pls[x] should be included for computing ui,
@@ -906,13 +920,19 @@ class AnytimeDensenet(AnytimeNetwork):
         self._pre_compute_connections()
         self.connections = []
         self.l_max_scale = [ 0 for _ in range(self.total_units + 1) ]
+        self.l_min_scale = [ 0 for _ in range(self.total_units + 1) ]
         curr_bi = 0
+        curr_scale = 0
         for ui in range(self.total_units):
             if self.cumsum_blocks[curr_bi] == ui:
                 curr_bi += 1
+                curr_scale = self.bi_to_scale_idx(curr_bi)
             self.connections.append(self.dense_select_indices(ui))
             for i in self.connections[-1]:
-                self.l_max_scale[i] = max(self.l_max_scale[i], curr_bi)
+                self.l_max_scale[i] = max(self.l_max_scale[i], curr_scale)
+                self.l_min_scale[i] = min(self.l_min_scale[i], curr_scale)
+            self.l_min_scale[ui+1] = curr_scale
+            self.l_max_scale[ui+1] = curr_scale
 
 
     ## Check whether _connections is filled first;
@@ -1106,6 +1126,7 @@ class AnytimeDensenet(AnytimeNetwork):
 
             
     def _compute_ll_feats(self, image):
+        self.pre_compute_connections()
         l_feats = self._compute_init_l_feats(image)
         pls = [l_feats[0]]
         pmls = []
@@ -1472,6 +1493,18 @@ class AnytimeFCN(AnytimeNetwork):
                                    padding='SAME', data_format='NHWC')
         return image, [l_label, l_mask, l_dyn_hw]
 
+    
+    def bi_to_scale_idx(self, bi):
+        ## Because there are n_pools number of pooling, there are n_pools+1 scales
+        # Case downsample check: n_pools uses label_idx=n_pools;
+        #   0 uses 0.
+        # Case upsample check: bi == n_pools uses label_idx=n_pools;
+        #   the final bi == n_pools * 2 uses 0
+        if bi <= self.n_pools:
+            return bi
+        else:
+            return 2*self.n_pools - bi
+
 
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
         l_label, l_eval_mask, l_dyn_hw = label_inputs
@@ -1488,13 +1521,7 @@ class AnytimeFCN(AnytimeNetwork):
         # first idx that is > layer_idx
         bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
 
-        # Case downsample check: n_pools uses label_idx=n_pools
-        #   0 uses 0
-        # Case upsample check: bi == n_pools uses label_idx=n_pools. 
-        #   the final bi == n_pools * 2 uses 0
-        label_img_idx = bi
-        if bi > self.n_pools:
-            label_img_idx = 2 * self.n_pools - bi
+        label_img_idx = self.bi_to_scale_idx(bi)
 
         label = l_label[label_img_idx] # note this is a probability of label distri
         eval_mask = l_eval_mask[label_img_idx]
@@ -1682,144 +1709,81 @@ class FCDensenet(AnytimeFCN):
         return ll_feats
 
 
+def get_fc_dense_model_cls(T_class):
 
-class AnytimeFCDensenet(AnytimeFCN, AnytimeDensenet):
-    """
-        Anytime FC-densenet. Use AnytimeFCN to have FC input, logits, costs. 
-
-        Use AnytimeDensenet to have dense_select_indices, compute_transition, 
-        compute_block
-
-        Implement compute_ll_feats here to organize the feats
-    """
-
-    def __init__(self, args):
-        # set up params from regular densenet.
-        super(AnytimeFCDensenet, self).__init__(args)
-        self.dropout_kp = 1.0
-
-        # other format is not supported yet
-        assert self.n_pools * 2 + 1 == self.n_blocks
-        # FC-dense doesn't support width > 1 yet
-        assert self.width == 1
-        # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
-        assert self.network_config.s_type == 'basic'
-
-        self.l_natural_scale = None
-        self.l_min_scale = None
-        self.l_max_scale = None
-        ## fill up l_min/max scale
-        self._pre_compute_scales()
-                
-
-    def _pre_compute_scales(self)
-        # Precommpute the connection graph to figure out scales of each layer
-        tmp = np.zeros(self.total_units + 1, dtype=int)
-        cfg_cumsum = 1 + self.cumsum_blocks
-        tmp[cfg_cumsum[:self.n_pools]] = 1
-        tmp[cfg_cumsum[self.n_pools:-1]] = -1
-        l_natural_scale = np.cumsum(tmp)
-        l_min_scale = l_natural_scale.copy()
-        l_max_scale = l_natural_scale.copy()
-        ui= -1
-        for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            for k in range(n_units):
-                ui += 1
-                indices = self.connections[ui]
-                scale_ui = l_natural_scale[ui + 1]
-                for idx in indices:
-                    if l_min_scale[idx] > scale_ui:
-                        l_min_scale[idx] = scale_ui
-                    if l_max_scale[idx] < scale_ui:
-                        l_max_scale[idx] = scale_ui
-        self.l_natural_scale = l_natural_scale
-        self.l_min_scale = l_min_scale
-        self.l_max_scale = l_max_scale
-        for i in range(self.total_units+1):
-            logger.info("{} natural: {}  min : {}  max : {}".format(i, l_natural_scale[i],
-                l_min_scale[i], l_max_scale[i]))
-
-
-    def _compute_transition_up(self, pls, skip_pls, trans_idx):
-        """ for each previous layer, transition it up with deconv2d i.e., 
-            conv2d_transpose
+    class AnytimeFCDensenet(AnytimeFCN, T_class):
         """
-        scale_bi = self.n_pools * 2 - 1 - trans_idx
-        new_pls = []
-        for pli, pl in enumerate(pls):
-            if pli < len(skip_pls):
-                new_pls.append(skip_pls[pli])
-                continue 
-            if self.l_min_scale[pli] > scale_bi:
-                new_pls.append(None)
-                continue
-            # implied that skip_pls is exhausted
-            with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
-                ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
-                ch_out = int(ch_in * self.reduction_ratio)
-                dyn_h = tf.shape(skip_pls[0])[HEIGHT_DIM]
-                dyn_w = tf.shape(skip_pls[0])[WIDTH_DIM]
-                #kernel_shape=3, stride=2
-                new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
-                    dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
-        return new_pls
+            Anytime FC-densenet. Use AnytimeFCN to have FC input, logits, costs. 
 
-    ## Extra info for anytime FC (log)DenseNets:
-    # growth (float32) : which can technically change over time
-    # l_pls  (list) : store the list of pls at different scales.  
-    def _init_extra_info(self):
-        extra_info = (self.growth_rate, [])
-        return extra_info
+            Use T_class to have pre_compute_connections, compute_transition,
+            compute_block
 
-    def _compute_block_and_transition(self, pls, pmls, n_units, bi, extra_info):
-        growth, l_pls = extra_info
-        pls, pmls = AnytimeDensenet.compute_block(self, pls, pmls, n_units, growth)
-        if bi < self.n_pools:
-            l_pls.append(pls)
-            growth *= self.growth_rate_multiplier
-            pls = AnytimeDensenet.compute_transition(self, pls, bi)
-        elif bi < self.n_blocks - 1: 
-            growth /= self.growth_rate_multiplier
-            skip_pls = l_pls[2*self.n_pools - bi - 1]
-            pls = self._compute_transition_up(pls, skip_pls, bi)
-        return pls, pmls, (growth, l_pls)
+            Implement compute_ll_feats here to organize the feats
+        """
 
-#    def _compute_ll_feats(self, image):
-#        """
-#            This section transcribe SimJeg's FCdensnet construction to the 
-#            tensorflow framework. https://github.com/SimJeg/FC-DenseNet
-#
-#            It also changes how TD/TU layers work, since
-#            log-dense computes TD/TU for each individual layer instead of all 
-#            previous layers.
-#
-#            BNReLUConv in the original. ConvBNReLU here. 
-#
-#        """
-#        l_feats = self._compute_init_l_feats(image)
-#        pls = [l_feats[0]]
-#        l_pls = []
-#        pmls = []
-#        growth = self.growth_rate
-#        for bi, n_units in enumerate(self.network_config.n_units_per_block):  
-#            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
-#            if bi < self.n_pools: 
-#                # downsampling
-#                l_pls.append(pls)
-#                growth *= self.growth_rate_multiplier
-#                pls = self.compute_transition(pls, bi)
-#            elif bi < self.n_blocks - 1:
-#                # To check: first deconv at self.n_pools, every layer except the last block
-#                # has pl of featmap-size of n_pools-1. 
-#                # The second to the last block has the final upsampling, and it has 
-#                # bi = 2*n_pools - 1; The featmap scale matches that of l_pls[0] 
-#                skip_pls = l_pls[2*self.n_pools - bi - 1]
-#                growth /= self.growth_rate_multiplier
-#                pls = self._compute_transition_up(pls, skip_pls, bi)
-#        
-#        ll_feats = [ [ feat ] for feat in pmls ]
-#        assert len(ll_feats) == self.total_units
-#        return ll_feats
+        def __init__(self, args):
+            # set up params from regular densenet.
+            super(AnytimeFCDensenet, self).__init__(args)
+            self.dropout_kp = 1.0
+
+            # other format is not supported yet
+            assert self.n_pools * 2 + 1 == self.n_blocks
+            # FC-dense doesn't support width > 1 yet
+            assert self.width == 1
+            # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
+            assert self.network_config.s_type == 'basic'
+
+
+        def _compute_transition_up(self, pls, skip_pls, trans_idx):
+            """ for each previous layer, transition it up with deconv2d i.e., 
+                conv2d_transpose
+            """
+            ## current scale
+            scale_bi = self.bi_to_scale_idx(trans_idx)
+            new_pls = []
+            for pli, pl in enumerate(pls):
+                if pli < len(skip_pls):
+                    new_pls.append(skip_pls[pli])
+                    continue 
+                if self.l_min_scale[pli] >= scale_bi:
+                    new_pls.append(None)
+                    continue
+                # implied that skip_pls is exhausted
+                with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
+                    ch_in = pl.get_shape().as_list()[CHANNEL_DIM]
+                    ch_out = int(ch_in * self.reduction_ratio)
+                    dyn_h = tf.shape(skip_pls[0])[HEIGHT_DIM]
+                    dyn_w = tf.shape(skip_pls[0])[WIDTH_DIM]
+                    #kernel_shape=3, stride=2
+                    new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
+                        dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
+            return new_pls
+
+
+        ## Extra info for anytime FC (log)DenseNets:
+        # growth (float32) : which can technically change over time
+        # l_pls  (list) : store the list of pls at different scales.  
+        def _init_extra_info(self):
+            ## fill up l_min/max scale
+            self.pre_compute_connections()
+            extra_info = (self.growth_rate, [])
+            return extra_info
+
+
+        def _compute_block_and_transition(self, pls, pmls, n_units, bi, extra_info):
+            growth, l_pls = extra_info
+            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
+            if bi < self.n_pools:
+                l_pls.append(pls)
+                growth *= self.growth_rate_multiplier
+                pls = self.compute_transition(pls, bi)
+            elif bi < self.n_blocks - 1: 
+                growth /= self.growth_rate_multiplier
+                skip_pls = l_pls[self.bi_to_scale_idx(bi) - 1]
+                pls = self._compute_transition_up(pls, skip_pls, bi)
+            return pls, pmls, (growth, l_pls)
+
+    return AnytimeFCDensenet
 
 
 ## Version 2 of anytime FCN for dense-net
@@ -1828,7 +1792,6 @@ class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):
     
     def __init__(self, args):
         super(AnytimeFCDensenetV2, self).__init__(args)
-        self.n_pools = args.n_pools
         assert self.n_pools * 2 == self.n_blocks - 1
         assert self.width == 1
         assert self.network_config.s_type == 'basic'
@@ -1870,7 +1833,7 @@ class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):
                 l_skips.append(l_mls[-1])
                 bcml = self.update_compressed_feature(layer_idx, ch_out, pls, bcml)
             elif bi < self.n_blocks - 1:
-                sml = l_skips[self.n_pools * 2 - bi - 1]
+                sml = l_skips[self.bi_to_scale_idx(bi) - 1]
                 bcml = self.update_compressed_feature_up(layer_idx, ch_out, pls, bcml, sml)
         
         ll_feats = [ [ml] for ml in l_mls ]
