@@ -1277,6 +1277,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
     def _compute_ll_feats(self, image):
         l_feats = self._compute_init_l_feats(image)
+        self.pre_compute_connections()
         bcml = l_feats[0]
         l_mls = []
         growth = self.growth_rate
