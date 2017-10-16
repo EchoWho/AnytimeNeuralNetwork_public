@@ -1709,9 +1709,9 @@ class FCDensenet(AnytimeFCN):
         return ll_feats
 
 
-def get_fc_dense_model_cls(T_class):
+def AnytimeFCDenseNet(T_class):
 
-    class AnytimeFCDensenet(AnytimeFCN, T_class):
+    class AnytimeFCDenseNetTemplate(AnytimeFCN, T_class):
         """
             Anytime FC-densenet. Use AnytimeFCN to have FC input, logits, costs. 
 
@@ -1723,7 +1723,7 @@ def get_fc_dense_model_cls(T_class):
 
         def __init__(self, args):
             # set up params from regular densenet.
-            super(AnytimeFCDensenet, self).__init__(args)
+            super(AnytimeFCDenseNetTemplate, self).__init__(args)
             self.dropout_kp = 1.0
 
             # other format is not supported yet
@@ -1783,7 +1783,7 @@ def get_fc_dense_model_cls(T_class):
                 pls = self._compute_transition_up(pls, skip_pls, bi)
             return pls, pmls, (growth, l_pls)
 
-    return AnytimeFCDensenet
+    return AnytimeFCDenseNetTemplate
 
 
 ## Version 2 of anytime FCN for dense-net
