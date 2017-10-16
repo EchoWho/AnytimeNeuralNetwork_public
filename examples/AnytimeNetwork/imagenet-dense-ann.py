@@ -27,7 +27,7 @@ INPUT_SIZE = 224
 
 get_data = get_augmented_data.get_ilsvrc_augmented_data
 
-def get_config(model_cls):
+def get_config(model_cls, lr_schedule):
     # prepare dataset
     dataset_train = get_data('train', args, do_multiprocess=True)
     dataset_val = get_data('val', args, do_multiprocess=True)
@@ -37,24 +37,6 @@ def get_config(model_cls):
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
 
-    lr_rate = args.lr_divider
-    lr_schedule = [(1, 1e-1 / lr_rate), (43, 1e-2 / lr_rate ), (70, 1e-3 / lr_rate) ]
-    max_epoch = 90
-    def populate_lr_schedule(lr_schedule, max_epoch):
-        lr_schedule.append((max_epoch+1, lr_schedule[-1][1]))
-        change_iter = iter(lr_schedule)
-        change = next(change_iter)
-        assert change[0] == 1
-        populated_schedule = []
-        for i in range(1,max_epoch+1):
-            if change[0] <= i:
-                lr = change[1]
-                change = next(change_iter)
-            populated_schedule.append((i, lr))
-        return populated_schedule
-    lr_schedule = populate_lr_schedule(lr_schedule, max_epoch)
-
-            
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
@@ -125,16 +107,36 @@ if __name__ == '__main__':
     assert args.mean is not None and args.std is not None
 
     # Scale learning rate with the batch size linearly 
-    divider_at_256 = 2.0
-    args.lr_divider = divider_at_256 * 256.0 / args.batch_size 
-    args.init_lr = 1e-1 / args.lr_divider
-    args.batch_norm_decay=0.9**(divider_at_256 / args.lr_divider)  # according to Torch blog
+    # lr_rate represent how much we need to scale up down lr based on batch size
+    lr_rate = args.batch_size / 256.0
+    lr_decay_epoch = 15
+    lr_decay_step = 0.5
+    max_epoch = 105
+    lr_schedule = [(1, 1e-1 * lr_rate)]
+    for epochi in range(lr_decay_epoch, max_epoch, lr_decay_epoch):
+        last_lr = lr_schedule[-1][1]
+        lr_schedule.append((epochi, last_lr * lr_decay_step))
+    def populate_lr_schedule(lr_schedule, max_epoch):
+        lr_schedule.append((max_epoch+1, lr_schedule[-1][1]))
+        change_iter = iter(lr_schedule)
+        change = next(change_iter)
+        assert change[0] == 1
+        populated_schedule = []
+        for i in range(1,max_epoch+1):
+            if change[0] <= i:
+                lr = change[1]
+                change = next(change_iter)
+            populated_schedule.append((i, lr))
+        return populated_schedule
+    lr_schedule = populate_lr_schedule(lr_schedule, max_epoch)
+    args.init_lr = lr_schedule[0][1]
+    args.batch_norm_decay=0.9**(lr_rate)  # according to Torch blog
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
 
-    config = get_config(model_cls)
+    config = get_config(model_cls, lr_schedule)
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
