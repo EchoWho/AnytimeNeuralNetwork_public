@@ -208,8 +208,12 @@ if __name__ == '__main__':
     parser.add_argument('--display_period', help='Display at eval every # of image; 0 means no display',
                         default=0, type=int)
     anytime_network.parser_add_fcdense_arguments(parser)
-    model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
     args = parser.parse_args()
+    if args.densenet_version == 'atv1':
+        dense_cls = AnytimeDensenet
+    elif args.densenet_version == 'loglog':
+        dense_cls = AnytimeLogLogDenseNet
+    model_cls = AnytimeFCDenseNet(dense_cls)
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
