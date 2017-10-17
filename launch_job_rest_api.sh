@@ -1,12 +1,13 @@
 #!/bin/bash
-# Exp 56:
-# 2721..2744
-# Num gpus: 2
 
 # Exp 57:
 # 2747..2770
 # Num gpus: 2
-for i in {2747..2770}
+
+# Exp 58:
+# 2773..2796
+# Num gpus: 2
+for i in {2747..2770} {2773..2796}
 do
 
 	USERNAME="dedey"
@@ -141,4 +142,8 @@ done
 
 # Exp 57:
 # 2747..2770
+# Num gpus: 2
+
+# Exp 58:
+# 2773..2796
 # Num gpus: 2
