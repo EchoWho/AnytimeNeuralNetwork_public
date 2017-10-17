@@ -1079,13 +1079,14 @@ class AnytimeDensenet(AnytimeNetwork):
                     bottleneck_width = int(self.options.bottleneck_width * growth)
                     #ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
                     #bottleneck_width = min(ch_in, bottleneck_width)
-                    l = (LinearWrap(ml)
-                        .Conv2D('conv1x1', bottleneck_width, 1, nl=BNReLU)
-                        .Dropout('dropout', keep_prob=self.dropout_kp)
-                        .Conv2D('conv3x3', growth, 3, nl=nl)())
+                    l = Conv2D('conv1x1', ml, bottleneck_width, 1, nl=BNReLU)
+                    if self.dropout_kp < 1:
+                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    l = Conv2D('conv3x3', l, growth, 3, nl=nl)
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=nl)
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                if self.dropout_kp < 1:
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
@@ -1117,11 +1118,11 @@ class AnytimeDensenet(AnytimeNetwork):
                     nl = tf.identity
                 else:
                     nl = BNReLU
-                new_pl = (LinearWrap(pl)
-                    .Conv2D('conv', ch_out, 1, nl=nl)
-                    .Dropout('dropout', keep_prob=self.dropout_kp)
-                    .AvgPooling('pool', 2, padding='SAME')())
-                new_pls.append(new_pl)
+                l = Conv2D('conv', pl, ch_out, 1, nl=nl)
+                if self.dropout_kp < 1:
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                l = AvgPooling('pool', l, 2, padding='SAME')
+                new_pls.append(l)
         return new_pls
 
             
@@ -1158,7 +1159,8 @@ class DenseNet(AnytimeDensenet):
                 ch_in = pml.get_shape().as_list()[CHANNEL_DIM]
                 ch_out = int(ch_in * self.reduction_ratio)
                 pml = Conv2D('conv1x1', pml, ch_out, 1, nl=BNReLU)
-                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
+                if self.dropout_kp < 1:
+                    pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
                 pml = AvgPooling('pool', pml, 2, padding='SAME')
 
         for k in range(n_units):
@@ -1169,9 +1171,11 @@ class DenseNet(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    if self.dropout_kp < 1:
+                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l = Conv2D('conv3x3', l, growth, 3, nl=BNReLU)
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                if self.dropout_kp < 1:
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pml = tf.concat([pml, l], CHANNEL_DIM, name='concat')
                 pmls.append(pml)
         return pmls
@@ -1230,12 +1234,14 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    if self.dropout_kp < 1:
+                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     l = Conv2D('conv3x3', l, growth, 3, nl=nl)
                 else:
                     l = Conv2D('conv3x3', ml, growth, 3, nl=nl) 
                 # dense connections need drop out to regularize
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                if self.dropout_kp < 1:
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
 
                 if self.weights[layer_idx] > 0:
@@ -1263,12 +1269,14 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
             else:
                 nl = BNReLU
             l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=nl)
-            l = Dropout('dropout_new', l, keep_prob=self.dropout_kp)
+            if self.dropout_kp < 1:
+                l = Dropout('dropout_new', l, keep_prob=self.dropout_kp)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
 
             ch_old = bcml.get_shape().as_list()[CHANNEL_DIM]
             bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=nl)
-            bcml = Dropout('dropout_old', bcml, keep_prob=self.dropout_kp)
+            if self.dropout_kp < 1:
+                bcml = Dropout('dropout_old', bcml, keep_prob=self.dropout_kp)
             bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
             
             bcml = tf.concat([bcml, l], CHANNEL_DIM, name='concat_all')
@@ -1657,7 +1665,8 @@ class FCDensenet(AnytimeFCN):
             stack = BNReLU('bnrelu', stack)
             ch_in = stack.get_shape().as_list()[CHANNEL_DIM]
             stack = Conv2D('conv1x1', stack, ch_in, 1, use_bias=True)
-            stack = Dropout('dropout', stack, keep_prob=self.dropout_kp)
+            if self.dropout_kp < 1:
+                stack = Dropout('dropout', stack, keep_prob=self.dropout_kp)
             stack = MaxPooling('pool', stack, 2, padding='SAME')
         return stack
 
@@ -1670,7 +1679,8 @@ class FCDensenet(AnytimeFCN):
             with tf.variable_scope(scope_name+'.feat'):
                 stack = BNReLU('bnrelu', stack)
                 l = Conv2D('conv3x3', stack, self.growth_rate, 3, use_bias=True)
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                if self.dropout_kp < 1:
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 stack = tf.concat([stack, l], CHANNEL_DIM, name='concat_feat')
                 l_layers.append(l)
         return stack, unit_idx, l_layers
