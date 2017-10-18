@@ -2,7 +2,11 @@
 # Exp 59:
 # 2799..2822
 # Num gpus: 2
-for i in {2799..2822}
+
+# Exp 43:
+# 2144..2245
+# Num gpus: 1
+for i in {2144..2245}
 do
 
 	USERNAME="dedey"
