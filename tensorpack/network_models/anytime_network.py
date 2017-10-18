@@ -845,6 +845,8 @@ def parser_add_densenet_arguments(parser):
                         default=False, action='store_true')
     parser.add_argument('--dropout_kp', help='Dropout probability',
                         type=np.float32, default=0.8)
+    parser.add_argument('--loglog_growth_multiplier', help='Loglog recursion depth 0 growth rate multiplier',
+                        type=np.float32, default=1.0)
     return parser, depth_group
 
 
@@ -914,6 +916,12 @@ class AnytimeDensenet(AnytimeNetwork):
         self._connections = None
 
 
+    ## Some networks need special grwoth rate for certain layers, 
+    # e.g., loglogdense
+    def _compute_layer_growth(self, ui, growth):
+        return growth
+
+
     ## Pre-compute connections that include all forced connects 
     # such as _dense_select_early_connect
     def pre_compute_connections(self):
@@ -972,7 +980,6 @@ class AnytimeDensenet(AnytimeNetwork):
         if (self.early_connect_type >> 3) % 2 == 1: # e.g., 8
             # force connect to end of all blocks 
             indices.extend(self.cumsum_blocks)
-
         indices = filter(lambda x : x <=ui and x >=0, np.unique(indices))
         return indices
 
@@ -981,14 +988,11 @@ class AnytimeDensenet(AnytimeNetwork):
         """
             Given ui, return the list of indices i's such that 
             pls[i] contribute to forming layer[ui] i.e. pls[ui+1].
-
             For methods that can be computed directly using ui, and other
             args, use this method to do so. 
-
             If the computation is too complex or it is easy to pre-compute
             all connections before hand, see loglogdense as an example, and
             use _pre_compute_connections.
-
             ui : unit_idx
         """
         if self.dense_select_method == 0:
@@ -1075,16 +1079,17 @@ class AnytimeDensenet(AnytimeNetwork):
                     nl = tf.identity
                 else:
                     nl = BNReLU
+                layer_growth = self._compute_layer_growth(unit_idx, growth)
                 if self.network_config.b_type == 'bottleneck':
-                    bottleneck_width = int(self.options.bottleneck_width * growth)
+                    bottleneck_width = int(self.options.bottleneck_width * layer_growth)
                     #ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
                     #bottleneck_width = min(ch_in, bottleneck_width)
                     l = Conv2D('conv1x1', ml, bottleneck_width, 1, nl=BNReLU)
                     if self.dropout_kp < 1:
                         l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                    l = Conv2D('conv3x3', l, growth, 3, nl=nl)
+                    l = Conv2D('conv3x3', l, layer_growth, 3, nl=nl)
                 else:
-                    l = Conv2D('conv3x3', ml, growth, 3, nl=nl)
+                    l = Conv2D('conv3x3', ml, layer_growth, 3, nl=nl)
                 if self.dropout_kp < 1:
                     l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
@@ -1308,6 +1313,15 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 class AnytimeLogLogDenseNet(AnytimeDensenet):
     def __init__(self, input_size, args):
         super(AnytimeLogLogDenseNet, self).__init__(input_size, args)
+        self._recursion_depths = None
+        self.loglog_growth_multiplier = args.loglog_growth_multiplier
+
+
+    def _compute_layer_growth(self, ui, growth):
+        if self._recursion_depths[ui] == 0:
+            return growth * self.loglog_growth_multiplier
+        return growth
+
 
     ## pre compute connections for log-log dense as it is rather complicated
     # construct connection adjacency list for backprop
@@ -1318,6 +1332,7 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
         # Everything is connected to the previous layer
         # l_adj[0] is a placeholder, so ignore that it connects to -1.
         l_adj = [ [i-1] for i in range(self.total_units+1) ]
+        recursion_depths = [ -1 for i in range(self.total_units+1) ]
 
         ## padding connection offset to ensure at least bn_width connections are used.
         # i - offset is the input index
@@ -1325,13 +1340,13 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
 
         
         ## update l_adj connecitono on interval [a, b)
-        def loglog_connect(a, b, force_connect_locs=[]):
+        def loglog_connect(a, b, depth, force_connect_locs=[]):
             if b-a <= 2:
                 return None
                 
             seg_len = b-a
             step_len = int(np.sqrt(b-a))
-            key_indices = list(range(a, b, step_len))
+            key_indices = list(range(a + (b-1-a) % step_len, b, step_len))
             if len(force_connect_locs) > 0:
                 for fc_key in force_connect_locs:
                     if not fc_key in key_indices:
@@ -1339,9 +1354,13 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                 key_indices = sorted(key_indices)
             if key_indices[-1] != b-1:
                 key_indices.append(b-1)
+            if key_indices[0] != a:
+                key_indices.insert(0, a)
 
             # connection at the current recursion depth
             for ki, key in enumerate(key_indices):
+                if recursion_depths[key] < 0:
+                    recursion_depths[key] = depth
                 if ki == 0:
                      continue
                 for prev_key in key_indices[:ki]:
@@ -1351,12 +1370,12 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                 for li in range(prev_key + 1, key):
                     if not prev_key in l_adj[li]:
                         l_adj[li].append(prev_key)
-                loglog_connect(prev_key, key+1)
+                loglog_connect(prev_key, key+1, depth+1)
             return None
         
         
         force_connect_locs = self.cumsum_blocks
-        loglog_connect(0, self.total_units+1, force_connect_locs)
+        loglog_connect(0, self.total_units+1, 0, force_connect_locs)
         ## since the first conv is init conv that we don't count for pred.
         for i in range(self.total_units):
             l_adj[i+1] = filter(lambda x: x >= 0 and x <= i, np.unique(l_adj[i+1]))
@@ -1371,6 +1390,7 @@ class AnytimeLogLogDenseNet(AnytimeDensenet):
                             break
                 
         self._connections = l_adj[1:]
+        self._recursion_depths = recursion_depths[1:] 
         
     
 

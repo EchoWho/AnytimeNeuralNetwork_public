@@ -36,21 +36,30 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
         slide_all=slide_all,
         slide_window_size=side,
         void_overlap=not isTrain)
-    if isTrain:
-        x_augmentors = [
-            #imgaug.GaussianBlur(2)
-        ]
-        xy_augmentors = [
-            #imgaug.RotationAndCropValid(7),
-            #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-            imgaug.RandomCrop((side, side)),
-            imgaug.Flip(horiz=True),
-        ]
-    else:
-        x_augmentors = []
-        xy_augmentors = [
-            imgaug.RandomCrop((side, side)),
-        ]
+
+    x_augmentors = []
+    xy_augmentors = []
+    if args.operation == 'train':
+        if isTrain:
+            x_augmentors = [
+                #imgaug.GaussianBlur(2)
+            ]
+            xy_augmentors = [
+                #imgaug.RotationAndCropValid(7),
+                #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
+                imgaug.RandomCrop((side, side)),
+                imgaug.Flip(horiz=True),
+            ]
+        else:
+            xy_augmentors = [
+                imgaug.RandomCrop((side, side)),
+            ]
+    elif args.operation == 'finetune':
+        if isTrain:
+            xy_augmentors = [ imgaug.Flip(horiz=True) ]
+    elif args.operation == 'evaluate':
+        pass
+
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)
     ds = AugmentImageComponents(ds, xy_augmentors, copy=False)
@@ -197,8 +206,6 @@ if __name__ == '__main__':
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_test', help='Whehter use train-val or trainval-test',
                         default=False, action='store_true')
-    parser.add_argument('--eval',  help='whether do evaluation only',
-                        default=False, action='store_true')
     parser.add_argument('--is_philly', help='Whether the script is running in a phily script',
                         default=False, action='store_true')
     parser.add_argument('--operation', help='Current operation',
@@ -217,10 +224,7 @@ if __name__ == '__main__':
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
-    logger.info("Arguments: {}".format(args))
-    logger.info("TF version: {}".format(tf.__version__))
     fs.set_dataset_path(args.data_dir)
-
 
     ## 
     # Store a philly_operation.txt in root log dir
@@ -246,11 +250,13 @@ if __name__ == '__main__':
         args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_camvid_data
-        if args.eval:
+        if args.operation == 'evaluate':
+            args.batch_size = 1
+            args.nr_gpu = 1
             subset = 'test' if args.is_test else 'val'
             evaluate(subset, get_data, model_cls, dataset.Camvid)
             sys.exit()
-
+        
         if not args.is_test:
             ds_train = get_data('train') #trainval
             ds_val = get_data('val') #test
@@ -258,12 +264,24 @@ if __name__ == '__main__':
             ds_train = get_data('train')
             ds_val = get_data('test')
 
-        max_epoch = 750
-        lr = args.init_lr
-        lr_schedule = []
-        for i in range(max_epoch):
-            lr *= 0.995
-            lr_schedule.append((i+1, lr))
+        if args.operation == 'train':
+            max_epoch = 750
+            lr = args.init_lr
+            lr_schedule = []
+            for i in range(max_epoch):
+                lr *= 0.995
+                lr_schedule.append((i+1, lr))
+        elif args.operation == 'finetune':
+            args.batch_size = args.nr_gpu
+            init_epoch = 250 
+            max_epoch = init_epoch + 300
+            lr = 1e-4
+            lr_multiplier = 0.7 ** (1. / (max_epoch - init_epoch))
+            lr_schedule = []
+            for i in range(max_epoch):
+                if i > init_epoch:
+                    lr *= lr_multiplier   
+                lr_schedule.append((i+1, lr))
 
     elif args.ds_name == 'pascal':
         args.num_classes = 21
@@ -288,6 +306,8 @@ if __name__ == '__main__':
             lr *= 0.995
             lr_schedule.append((i+1, lr))
     
+    logger.info("Arguments: {}".format(args))
+    logger.info("TF version: {}".format(tf.__version__))
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
