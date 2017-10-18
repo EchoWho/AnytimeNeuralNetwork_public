@@ -846,7 +846,7 @@ def parser_add_densenet_arguments(parser):
     parser.add_argument('--dropout_kp', help='Dropout probability',
                         type=np.float32, default=0.8)
     parser.add_argument('--loglog_growth_multiplier', help='Loglog recursion depth 0 growth rate multiplier',
-                        type=np.float32, default=2.0)
+                        type=np.float32, default=1.0)
     return parser, depth_group
 
 
