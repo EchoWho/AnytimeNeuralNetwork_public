@@ -12,7 +12,7 @@ do
 
 	USERNAME="dedey"
 	PASSWORD="Will2god?"
-	CLUSTER="cam"
+	CLUSTER="rr1"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
