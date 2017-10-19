@@ -110,7 +110,8 @@ if __name__ == '__main__':
     # lr_rate represent how much we need to scale up down lr based on batch size
     lr_rate = args.batch_size / 256.0
     lr_decay_epoch = 15
-    lr_decay_step = 0.5
+    # step**6 approx 0.005 and step**5 approx 0.01
+    lr_decay_step = 0.4135 
     max_epoch = 105
     lr_schedule = [(1, 1e-1 * lr_rate)]
     for epochi in range(lr_decay_epoch, max_epoch, lr_decay_epoch):

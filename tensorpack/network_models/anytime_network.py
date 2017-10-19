@@ -226,6 +226,8 @@ def parser_add_common_arguments(parser):
     ## misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',
                         type=np.float32, default=0.01)
+    parser.add_argument('--sgd_moment', help='moment decay for SGD',
+                        type=np.float32, default=0.9)
     parser.add_argument('--batch_norm_decay', help='decay rate of batchnorms',
                         type=np.float32, default=0.9)
     parser.add_argument('--num_classes', help='Number of classes', 
@@ -610,7 +612,7 @@ class AnytimeNetwork(ModelDesc):
                 opt = tf.train.RMSPropOptimizer(lr)
         if opt is None:
             logger.info('No optimizer was specified, using default MomentumOptimizer')
-            opt = tf.train.MomentumOptimizer(lr, 0.9)
+            opt = tf.train.MomentumOptimizer(lr, self.options.sgd_moment)
         return opt
 
 
