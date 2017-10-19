@@ -217,7 +217,7 @@ if __name__ == '__main__':
     parser.add_argument('--is_philly', help='Whether the script is running in a phily script',
                         default=False, action='store_true')
     parser.add_argument('--operation', help='Current operation',
-                        default='train', choices=['finetune', 'evaluate'])
+                        default='train', choices=['train', 'finetune', 'evaluate'])
     parser.add_argument('--display_period', help='Display at eval every # of image; 0 means no display',
                         default=0, type=int)
     anytime_network.parser_add_fcdense_arguments(parser)
