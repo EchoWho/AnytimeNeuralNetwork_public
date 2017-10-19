@@ -1071,8 +1071,6 @@ class AnytimeDensenet(AnytimeNetwork):
                 logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     unit_idx, len(pls), sl_indices))
                 
-                ## Question: TODO whether save the pre-bnrelu feat or after-bnrelu feat
-                # The current version saves the after-bnrelue to save mem/computation
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
                 # pre activation
@@ -1767,6 +1765,71 @@ def AnytimeFCDenseNet(T_class):
             assert self.network_config.s_type == 'basic'
 
 
+        def compute_block(self, pls, pmls, n_units, growth, max_merge):
+            """
+                pls : previous layers. including the init_feat. Hence pls[i] is from 
+                    layer i-1 for i > 0
+                pmls : previous merged layers. (used for generate ll_feats) 
+                n_units : num units in a block
+
+                return pls, pmpls (updated version of these)
+            """
+            unit_idx = len(pls) - 2 # unit idx of the last completed unit
+            for _ in range(n_units):
+                unit_idx += 1
+                scope_name = self.compute_scope_basename(unit_idx)
+                with tf.variable_scope(scope_name+'.feat'):
+                    sl_indices = self.connections[unit_idx]
+                    logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
+                        unit_idx, len(pls), sl_indices))
+                    
+                    for idx_st in range(0, len(sl_indices), max_merge):
+                        idx_ed = min(idx_st + max_merge, len(sl_indices))
+                        name_appendix = '' if idx_st == 0 else '_{}'.format(idx_st)
+                        ml = tf.concat([pls[sli] for sli in sl_indices[idx_st:idx_ed]],\
+                                       CHANNEL_DIM, name='concat_feat'+name_appendix)
+                        
+                        # pre activation
+                        if self.pre_activate:
+                            ml = BNReLU('bnrelu_merged'+name_appendix, ml)
+                            nl = tf.identity
+                        else:
+                            nl = BNReLU
+                        layer_growth = self._compute_layer_growth(unit_idx, growth)
+                        if self.network_config.b_type == 'bottleneck':
+                            bottleneck_width = int(self.options.bottleneck_width * layer_growth)
+                            #ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
+                            #bottleneck_width = min(ch_in, bottleneck_width)
+                            l = Conv2D('conv1x1'+name_appendix, ml, bottleneck_width, 1, nl=BNReLU)
+                            if self.dropout_kp < 1:
+                                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                            l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3, nl=nl)
+                        else:
+                            l = Conv2D('conv3x3'+name_appendix, ml, layer_growth, 3, nl=nl)
+                        if self.dropout_kp < 1:
+                            l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                        
+                        if idx_st == 0:
+                            l_sum = l
+                        else:
+                            l_sum += l
+                    l = l_sum
+                    pls.append(l)
+
+                    # If the feature is used for prediction, store it.
+                    if self.weights[unit_idx] > 0:
+                        if self.pre_activate:
+                            l = BNReLU('bnrelu_local', l)
+                        if max_merge < len(sl_indices):
+                            pred_feat = [pls[sli] for sli in sl_indices] + [l]
+                        else:
+                            pred_feat = [ml, l]
+                        pmls.append(tf.concat(pred_feat, CHANNEL_DIM, name='concat_pred'))
+                    else:
+                        pmls.append(None)
+            return pls, pmls
+
+
         def _compute_transition_up(self, pls, skip_pls, trans_idx):
             """ for each previous layer, transition it up with deconv2d i.e., 
                 conv2d_transpose
@@ -1805,7 +1868,10 @@ def AnytimeFCDenseNet(T_class):
 
         def _compute_block_and_transition(self, pls, pmls, n_units, bi, extra_info):
             growth, l_pls = extra_info
-            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
+            max_merge = 4096
+            if bi >= self.n_blocks -2:
+                max_merge = 5
+            pls, pmls = self.compute_block(pls, pmls, n_units, growth, max_merge)
             if bi < self.n_pools:
                 l_pls.append(pls)
                 growth *= self.growth_rate_multiplier
