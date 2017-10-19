@@ -1795,25 +1795,29 @@ def AnytimeFCDenseNet(T_class):
                             nl = tf.identity
                         else:
                             nl = BNReLU
+
+                        # First conv
                         layer_growth = self._compute_layer_growth(unit_idx, growth)
                         if self.network_config.b_type == 'bottleneck':
                             bottleneck_width = int(self.options.bottleneck_width * layer_growth)
-                            #ch_in = ml.get_shape().as_list()[CHANNEL_DIM]
-                            #bottleneck_width = min(ch_in, bottleneck_width)
                             l = Conv2D('conv1x1'+name_appendix, ml, bottleneck_width, 1, nl=BNReLU)
-                            if self.dropout_kp < 1:
-                                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                            l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3, nl=nl)
                         else:
                             l = Conv2D('conv3x3'+name_appendix, ml, layer_growth, 3, nl=nl)
                         if self.dropout_kp < 1:
                             l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                         
+                        # accumulate conv results
                         if idx_st == 0:
                             l_sum = l
                         else:
                             l_sum += l
+
+                    # for bottleneck case, 2nd conv using the accumulated result
                     l = l_sum
+                    if self.network_config.b_type == 'bottleneck':
+                        l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3, nl=nl)
+                        if self.dropout_kp < 1:
+                            l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     pls.append(l)
 
                     # If the feature is used for prediction, store it.
@@ -1870,7 +1874,7 @@ def AnytimeFCDenseNet(T_class):
             growth, l_pls = extra_info
             max_merge = 4096
             if bi >= self.n_blocks -2:
-                max_merge = 5
+                max_merge = 8
             pls, pmls = self.compute_block(pls, pmls, n_units, growth, max_merge)
             if bi < self.n_pools:
                 l_pls.append(pls)
