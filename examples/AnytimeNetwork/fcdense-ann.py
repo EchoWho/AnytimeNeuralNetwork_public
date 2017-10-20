@@ -56,9 +56,18 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
             ]
     elif args.operation == 'finetune':
         if isTrain:
-            xy_augmentors = [ imgaug.Flip(horiz=True) ]
+            xy_augmentors = [ 
+                imgaug.Flip(horiz=True), 
+            #imgaug.RandomCrop((300, 300)) 
+            ]
+        else:
+            xy_augmentors = [
+            #imgaug.RandomCrop((300, 300)) 
+            ]
     elif args.operation == 'evaluate':
-        pass
+        xy_augmentors = [ 
+            #imgaug.RandomCrop((300, 300)) 
+        ]
 
     if len(x_augmentors) > 0:
         ds = AugmentImageComponent(ds, x_augmentors, copy=True)
@@ -141,8 +150,7 @@ def evaluate(subset, get_data, model_cls, meta_info):
             plt.savefig(os.path.join(logger.LOG_DIR, 'img_{}.png'.format(i)),
                 dpi=fig.dpi, bbox_inches='tight')
 
-    #for each sample
-    
+    #endfor each sample
     l_ret = []
     for i, total_confusion in enumerate(l_total_confusion):
         ret = dict()
@@ -209,9 +217,7 @@ if __name__ == '__main__':
     parser.add_argument('--is_philly', help='Whether the script is running in a phily script',
                         default=False, action='store_true')
     parser.add_argument('--operation', help='Current operation',
-                        default='train', choices=['finetune', 'evaluate'])
-    parser.add_argument('--finetune',  help='whether do fine tuning',
-                        default=False, action='store_true')
+                        default='train', choices=['train', 'finetune', 'evaluate'])
     parser.add_argument('--display_period', help='Display at eval every # of image; 0 means no display',
                         default=0, type=int)
     anytime_network.parser_add_fcdense_arguments(parser)
@@ -257,13 +263,6 @@ if __name__ == '__main__':
             evaluate(subset, get_data, model_cls, dataset.Camvid)
             sys.exit()
         
-        if not args.is_test:
-            ds_train = get_data('train') #trainval
-            ds_val = get_data('val') #test
-        else:
-            ds_train = get_data('train')
-            ds_val = get_data('test')
-
         if args.operation == 'train':
             max_epoch = 750
             lr = args.init_lr
@@ -273,15 +272,26 @@ if __name__ == '__main__':
                 lr_schedule.append((i+1, lr))
         elif args.operation == 'finetune':
             args.batch_size = args.nr_gpu
-            init_epoch = 250 
-            max_epoch = init_epoch + 300
-            lr = 1e-4
-            lr_multiplier = 0.7 ** (1. / (max_epoch - init_epoch))
+            #init_epoch = 250 
+            init_epoch = 0
+            max_epoch = init_epoch + 300 + 250
+            lr = 1e-3
+            #lr = 1e-4
+            #lr_multiplier = 0.7 ** (1. / (max_epoch - init_epoch))
+            lr_multiplier = 0.995 
             lr_schedule = []
             for i in range(max_epoch):
                 if i > init_epoch:
                     lr *= lr_multiplier   
                 lr_schedule.append((i+1, lr))
+
+        if not args.is_test:
+            ds_train = get_data('train') #trainval
+            ds_val = get_data('val') #test
+        else:
+            ds_train = get_data('train')
+            ds_val = get_data('test')
+
 
     elif args.ds_name == 'pascal':
         args.num_classes = 21
@@ -290,7 +300,7 @@ if __name__ == '__main__':
         INPUT_SIZE = None
         get_data = get_pascal_voc_data
 
-        if args.eval:
+        if args.operation == 'evaluate':
             subset = 'val'
             evaluate(subset, get_data, model_cls, PascalVOC)
             sys.exit()

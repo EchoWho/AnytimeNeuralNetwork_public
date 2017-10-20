@@ -226,6 +226,8 @@ def parser_add_common_arguments(parser):
     ## misc: training params, data-set params, speed/memory params
     parser.add_argument('--init_lr', help='The initial learning rate',
                         type=np.float32, default=0.01)
+    parser.add_argument('--sgd_moment', help='moment decay for SGD',
+                        type=np.float32, default=0.9)
     parser.add_argument('--batch_norm_decay', help='decay rate of batchnorms',
                         type=np.float32, default=0.9)
     parser.add_argument('--num_classes', help='Number of classes', 
@@ -610,7 +612,7 @@ class AnytimeNetwork(ModelDesc):
                 opt = tf.train.RMSPropOptimizer(lr)
         if opt is None:
             logger.info('No optimizer was specified, using default MomentumOptimizer')
-            opt = tf.train.MomentumOptimizer(lr, 0.9)
+            opt = tf.train.MomentumOptimizer(lr, self.options.sgd_moment)
         return opt
 
 
@@ -896,24 +898,23 @@ class AnytimeDensenet(AnytimeNetwork):
         self.l_max_scale = None 
         self.l_min_scale = None
 
-
-    ## whether pls[x] should be included for computing ui,
-    # given that pls[x] is selected already by DSM, early forcement.
-    # e.g., log-dense-v2 uses this to cut early connections to do block
-    # compression
-    def special_filter(self, ui, x):
-        return True
-
-
-    ## Some connections methods requrie some recursion or complex 
-    # functions to set all the connection together first.
-    # this will be set in 
-    #               self._connections.
-    # it will then be used by pre_compute_connections and 
-    # dense_select_method to be augmented with forced connections
-    # and special_filter
-    def _pre_compute_connections(self):
-        self._connections = None
+        ## NOTE on how the connections are formed and used
+        # 
+        # 1. In the end, we use self.connections[ui] (0-based) to retrieve connections.
+        #  To form self.connections[..], we call pre_compute_connections().
+        #  This is typically done near the start of _compute_ll_feats
+        #
+        # 2. pre_compute_connections() first calls _pre_compute_connections(), 
+        #  which sets up _connections for certain complicated connection patterns.
+        #  Then for each ui=0,..., we use dense_select_indices() to pre_compute
+        #  the connections self.connections[ui], and update the required scales for 
+        #  each ui in self.l_min_scale and self.l_min_scale
+        #
+        # 3. dense_select_indices() has two cases, it either uses self._connections[ui]
+        #  to retrive connections from _pre_compute_connections(), or call 
+        #  _dense_select_indices() to compute self._connections[ui] on the fly.
+        #  Then self._connections[ui] is augmented with forced early connections, 
+        #  and are filtered by self.special_filter() to form self.connection[ui]
 
 
     ## Some networks need special grwoth rate for certain layers, 
@@ -943,6 +944,17 @@ class AnytimeDensenet(AnytimeNetwork):
             self.l_max_scale[ui+1] = curr_scale
 
 
+    ## Some connections methods requrie some recursion or complex 
+    # functions to set all the connection together first.
+    # this will be set in 
+    #               self._connections.
+    # it will then be used by pre_compute_connections and 
+    # dense_select_method to be augmented with forced connections
+    # and special_filter
+    def _pre_compute_connections(self):
+        self._connections = None
+
+
     ## Check whether _connections is filled first;
     # if not then use _dense_select_indices to actually comput connections.
     def dense_select_indices(self, ui):
@@ -958,6 +970,14 @@ class AnytimeDensenet(AnytimeNetwork):
         indices = filter(lambda x, ui=ui: x <=ui and x >=0 and \
             self.special_filter(ui, x), np.unique(indices))
         return indices
+
+
+    ## whether pls[x] should be included for computing ui,
+    # given that pls[x] is selected already by DSM, early forcement.
+    # e.g., log-dense-v2 uses this to cut early connections to do block
+    # compression
+    def special_filter(self, ui, x):
+        return True
 
 
     ## Multiple ways to force connections to early layers.
@@ -1019,7 +1039,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 / np.log2(self.log_dense_base) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
         elif self.dense_select_method == 3:
-            # Evenly spaced connections
+            # Evenly spaced connections (select log)
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
             delta = (ui+1.0) / n_select
             df = 0
@@ -1029,11 +1049,14 @@ class AnytimeDensenet(AnytimeNetwork):
                 if len(diffs) == 0 or int_df != diffs[-1]:
                     diffs.append(int_df)
                 df += delta
+
         elif self.dense_select_method == 4: 
             # select all
             diffs = list(range(ui+1))
         elif self.dense_select_method == 5: 
-            # mini dense (only close to the last layer) 
+            # mini dense 
+            # For all x_i, x_i is close to x_L 
+            # No guarantees for BD(x_i, x_j) in general
             diffs = [0, 1]
             left = 0
             right = self.total_units + 1
@@ -1046,6 +1069,27 @@ class AnytimeDensenet(AnytimeNetwork):
             df = right - (right + left) // 2 - 1
             if df > 1:
                 diffs.append(df)
+
+        elif self.dense_select_method == 6:
+            # select at the end with 0.5 * i
+            # BD(xi, xj) <= log(i-j)
+            n_select = ui // 2 + 1
+            diffs = list(range(n_select))
+        elif self.dense_select_method == 7:
+            # select from every other layer 
+            # starting from the previous layer (diff==0)
+            # BD(xi, xj) <= 2
+            diffs = list(range(0, ui+1, 2))
+        elif self.dense_select_method == 8:
+            # select at the end with 0.5 *i
+            # also select the key hubs at 0.25 *i, 0.125*i, ...
+            # BD(xi, xj) <= 2
+            n_select = ui // 2 + 1
+            diffs = list(range(n_select))
+            pos = ui - n_select + 1
+            while pos > 0:
+                pos = (pos - 1) // 2
+                diffs.append(ui - pos)
 
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
         return indices
@@ -1069,8 +1113,6 @@ class AnytimeDensenet(AnytimeNetwork):
                 logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
                     unit_idx, len(pls), sl_indices))
                 
-                ## Question: TODO whether save the pre-bnrelu feat or after-bnrelu feat
-                # The current version saves the after-bnrelue to save mem/computation
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                CHANNEL_DIM, name='concat_feat')
                 # pre activation
@@ -1308,7 +1350,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
 
 ############################
-# The craziness of Log-Log dense
+# Log-Log dense
 ############################
 class AnytimeLogLogDenseNet(AnytimeDensenet):
     def __init__(self, input_size, args):
@@ -1765,6 +1807,75 @@ def AnytimeFCDenseNet(T_class):
             assert self.network_config.s_type == 'basic'
 
 
+        def compute_block(self, pls, pmls, n_units, growth, max_merge):
+            """
+                pls : previous layers. including the init_feat. Hence pls[i] is from 
+                    layer i-1 for i > 0
+                pmls : previous merged layers. (used for generate ll_feats) 
+                n_units : num units in a block
+
+                return pls, pmpls (updated version of these)
+            """
+            unit_idx = len(pls) - 2 # unit idx of the last completed unit
+            for _ in range(n_units):
+                unit_idx += 1
+                scope_name = self.compute_scope_basename(unit_idx)
+                with tf.variable_scope(scope_name+'.feat'):
+                    sl_indices = self.connections[unit_idx]
+                    logger.info("unit_idx = {}, len past_feats = {}, selected_feats: {}".format(\
+                        unit_idx, len(pls), sl_indices))
+                    
+                    for idx_st in range(0, len(sl_indices), max_merge):
+                        idx_ed = min(idx_st + max_merge, len(sl_indices))
+                        name_appendix = '' if idx_st == 0 else '_{}'.format(idx_st)
+                        ml = tf.concat([pls[sli] for sli in sl_indices[idx_st:idx_ed]],\
+                                       CHANNEL_DIM, name='concat_feat'+name_appendix)
+                        
+                        # pre activation
+                        if self.pre_activate:
+                            ml = BNReLU('bnrelu_merged'+name_appendix, ml)
+                            nl = tf.identity
+                        else:
+                            nl = BNReLU
+
+                        # First conv
+                        layer_growth = self._compute_layer_growth(unit_idx, growth)
+                        if self.network_config.b_type == 'bottleneck':
+                            bottleneck_width = int(self.options.bottleneck_width * layer_growth)
+                            l = Conv2D('conv1x1'+name_appendix, ml, bottleneck_width, 1, nl=BNReLU)
+                        else:
+                            l = Conv2D('conv3x3'+name_appendix, ml, layer_growth, 3, nl=nl)
+                        if self.dropout_kp < 1:
+                            l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                        
+                        # accumulate conv results
+                        if idx_st == 0:
+                            l_sum = l
+                        else:
+                            l_sum += l
+
+                    # for bottleneck case, 2nd conv using the accumulated result
+                    l = l_sum
+                    if self.network_config.b_type == 'bottleneck':
+                        l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3, nl=nl)
+                        if self.dropout_kp < 1:
+                            l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    pls.append(l)
+
+                    # If the feature is used for prediction, store it.
+                    if self.weights[unit_idx] > 0:
+                        if self.pre_activate:
+                            l = BNReLU('bnrelu_local', l)
+                        if max_merge < len(sl_indices):
+                            pred_feat = [pls[sli] for sli in sl_indices] + [l]
+                        else:
+                            pred_feat = [ml, l]
+                        pmls.append(tf.concat(pred_feat, CHANNEL_DIM, name='concat_pred'))
+                    else:
+                        pmls.append(None)
+            return pls, pmls
+
+
         def _compute_transition_up(self, pls, skip_pls, trans_idx):
             """ for each previous layer, transition it up with deconv2d i.e., 
                 conv2d_transpose
@@ -1803,7 +1914,10 @@ def AnytimeFCDenseNet(T_class):
 
         def _compute_block_and_transition(self, pls, pmls, n_units, bi, extra_info):
             growth, l_pls = extra_info
-            pls, pmls = self.compute_block(pls, pmls, n_units, growth)
+            max_merge = 4096
+            if bi >= self.n_blocks -2:
+                max_merge = 8
+            pls, pmls = self.compute_block(pls, pmls, n_units, growth, max_merge)
             if bi < self.n_pools:
                 l_pls.append(pls)
                 growth *= self.growth_rate_multiplier
