@@ -1072,12 +1072,24 @@ class AnytimeDensenet(AnytimeNetwork):
 
         elif self.dense_select_method == 6:
             # select at the end with 0.5 * i
+            # BD(xi, xj) <= log(i-j)
             n_select = ui // 2 + 1
-            diffs = list(range(n_select + 1))
-        elif select.dense_select_method == 7:
+            diffs = list(range(n_select))
+        elif self.dense_select_method == 7:
             # select from every other layer 
             # starting from the previous layer (diff==0)
+            # BD(xi, xj) <= 2
             diffs = list(range(0, ui+1, 2))
+        elif self.dense_select_method == 8:
+            # select at the end with 0.5 *i
+            # also select the key hubs at 0.25 *i, 0.125*i, ...
+            # BD(xi, xj) <= 2
+            n_select = ui // 2 + 1
+            diffs = list(range(n_select))
+            pos = ui - n_select + 1
+            while pos > 0:
+                pos = (pos - 1) // 2
+                diffs.append(ui - pos)
 
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
         return indices
