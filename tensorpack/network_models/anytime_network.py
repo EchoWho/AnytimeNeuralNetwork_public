@@ -898,24 +898,23 @@ class AnytimeDensenet(AnytimeNetwork):
         self.l_max_scale = None 
         self.l_min_scale = None
 
-
-    ## whether pls[x] should be included for computing ui,
-    # given that pls[x] is selected already by DSM, early forcement.
-    # e.g., log-dense-v2 uses this to cut early connections to do block
-    # compression
-    def special_filter(self, ui, x):
-        return True
-
-
-    ## Some connections methods requrie some recursion or complex 
-    # functions to set all the connection together first.
-    # this will be set in 
-    #               self._connections.
-    # it will then be used by pre_compute_connections and 
-    # dense_select_method to be augmented with forced connections
-    # and special_filter
-    def _pre_compute_connections(self):
-        self._connections = None
+        ## NOTE on how the connections are formed and used
+        # 
+        # 1. In the end, we use self.connections[ui] (0-based) to retrieve connections.
+        #  To form self.connections[..], we call pre_compute_connections().
+        #  This is typically done near the start of _compute_ll_feats
+        #
+        # 2. pre_compute_connections() first calls _pre_compute_connections(), 
+        #  which sets up _connections for certain complicated connection patterns.
+        #  Then for each ui=0,..., we use dense_select_indices() to pre_compute
+        #  the connections self.connections[ui], and update the required scales for 
+        #  each ui in self.l_min_scale and self.l_min_scale
+        #
+        # 3. dense_select_indices() has two cases, it either uses self._connections[ui]
+        #  to retrive connections from _pre_compute_connections(), or call 
+        #  _dense_select_indices() to compute self._connections[ui] on the fly.
+        #  Then self._connections[ui] is augmented with forced early connections, 
+        #  and are filtered by self.special_filter() to form self.connection[ui]
 
 
     ## Some networks need special grwoth rate for certain layers, 
@@ -945,6 +944,17 @@ class AnytimeDensenet(AnytimeNetwork):
             self.l_max_scale[ui+1] = curr_scale
 
 
+    ## Some connections methods requrie some recursion or complex 
+    # functions to set all the connection together first.
+    # this will be set in 
+    #               self._connections.
+    # it will then be used by pre_compute_connections and 
+    # dense_select_method to be augmented with forced connections
+    # and special_filter
+    def _pre_compute_connections(self):
+        self._connections = None
+
+
     ## Check whether _connections is filled first;
     # if not then use _dense_select_indices to actually comput connections.
     def dense_select_indices(self, ui):
@@ -960,6 +970,14 @@ class AnytimeDensenet(AnytimeNetwork):
         indices = filter(lambda x, ui=ui: x <=ui and x >=0 and \
             self.special_filter(ui, x), np.unique(indices))
         return indices
+
+
+    ## whether pls[x] should be included for computing ui,
+    # given that pls[x] is selected already by DSM, early forcement.
+    # e.g., log-dense-v2 uses this to cut early connections to do block
+    # compression
+    def special_filter(self, ui, x):
+        return True
 
 
     ## Multiple ways to force connections to early layers.
@@ -1021,7 +1039,7 @@ class AnytimeDensenet(AnytimeNetwork):
                 / np.log2(self.log_dense_base) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
         elif self.dense_select_method == 3:
-            # Evenly spaced connections
+            # Evenly spaced connections (select log)
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
             delta = (ui+1.0) / n_select
             df = 0
@@ -1031,11 +1049,14 @@ class AnytimeDensenet(AnytimeNetwork):
                 if len(diffs) == 0 or int_df != diffs[-1]:
                     diffs.append(int_df)
                 df += delta
+
         elif self.dense_select_method == 4: 
             # select all
             diffs = list(range(ui+1))
         elif self.dense_select_method == 5: 
-            # mini dense (only close to the last layer) 
+            # mini dense 
+            # For all x_i, x_i is close to x_L 
+            # No guarantees for BD(x_i, x_j) in general
             diffs = [0, 1]
             left = 0
             right = self.total_units + 1
@@ -1048,6 +1069,15 @@ class AnytimeDensenet(AnytimeNetwork):
             df = right - (right + left) // 2 - 1
             if df > 1:
                 diffs.append(df)
+
+        elif self.dense_select_method == 6:
+            # select at the end with 0.5 * i
+            n_select = ui // 2 + 1
+            diffs = list(range(n_select + 1))
+        elif select.dense_select_method == 7:
+            # select from every other layer 
+            # starting from the previous layer (diff==0)
+            diffs = list(range(0, ui+1, 2))
 
         indices = [ui - df  for df in diffs if ui - df >= 0 ]
         return indices
@@ -1308,7 +1338,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
 
 ############################
-# The craziness of Log-Log dense
+# Log-Log dense
 ############################
 class AnytimeLogLogDenseNet(AnytimeDensenet):
     def __init__(self, input_size, args):
