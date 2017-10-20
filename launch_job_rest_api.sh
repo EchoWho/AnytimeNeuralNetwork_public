@@ -1,12 +1,8 @@
 #!/bin/bash
-# Exp 59:
-# 2799..2822
-# Num gpus: 2
-
-# Exp 43:
-# 2144..2245
-# Num gpus: 1
-for i in {2144..2245}
+# Exp 60
+# 2825..2905
+# Num gpus: 4
+for i in {2825..2905}
 do
 
 	USERNAME="dedey"
@@ -15,7 +11,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="2"
+	NUM_GPUS="4"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -150,3 +146,7 @@ done
 # Exp 59:
 # 2799..2822
 # Num gpus: 2
+
+# Exp 60
+# 2825..2905
+# Num gpus: 4
