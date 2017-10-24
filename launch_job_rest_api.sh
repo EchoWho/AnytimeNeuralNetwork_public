@@ -15,7 +15,11 @@
 # Exp 63
 # 2960..2980
 # Num gpus: 4
-for i in {2904..2957} {2960..2980}
+
+# Exp 64
+# 2983..3009
+# Num gpus: 4
+for i in {2983..3009}
 do
 
 	USERNAME="dedey"
@@ -174,4 +178,8 @@ done
 
 # Exp 63
 # 2960..2980
+# Num gpus: 4
+
+# Exp 64
+# 2983..3009
 # Num gpus: 4
