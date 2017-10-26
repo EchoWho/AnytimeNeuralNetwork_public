@@ -11,7 +11,7 @@ def collect_info(cluster=None):
     password = 'Will2god?'
     vc = 'msrlabs'
     status = 'Passed'
-    num_finished_jobs = '2000'
+    num_finished_jobs = '500'
 
     cmd = "https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(
         cluster, vc, num_finished_jobs, user, status)
@@ -68,8 +68,8 @@ def main():
     json_data = collect_info(cluster='rr1')
     copy_passed_logs_from_json(json_data=json_data)
     # From cam
-    json_data = collect_info(cluster='cam')
-    copy_passed_logs_from_json(json_data=json_data)
+    # json_data = collect_info(cluster='cam')
+    # copy_passed_logs_from_json(json_data=json_data)
 
 if __name__ == '__main__':
     main()
