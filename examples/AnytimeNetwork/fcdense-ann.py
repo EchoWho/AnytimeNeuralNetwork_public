@@ -169,7 +169,7 @@ def evaluate(subset, get_data, model_cls, meta_info):
 
     if logger.LOG_DIR:
         npzfn = os.path.join(logger.LOG_DIR, 'evaluation.npz') 
-        np.savez(npzfn, evalution_ret=ret)
+        np.savez(npzfn, evaluation_ret=ret)
 
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
