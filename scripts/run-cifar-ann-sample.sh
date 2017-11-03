@@ -1,10 +1,10 @@
 #!/bin/bash
 ds_name=cifar100  #cifar10, cifar100 or svhn
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 DATA_DIR=${GLOBAL_DATA_DIR}/
 LOG_DIR=${GLOBAL_LOG_DIR}/${ds_name}/
 MODEL_DIR=${GLOBAL_MODEL_DIR}/${ds_name}/
-CONFIG_DIR=/home/dedey/AnytimeNeuralNetwork/
+CONFIG_DIR=.
 
 mkdir -p $MODEL_DIR
 
