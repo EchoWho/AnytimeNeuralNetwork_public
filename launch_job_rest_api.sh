@@ -1,25 +1,9 @@
 #!/bin/bash
 
-# Exp 60
-# 2825..2878
+# Exp 65
+# 3011..3038
 # Num gpus: 4
-
-# Exp 61
-# 2881..2901
-# Num gpus: 4
-
-# Exp 62
-# 2904..2957
-# Num gpus: 4
-
-# Exp 63
-# 2960..2980
-# Num gpus: 4
-
-# Exp 64
-# 2983..3009
-# Num gpus: 4
-for i in {2983..3009}
+for i in {3011..3038}
 do
 
 	USERNAME="dedey"
@@ -182,4 +166,8 @@ done
 
 # Exp 64
 # 2983..3009
+# Num gpus: 4
+
+# Exp 65
+# 3011..3038
 # Num gpus: 4
