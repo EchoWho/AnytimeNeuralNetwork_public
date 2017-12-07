@@ -1,25 +1,13 @@
 #!/bin/bash
 
-# Exp 60
-# 2825..2878
+# Exp 65
+# 3011..3032
 # Num gpus: 4
 
-# Exp 61
-# 2881..2901
+# Exp 66
+# 3035..3115
 # Num gpus: 4
-
-# Exp 62
-# 2904..2957
-# Num gpus: 4
-
-# Exp 63
-# 2960..2980
-# Num gpus: 4
-
-# Exp 64
-# 2983..3009
-# Num gpus: 4
-for i in {2881..2901} {2904..2957} {2960..2980} {2983..3009}
+for i in {3011..3032} {3035..3115}
 do
 	USERNAME="dedey"
 	PASSWORD="Will2god?"
@@ -47,7 +35,6 @@ do
 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
 
 	echo "$CMD"
-
 done
 
 
@@ -181,4 +168,12 @@ done
 
 # Exp 64
 # 2983..3009
+# Num gpus: 4
+
+# Exp 65
+# 3011..3032
+# Num gpus: 4
+
+# Exp 66
+# 3035..3115
 # Num gpus: 4
