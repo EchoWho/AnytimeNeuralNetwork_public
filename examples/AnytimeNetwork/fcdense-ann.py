@@ -13,7 +13,7 @@ from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import \
-    AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet
+    AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet, AnytimeFCDenseNetV2
 import get_augmented_data
 
 
@@ -222,11 +222,13 @@ if __name__ == '__main__':
                         default=0, type=int)
     anytime_network.parser_add_fcdense_arguments(parser)
     args = parser.parse_args()
-    if args.densenet_version == 'atv1':
-        dense_cls = AnytimeDensenet
+    model_cls = None
+    if args.densenet_version == 'atv2':
+        model_cls = AnytimeFCDenseNetV2
+    elif args.densenet_version == 'atv1':
+        model_cls = AnytimeFCDenseNet(AnytimeDensenet)
     elif args.densenet_version == 'loglog':
-        dense_cls = AnytimeLogLogDenseNet
-    model_cls = AnytimeFCDenseNet(dense_cls)
+        model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
