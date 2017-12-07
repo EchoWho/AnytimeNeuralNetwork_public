@@ -5,9 +5,9 @@
 # Num gpus: 4
 
 # Exp 66
-# 3035..3061
+# 3035..3115
 # Num gpus: 4
-for i in {3011..3032} {3035..3061}
+for i in {3011..3032} {3035..3115}
 do
 
 	USERNAME="dedey"
@@ -177,5 +177,5 @@ done
 # Num gpus: 4
 
 # Exp 66
-# 3035..3061
+# 3035..3115
 # Num gpus: 4
