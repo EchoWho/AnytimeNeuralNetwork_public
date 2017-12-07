@@ -19,12 +19,11 @@
 # Exp 64
 # 2983..3009
 # Num gpus: 4
-for i in {2983..3009}
+for i in {2881..2901} {2904..2957} {2960..2980} {2983..3009}
 do
-
 	USERNAME="dedey"
 	PASSWORD="Will2god?"
-	CLUSTER="rr1"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
