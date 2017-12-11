@@ -10,8 +10,8 @@
 for i in {3012..3032} {3035..3115}
 do
 	USERNAME="dedey"
-	PASSWORD="Will2god?"
-	CLUSTER="rr1"
+	PASSWORD="DigDug2god?"
+	CLUSTER="gcr"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
