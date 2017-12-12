@@ -1,18 +1,17 @@
 #!/bin/bash
 
 # Exp 65
-# 3011..3032
+# 3012..3032
 # Num gpus: 4
 
 # Exp 66
 # 3035..3115
 # Num gpus: 4
-for i in {3011..3032} {3035..3115}
+for i in {3012..3032} {3035..3115}
 do
-
 	USERNAME="dedey"
-	PASSWORD="Will2god?"
-	CLUSTER="rr1"
+	PASSWORD="DigDug2god?"
+	CLUSTER="gcr"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
@@ -36,7 +35,6 @@ do
 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
 
 	echo "$CMD"
-
 done
 
 
