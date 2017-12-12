@@ -8,7 +8,7 @@ import pdb
 
 def collect_info(cluster=None):
     user = 'dedey'
-    password = 'Will2god?'
+    password = 'DigDug2god?'
     vc = 'msrlabs'
     status = 'Passed'
     num_finished_jobs = '500'
@@ -52,7 +52,7 @@ def copy_passed_logs_from_json(json_data=None):
                 philly_scratch_dir = job['scratch']
 
                 # The name of the folder on the local machine to put logs in
-                local_dir = os.path.join('/home/dedey/DATADRIVE1/ann_models_logs', job_name.split('.')[0])
+                local_dir = os.path.join('/home/dedey/ann_models_logs', job_name.split('.')[0])
 
                 # Call the bash script with the arguments
                 print 'Going to copy: ' + philly_scratch_dir + ' to ' + local_dir
