@@ -116,7 +116,7 @@ if __name__ == '__main__':
                         type=str, default=None)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
-                        type=bool, default=False, action='store_true')
+                        default=False, action='store_true')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
