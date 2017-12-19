@@ -116,7 +116,7 @@ if __name__ == '__main__':
                         type=str, default=None)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
-                        type=bool, default=False)
+                        type=bool, default=False, action='store_true')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
@@ -149,8 +149,10 @@ if __name__ == '__main__':
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_cifar_augmented_data
-        ds_train = get_data('train', args, not do_eval)
-        ds_val = get_data('test', args, False)
+        ds_train = get_data('train', args, do_multiprocess=not do_eval, 
+            do_validation=args.do_validation)
+        ds_val = get_data('test', args, 
+            do_multiprocess=False, do_validation=args.do_validation)
 
         lr_schedule = \
             [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
