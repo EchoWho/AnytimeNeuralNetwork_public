@@ -63,7 +63,7 @@ def evaluate(model_cls, ds, eval_names):
         model=model,
         session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
-        output_names=['input', 'label'] + output_names[-1] + feature_names[-1])
+        output_names=['input', 'label'] + output_names[-1:] + feature_names[-1:])
     
     pred = SimpleDatasetPredictor(pred_config, ds)
 
@@ -78,8 +78,8 @@ def evaluate(model_cls, ds, eval_names):
         # o contains a list of predictios at various locations; each pred contains a small batch
         image, label = output[0:2]
         l_labels.extend(label)
-        anytime_preds = output[3]
-        anytime_feats = output[4]
+        anytime_preds = output[2]
+        anytime_feats = output[3]
 
         l_preds.extend(anytime_preds)
         l_feats.extend(anytime_feats)
@@ -92,11 +92,10 @@ def evaluate(model_cls, ds, eval_names):
     l_labels = np.asarray(l_labels)
     l_preds = np.asarray(l_preds)
     l_feats = np.asarray(l_feats)
-    logger.info("N samples predicted: {}".format(len(l_labels)))
+    if args.store_feats_preds:
+        np.savez(args.store_basename + '.npz', l_preds=l_preds, l_feats=l_feats)
 
-    import ipdb
-    ipdb.set_trace()
-    
+    logger.info("N samples predicted: {}".format(len(l_labels)))
     if args.store_final_prediction:
         f_store_out.close()
         
@@ -140,6 +139,8 @@ if __name__ == '__main__':
                         default=False, action='store_true')
     parser.add_argument('--store_basename', help='basename_<train/test>.bin for storing the logits',
                         type=str, default='distill_target')
+    parser.add_argument('--store_feats_preds', help='whether store final feature and predictins in npz', 
+                        default=False, action='store_true')
     anytime_network.parser_add_resnet_arguments(parser)
     model_cls = AnytimeResnet
     args = parser.parse_args()
