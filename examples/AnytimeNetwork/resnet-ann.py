@@ -52,15 +52,18 @@ def evaluate(model_cls, ds, eval_names):
     model = model_cls(INPUT_SIZE, args) 
 
     output_names = []
+    feature_names = []
     for i, w in enumerate(model.weights):
         if w > 0:
             output_names.append('layer{:03d}.0.pred/linear/output:0'.format(i))
+            feature_names.append('layer{:03d}.0.end/add:0'.format(i))
+    n_outputs = len(output_names)
 
     pred_config = PredictConfig(
         model=model,
         session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
-        output_names=['input', 'label'] + output_names)
+        output_names=['input', 'label'] + output_names[-1] + feature_names[-1])
     
     pred = SimpleDatasetPredictor(pred_config, ds)
 
@@ -69,19 +72,30 @@ def evaluate(model_cls, ds, eval_names):
         f_store_out = open(store_fn, 'wb')
 
     l_labels = []
+    l_preds = []
+    l_feats = []
     for idx, output in enumerate(pred.get_result()):
         # o contains a list of predictios at various locations; each pred contains a small batch
         image, label = output[0:2]
         l_labels.extend(label)
-        anytime_preds = output[2:]
+        anytime_preds = output[3]
+        anytime_feats = output[4]
+
+        l_preds.extend(anytime_preds)
+        l_feats.extend(anytime_feats)
         
         if args.store_final_prediction:
-            preds = anytime_preds[-1]
+            preds = anytime_preds
             f_store_out.write(preds)
 
     # since the labels comes in batches
     l_labels = np.asarray(l_labels)
+    l_preds = np.asarray(l_preds)
+    l_feats = np.asarray(l_feats)
     logger.info("N samples predicted: {}".format(len(l_labels)))
+
+    import ipdb
+    ipdb.set_trace()
     
     if args.store_final_prediction:
         f_store_out.close()
