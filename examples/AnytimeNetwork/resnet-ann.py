@@ -52,15 +52,18 @@ def evaluate(model_cls, ds, eval_names):
     model = model_cls(INPUT_SIZE, args) 
 
     output_names = []
+    feature_names = []
     for i, w in enumerate(model.weights):
         if w > 0:
             output_names.append('layer{:03d}.0.pred/linear/output:0'.format(i))
+            feature_names.append('layer{:03d}.0.end/add:0'.format(i))
+    n_outputs = len(output_names)
 
     pred_config = PredictConfig(
         model=model,
         session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
-        output_names=['input', 'label'] + output_names)
+        output_names=['input', 'label'] + output_names[-1:] + feature_names[-1:])
     
     pred = SimpleDatasetPredictor(pred_config, ds)
 
@@ -69,20 +72,30 @@ def evaluate(model_cls, ds, eval_names):
         f_store_out = open(store_fn, 'wb')
 
     l_labels = []
+    l_preds = []
+    l_feats = []
     for idx, output in enumerate(pred.get_result()):
         # o contains a list of predictios at various locations; each pred contains a small batch
         image, label = output[0:2]
         l_labels.extend(label)
-        anytime_preds = output[2:]
+        anytime_preds = output[2]
+        anytime_feats = output[3]
+
+        l_preds.extend(anytime_preds)
+        l_feats.extend(anytime_feats)
         
         if args.store_final_prediction:
-            preds = anytime_preds[-1]
+            preds = anytime_preds
             f_store_out.write(preds)
 
     # since the labels comes in batches
     l_labels = np.asarray(l_labels)
+    l_preds = np.asarray(l_preds)
+    l_feats = np.asarray(l_feats)
+    if args.store_feats_preds:
+        np.savez(args.store_basename + '.npz', l_preds=l_preds, l_feats=l_feats)
+
     logger.info("N samples predicted: {}".format(len(l_labels)))
-    
     if args.store_final_prediction:
         f_store_out.close()
         
@@ -116,7 +129,7 @@ if __name__ == '__main__':
                         type=str, default=None)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--do_validation', help='Whether use validation set. Default not',
-                        type=bool, default=False)
+                        default=False, action='store_true')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
     parser.add_argument('--is_toy', help='Whether to have data size of only 1024',
                         type=bool, default=False)
@@ -126,6 +139,8 @@ if __name__ == '__main__':
                         default=False, action='store_true')
     parser.add_argument('--store_basename', help='basename_<train/test>.bin for storing the logits',
                         type=str, default='distill_target')
+    parser.add_argument('--store_feats_preds', help='whether store final feature and predictins in npz', 
+                        default=False, action='store_true')
     anytime_network.parser_add_resnet_arguments(parser)
     model_cls = AnytimeResnet
     args = parser.parse_args()
@@ -149,8 +164,10 @@ if __name__ == '__main__':
         INPUT_SIZE = 32
         fs.set_dataset_path(path=args.data_dir, auto_download=False)
         get_data = get_cifar_augmented_data
-        ds_train = get_data('train', args, not do_eval)
-        ds_val = get_data('test', args, False)
+        ds_train = get_data('train', args, do_multiprocess=not do_eval, 
+            do_validation=args.do_validation)
+        ds_val = get_data('test', args, 
+            do_multiprocess=False, do_validation=args.do_validation)
 
         lr_schedule = \
             [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]

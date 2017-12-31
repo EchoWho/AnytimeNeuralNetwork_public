@@ -1811,6 +1811,10 @@ def AnytimeFCDenseNet(T_class):
                     layer i-1 for i > 0
                 pmls : previous merged layers. (used for generate ll_feats) 
                 n_units : num units in a block
+                max_merge : upper bound for how many selected layers can be merged at once, 
+                    if we select more than max_merge, we will have multiple batches of size
+                    max_merge. Each batch will produce a result, and the results will be added
+                    together.  This is for preventing the 2GB max tensor size problem
 
                 return pls, pmpls (updated version of these)
             """
@@ -1962,6 +1966,7 @@ class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDensenetV2):
         return bcml
 
     def _compute_ll_feats(self, image):
+        self.pre_compute_connections()
         l_feats = self._compute_init_l_feats(image)
         bcml = l_feats[0] #block compression merged layer
         l_mls = []
