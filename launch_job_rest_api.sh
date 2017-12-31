@@ -11,7 +11,7 @@ for i in {3012..3032} {3035..3115}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
-	CLUSTER="gcr"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
