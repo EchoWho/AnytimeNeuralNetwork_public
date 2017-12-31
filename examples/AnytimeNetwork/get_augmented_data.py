@@ -35,14 +35,14 @@ def join_distill_and_shuffle(ds, subset, options, buffer_size=None):
     ds = LocallyShuffleData(ds, buffer_size)
     return ds
 
-def get_cifar_augmented_data(subset, options, do_multiprocess=True):
+def get_cifar_augmented_data(subset, options, do_multiprocess=True, do_validation=False):
     isTrain = subset == 'train' and do_multiprocess
     use_distill = isTrain and options.alter_label
     shuffle = isTrain and not options.alter_label
     if options.num_classes == 10:
-        ds = dataset.Cifar10(subset, shuffle=shuffle)
+        ds = dataset.Cifar10(subset, shuffle=shuffle, do_validation=do_validation)
     elif options.num_classes == 100:
-        ds = dataset.Cifar100(subset, shuffle=shuffle)
+        ds = dataset.Cifar100(subset, shuffle=shuffle, do_validation=do_validation)
     else:
         raise ValueError('Number of classes must be set to 10(default) or 100 for CIFAR')
     logger.info('{} set has n_samples: {}'.format(subset, len(ds.data)))
