@@ -7,11 +7,11 @@ import subprocess
 import os
 import pdb
 
-def collect_info():
+def collect_info(cluster_name):
 	user = 'dedey'
-	password = 'Chakra2god?'
-	cluster = 'gcr'
-	vc = 'pnrsy'
+	password = 'Will2god?'
+	cluster = cluster_name
+	vc = 'msrlabs'
 	status = 'all'
 	num_finished_jobs = '2000'
 
@@ -94,9 +94,10 @@ def print_minimal_info(json_data=None):
 	print '------------------------------------------------'
 
 def main():
-	json_data = collect_info()
+	json_data = collect_info('gcr')
 	print_minimal_info(json_data=json_data)
-	
+	json_data = collect_info('rr1')
+	print_minimal_info(json_data=json_data)
 
 
 
