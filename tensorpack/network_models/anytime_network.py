@@ -15,7 +15,6 @@ from tensorflow.contrib.layers import xavier_initializer
 from collections import namedtuple
 import bisect
 
-
 """
 Data format, and the resulting dimension for the channels.
 ('NCHW',1) or ('NHWC', 3)
@@ -634,7 +633,6 @@ class AnytimeNetwork(ModelDesc):
                 #add_moving_summary(weight_i)
         return select_idx
 
-
 class AnytimeResnet(AnytimeNetwork):
     def __init__(self, input_size, args):
         super(AnytimeResnet, self).__init__(input_size, args)
@@ -806,7 +804,6 @@ class AnytimeResnet(AnytimeNetwork):
 ################################################
 # Dense Net (Log Dense)
 ################################################
-
 def parser_add_densenet_arguments(parser):
     parser, depth_group = parser_add_common_arguments(parser)
     depth_group.add_argument('--densenet_depth',
@@ -1462,20 +1459,17 @@ def parser_add_fcn_arguments(parser):
 
 class AnytimeFCN(AnytimeNetwork):
     """
-    Overload AnytimeNetwork from classification set-up to semantic labeling:
-    (1) the input now accept image and image labels;
-    (2) prediction and loss are on image of prediction probs; 
-    (3) parse input label to various sizes of label distributions for ANN;
-    (4) scene parsing callbacks. 
-    (5) TODO introduce transition_up and compute_ll_feats 
+        Overload AnytimeNetwork from classification set-up to semantic labeling:
+        (1) the input now accept image and image labels;
+        (2) prediction and loss are on image of prediction probs; 
+        (3) parse input label to various sizes of label distributions for ANN;
+        (4) scene parsing callbacks. 
+        (5) TODO introduce transition_up and compute_ll_feats 
     """
 
-    # NOTE
-    # label_img is always NHWC or NHW
-    # If label_img is NHWC, the distribution doesn't include void. 
-    # Furthermore, label_img is 0-vec for void labels
     def __init__(self, args):
         super(AnytimeFCN, self).__init__(None, args)
+
 
         # Class weight for fully convolutional networks
         self.class_weight = None
@@ -1528,6 +1522,10 @@ class AnytimeFCN(AnytimeNetwork):
 
 
     def _parse_inputs(self, inputs):
+        # NOTE
+        # label_img is always NHWC or NHW
+        # If label_img is NHWC, the distribution doesn't include void. 
+        # Furthermore, label_img is 0-vec for void labels
         image, label_img = inputs
         if not self.options.is_label_one_hot: 
             # From now on label_img is tf.float one hot, void has 0-vector.
@@ -1813,6 +1811,10 @@ def AnytimeFCDenseNet(T_class):
                     layer i-1 for i > 0
                 pmls : previous merged layers. (used for generate ll_feats) 
                 n_units : num units in a block
+                max_merge : upper bound for how many selected layers can be merged at once, 
+                    if we select more than max_merge, we will have multiple batches of size
+                    max_merge. Each batch will produce a result, and the results will be added
+                    together.  This is for preventing the 2GB max tensor size problem
 
                 return pls, pmpls (updated version of these)
             """
@@ -1933,10 +1935,10 @@ def AnytimeFCDenseNet(T_class):
 
 ## Version 2 of anytime FCN for dense-net
 # 
-class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):  
+class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDensenetV2):  
     
     def __init__(self, args):
-        super(AnytimeFCDensenetV2, self).__init__(args)
+        super(AnytimeFCDenseNetV2, self).__init__(args)
         assert self.n_pools * 2 == self.n_blocks - 1
         assert self.width == 1
         assert self.network_config.s_type == 'basic'
@@ -1964,6 +1966,7 @@ class AnytimeFCDensenetV2(AnytimeFCN, AnytimeLogDensenetV2):
         return bcml
 
     def _compute_ll_feats(self, image):
+        self.pre_compute_connections()
         l_feats = self._compute_init_l_feats(image)
         bcml = l_feats[0] #block compression merged layer
         l_mls = []
