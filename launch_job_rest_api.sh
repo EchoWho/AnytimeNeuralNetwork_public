@@ -19,7 +19,7 @@
 # Exp 64
 # 2983..3009
 # Num gpus: 4
-for i in {2983..3009}
+for i in {2990}
 do
 
 	USERNAME="dedey"
