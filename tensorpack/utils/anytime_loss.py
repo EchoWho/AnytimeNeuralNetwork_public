@@ -188,6 +188,29 @@ def loss_weights(N, args, cfg=None):
         weights = stack_loss_weights(N, args.stack, lambda N:constant_weights(N, normalize=False))
     elif FUNC_TYPE == 12: # linear = 0.25...1
         weights = stack_loss_weights(N, args.stack, lambda N:linear(N,normalize=False))
+    elif FUNC_TYPE == 13:
+        weights = np.ones(N, dtype=np.float32)
+        weights[N//2] = 3.0
+        weights[N-1] = 3.0
+        weights /= weights[-1]
+    elif FUNC_TYPE == 14:
+        weights = np.ones(N, dtype=np.float32)
+        weights[N//4] = 3.0
+        weights[N//2] = 5.0
+        weights[3*N //4] = 3.0
+        weights[N-1] = 5.0
+        weights /= weights[-1]
+    elif FUNC_TYPE == 15:
+        weights = np.ones(N, dtype=np.float32)
+        weights[N // 8] = 2.0
+        weights[N // 4] = 3.0
+        weights[3 * N // 8] = 2.0
+        weights[N // 2] = 4.0
+        weights[5 * N // 8] = 2.0
+        weights[3 * N // 4] = 3.0
+        weights[7 * N // 8] = 2.0
+        weights[N-1] = 4.0
+        weights /= weights[-1]
     else:
         raise NameError('func type must be either 0: exponential or 1: square' \
             + ' or 2: optimal at --opt_at, or 3: exponential weight with base --base')
