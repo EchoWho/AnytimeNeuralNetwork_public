@@ -8,6 +8,10 @@
 # 3035..3115
 # Num gpus: 4
 
+# Exp 67 (imagenet resnet 50, 101)
+# 3118..3119
+# Num gpus: 4
+
 for i in {3012..3032} {3035..3115}
 do
 	USERNAME="dedey"
