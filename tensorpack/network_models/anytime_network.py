@@ -107,11 +107,20 @@ def compute_cfg(options):
         if options.msdensenet_depth == 24:
             n_units_per_block = [7, 8, 8]
             s_type = 'basic'
-            # g=24
-        elif options.msdensenet_depth == 23: 
-            n_units_per_block = [6, 6, 5, 5]
+            # g =6
+        elif options.msdensenet_depth == 38: 
+            n_units_per_block = [2] + [7]*5
             s_type = 'imagenet'
-            # g=64
+            # g = 16
+            # s = 7
+        elif options.msdensenet_depth == 33:
+            n_units_per_block = [2] + [6]*5
+            s_type = 'imagenet'
+            # s = 6
+        elif options.msdensenet_depth == 23:
+            n_units_per_block = [2] + [4]*5
+            s_type = 'imagenet'
+            # s = 4
         else:
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
@@ -2011,14 +2020,15 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         super(AnytimeMultiScaleDenseNet, self).__init__(input_size, args)
         self.num_scales = self.options.num_scales
         self.growth_rate = self.options.growth_rate
-        self.bottleneck_width = self.options.bottleneck_width
+        self.growth_rate_factor = [1,2,4,4]
+        self.bottleneck_factor = [1,2,4,4]
         self.init_channel = self.growth_rate * 2
 
     def _compute_init_l_feats(self, image):
         l_feats = []
-        ch_out = self.init_channel
         for w in range(self.num_scales):
             with tf.variable_scope('init_conv'+str(w)) as scope:
+                ch_out = self.init_channel * self.growth_rate_factor[w]
                 if w == 0:
                     if self.network_config.s_type == 'basic':
                         l = Conv2D('conv0', image, ch_out, 3, nl=BNReLU) #, nl=BNReLU) 
@@ -2030,12 +2040,11 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 else:
                     l = Conv2D('conv0', l, ch_out, 3, stride=2, nl=BNReLU) 
                 l_feats.append(l)
-                ch_out *= 2
         return l_feats
 
-    def compute_edge(self, l, ch_out, l_type='normal', name=""):
+    def compute_edge(self, l, ch_out, bnw, l_type='normal', name=""):
         if self.network_config.b_type == 'bottleneck':
-            bnw = int(self.bottleneck_width * ch_out)
+            bnw = int(bnw * ch_out)
             l = Conv2D('conv1x1_'+name, l, bnw, 1, nl=BNReLU)
         if l_type == 'normal':
             stride = 1
@@ -2047,22 +2056,22 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
 
     def compute_block(self, bi, n_units, layer_idx, ll_merged_feats):
         l_mf = ll_merged_feats[-1]
-        g_base = self.growth_rate * 2**bi
         for k in range(n_units):
             layer_idx += 1
             scope_name = self.compute_scope_basename(layer_idx)
-            l_feats = [None] * bi
-            g = g_base
-            for w in range(bi, self.num_scales):
+            s_start = max(0, self.num_scales - (self.n_blocks - bi))
+            l_feats = [None] * s_start
+            for w in range(s_start, self.num_scales):
                 with tf.variable_scope(scope_name+'.'+str(w)) as scope:
+                    g = self.growth_rate_factor[w] * self.growth_rate
+                    bnw = self.bottleneck_factor[w]
                     if w == bi and (layer_idx ==0 or k > 0):
-                        l = self.compute_edge(l_mf[w], g, 'normal')
+                        l = self.compute_edge(l_mf[w], g, bnw, 'normal')
                     else:
-                        l = self.compute_edge(l_mf[w], g/2, 'normal', name='e1')
-                        lp = self.compute_edge(l_mf[w-1], g/2, 'down', name='e2')
+                        l = self.compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
+                        lp = self.compute_edge(l_mf[w-1], g/2, bnw, 'down', name='e2')
                         l = tf.concat([l, lp], CHANNEL_DIM, name='concat_ms') 
                     l_feats.append(l)
-                g *= 2
             #end for w
             new_l_mf = [None] * self.num_scales
             for w in range(bi, self.num_scales):
