@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-msdense-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---msdensenet_depth=33 --batch_size=128 --nr_gpu=4 -f=10 --opt_at=-1 --samloss=6 -c=16 --num_classes=1000 --num_scales=4 --prediction_feature=msdense 
+--msdensenet_depth=33 --batch_size=128 --nr_gpu=4 -f=10 --opt_at=-1 --samloss=6 -g=16 --num_classes=1000 --num_scales=4 --prediction_feature=msdense 
