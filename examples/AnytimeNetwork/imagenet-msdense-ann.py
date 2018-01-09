@@ -101,7 +101,7 @@ if __name__ == '__main__':
     # Fixed parameter
     args.ds_name="ilsvrc"
     args.num_classes == 1000
-    args.init_channel = 16
+    args.growth_rate=16
     args.stack = (args.msdensenet_depth - 3) // 5
     args.prediction_feature='msdense'
     args.num_scales=4
