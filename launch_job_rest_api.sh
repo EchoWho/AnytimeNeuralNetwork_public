@@ -1,18 +1,13 @@
 #!/bin/bash
-
-# Exp 65
-# 3012..3032
-# Num gpus: 4
-
-# Exp 66
-# 3035..3115
-# Num gpus: 4
-
 # Exp 67 (imagenet resnet 50, 101)
 # 3118..3119
 # Num gpus: 4
 
-for i in {3012..3032} {3035..3115}
+# Exp 68 (imagenet msdense 23, 33, 38)
+# 3122..3124
+# Num gpus: 4
+
+for i in {3118..3119} {3122..3124}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -181,4 +176,12 @@ done
 
 # Exp 66
 # 3035..3115
+# Num gpus: 4
+
+# Exp 67 (imagenet resnet 50, 101)
+# 3118..3119
+# Num gpus: 4
+
+# Exp 68 (imagenet msdense 23, 33, 38)
+# 3122..3124
 # Num gpus: 4
