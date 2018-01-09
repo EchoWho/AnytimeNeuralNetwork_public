@@ -105,13 +105,22 @@ def compute_cfg(options):
 
     elif hasattr(options, 'msdensenet_depth') and options.msdensenet_depth is not None:
         if options.msdensenet_depth == 24:
-            n_units_per_block = [7, 8, 8]
+            n_units_per_block = [8, 8, 8]
             s_type = 'basic'
-            # g=24
-        elif options.msdensenet_depth == 23: 
-            n_units_per_block = [6, 6, 5, 5]
+            # g =6
+        elif options.msdensenet_depth == 38: 
+            n_units_per_block = [10, 10, 9, 9]
             s_type = 'imagenet'
-            # g=64
+            # g = 16
+            # s = 7
+        elif options.msdensenet_depth == 33:
+            n_units_per_block = [9, 8, 8, 8]
+            s_type = 'imagenet'
+            # s = 6
+        elif options.msdensenet_depth == 23:
+            n_units_per_block = [6, 6, 6, 5]
+            s_type = 'imagenet'
+            # s = 4
         else:
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
@@ -2003,6 +2012,10 @@ def parser_add_msdensenet_arguments(parser):
                         type=float, default=4.0)
     parser.add_argument('--num_scales', help='number of scales',
                         type=int, default=3)
+    parser.add_argument('--reduction_ratio', help='reduction ratio between blocks',
+                        type=float, default=0.5)
+    parser.add_argument('--prune', help='Prune method min or max: prune minimum or maximum amount',
+                        type=str, default='max', choices=['max'])
 
 
 class AnytimeMultiScaleDenseNet(AnytimeNetwork):
@@ -2011,14 +2024,16 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         super(AnytimeMultiScaleDenseNet, self).__init__(input_size, args)
         self.num_scales = self.options.num_scales
         self.growth_rate = self.options.growth_rate
-        self.bottleneck_width = self.options.bottleneck_width
+        self.growth_rate_factor = [1,2,4,4]
+        self.bottleneck_factor = [1,2,4,4]
         self.init_channel = self.growth_rate * 2
+        self.reduction_ratio = self.options.reduction_ratio
 
     def _compute_init_l_feats(self, image):
         l_feats = []
-        ch_out = self.init_channel
         for w in range(self.num_scales):
             with tf.variable_scope('init_conv'+str(w)) as scope:
+                ch_out = self.init_channel * self.growth_rate_factor[w]
                 if w == 0:
                     if self.network_config.s_type == 'basic':
                         l = Conv2D('conv0', image, ch_out, 3, nl=BNReLU) #, nl=BNReLU) 
@@ -2030,57 +2045,80 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 else:
                     l = Conv2D('conv0', l, ch_out, 3, stride=2, nl=BNReLU) 
                 l_feats.append(l)
-                ch_out *= 2
         return l_feats
 
-    def compute_edge(self, l, ch_out, l_type='normal', name=""):
+    def _compute_edge(self, l, ch_out, bnw, l_type='normal', name=""):
         if self.network_config.b_type == 'bottleneck':
-            bnw = int(self.bottleneck_width * ch_out)
-            l = Conv2D('conv1x1_'+name, l, bnw, 1, nl=BNReLU)
+            bnw_ch = int(bnw * ch_out)
+            l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, nl=BNReLU)
         if l_type == 'normal':
             stride = 1
         elif l_type == 'down':
             stride = 2
         l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride=stride, nl=BNReLU)
         return l
-        
 
-    def compute_block(self, bi, n_units, layer_idx, ll_merged_feats):
-        l_mf = ll_merged_feats[-1]
-        g_base = self.growth_rate * 2**bi
+    def _compute_block(self, bi, n_units, layer_idx, l_mf):
+        ll_feats = []
         for k in range(n_units):
             layer_idx += 1
             scope_name = self.compute_scope_basename(layer_idx)
-            l_feats = [None] * bi
-            g = g_base
-            for w in range(bi, self.num_scales):
+            s_start = bi
+            l_feats = [None] * s_start
+            for w in range(s_start, self.num_scales):
                 with tf.variable_scope(scope_name+'.'+str(w)) as scope:
-                    if w == bi and (layer_idx ==0 or k > 0):
-                        l = self.compute_edge(l_mf[w], g, 'normal')
+                    g = self.growth_rate_factor[w] * self.growth_rate
+                    bnw = self.bottleneck_factor[w]
+                    has_smaller_scale = w > s_start or (w > 0 and k==0)
+                    if not has_smaller_scale:
+                        l = self._compute_edge(l_mf[w], g, bnw, 'normal')
                     else:
-                        l = self.compute_edge(l_mf[w], g/2, 'normal', name='e1')
-                        lp = self.compute_edge(l_mf[w-1], g/2, 'down', name='e2')
+                        l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
+                        lp = self._compute_edge(l_mf[w-1], g/2, bnw, 'down', name='e2')
                         l = tf.concat([l, lp], CHANNEL_DIM, name='concat_ms') 
                     l_feats.append(l)
-                g *= 2
             #end for w
             new_l_mf = [None] * self.num_scales
-            for w in range(bi, self.num_scales):
+            for w in range(s_start, self.num_scales):
                 with tf.variable_scope(scope_name+'.'+str(w)+'.merge') as scope:
                     new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], 
                         CHANNEL_DIM, name='merge_feats')
-            ll_merged_feats.append(new_l_mf)
+            ll_feats.append(new_l_mf)
             l_mf = new_l_mf
-        return ll_merged_feats
+        return ll_feats
 
+    def _compute_transition(self, ll_merged_feats, layer_idx):
+        rr = self.reduction_ratio
+        l_feats = []
+        for w, l in enumerate(ll_merged_feats):
+            if l is None:
+                l_feats.append(None)
+                continue
 
+            with tf.variable_scope('transat_{:02d}_{:02d}'.format(layer_idx, w)):
+                ch_in = l.get_shape().as_list()[CHANNEL_DIM]
+                ch_out = int(ch_in * rr)
+                l = Conv2D('conv1x1', l, ch_out, 1, nl=BNReLU)
+                l_feats.append(l)
+        return l_feats
+        
     def _compute_ll_feats(self, image):
-        l_feats = self._compute_init_l_feats(image)
-        ll_merged_feats = [[ feat for feat in l_feats ]]
+        l_mf = self._compute_init_l_feats(image)
+        ll_feats = [[ feat for feat in l_mf ]]
         layer_idx = -1
         for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            ll_merged_feats = self.compute_block(bi, n_units, layer_idx, ll_merged_feats) 
+            if bi == 0: 
+                # Subtract one since the first layer is in the first block.
+                n_units -= 1
+            ll_block_feats = self._compute_block(bi, n_units, layer_idx, l_mf) 
             layer_idx += n_units
-        ll_feats = [ [l_merged_feats[-1]] for l_merged_feats in ll_merged_feats ]
-        # since ll_feats now contains the initial feature, which we don't want..
-        return ll_feats[1:]
+            ll_feats.extend(ll_block_feats)
+            l_mf = ll_block_feats[-1]
+            if bi < self.n_blocks - 1 and self.reduction_ratio < 1:
+                l_mf = self._compute_transition(l_mf, layer_idx)
+
+        # precondition: ll_feats[i][j] is the feature used to generate layer i, scale j
+        #       concatenated with the generated layer i, scale j.
+        # postcondition: ll_feats[i] is [ feature map at i for anytime prediction  ]
+        ll_feats = [ [None if l_feats is None else l_feats[-1]] for l_feats in ll_feats ]
+        return ll_feats
