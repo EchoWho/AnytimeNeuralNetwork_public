@@ -103,7 +103,7 @@ if __name__ == '__main__':
     args.num_classes == 1000
     args.init_channel = 16
     args.stack = (args.msdensenet_depth - 3) // 5
-    args.prediction_feature=msdense
+    args.prediction_feature='msdense'
     args.num_scales=4
 
     # GPU will handle mean std transformation to save CPU-GPU communication
