@@ -15,11 +15,11 @@ for i in {3127..3129}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
-	CLUSTER="gcr"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
