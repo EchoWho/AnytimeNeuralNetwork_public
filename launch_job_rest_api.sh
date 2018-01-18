@@ -7,7 +7,11 @@
 # 3122..3124
 # Num gpus: 4
 
-for i in {3118..3119} {3122..3124}
+# Exp 69 (imagenet msdense 23, 33, 38, nr_gpu=8
+# 3127..3129
+# Num gpus: 8
+
+for i in {3127..3129}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -15,7 +19,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -185,3 +189,7 @@ done
 # Exp 68 (imagenet msdense 23, 33, 38)
 # 3122..3124
 # Num gpus: 4
+
+# Exp 69 (imagenet msdense 23, 33, 38, nr_gpu=8
+# 3127..3129
+# Num gpus: 8
