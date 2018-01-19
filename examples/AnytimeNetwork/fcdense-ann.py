@@ -13,7 +13,8 @@ from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import \
-    AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet, AnytimeFCDenseNetV2
+    AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet, AnytimeFCDenseNetV2,\
+    AnytimeFCNCoarseToFine
 import get_augmented_data
 
 
@@ -229,6 +230,8 @@ if __name__ == '__main__':
         model_cls = AnytimeFCDenseNet(AnytimeDensenet)
     elif args.densenet_version == 'loglog':
         model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
+    elif args.densenet_version == 'c2f':
+        model_cls = AnytimeFCNCoarseToFine
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()
@@ -273,7 +276,7 @@ if __name__ == '__main__':
                 lr *= 0.995
                 lr_schedule.append((i+1, lr))
         elif args.operation == 'finetune':
-            args.batch_size = args.nr_gpu
+            args.batch_size = args.nr_gpu * 1
             #init_epoch = 250 
             init_epoch = 0
             max_epoch = init_epoch + 300 + 250
