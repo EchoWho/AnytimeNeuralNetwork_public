@@ -141,6 +141,8 @@ def compute_cfg(options):
         elif options.densenet_version == 'c2f':
             if options.fcdense_depth == 22:
                 n_units_per_block = [5, 6, 6, 4]
+            elif options.fcdense_depth == 26:
+                n_units_per_block = [9, 7, 5, 4]
             else:
                 raise ValueError('FCN coarse2fine depth {} is undefined'.format(options.c2f_depth))
             b_type = 'bottleneck'
