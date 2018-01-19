@@ -105,20 +105,20 @@ def compute_cfg(options):
 
     elif hasattr(options, 'msdensenet_depth') and options.msdensenet_depth is not None:
         if options.msdensenet_depth == 24:
-            n_units_per_block = [8, 8, 8]
+            n_units_per_block = [7, 8, 8]
             s_type = 'basic'
             # g =6
         elif options.msdensenet_depth == 38: 
-            n_units_per_block = [10, 10, 9, 9]
+            n_units_per_block = [9, 10, 9, 9]
             s_type = 'imagenet'
             # g = 16
             # s = 7
         elif options.msdensenet_depth == 33:
-            n_units_per_block = [9, 8, 8, 8]
+            n_units_per_block = [8, 8, 8, 8]
             s_type = 'imagenet'
             # s = 6
         elif options.msdensenet_depth == 23:
-            n_units_per_block = [6, 6, 6, 5]
+            n_units_per_block = [5, 6, 6, 5]
             s_type = 'imagenet'
             # s = 4
         else:
@@ -126,15 +126,26 @@ def compute_cfg(options):
         b_type = 'bottleneck'
         return NetworkConfig(n_units_per_block, b_type, s_type)
  
-    elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
-        if options.fcdense_depth == 103:
-            n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
-        else:
-            raise ValueError('FC dense net depth {} is undefined'\
-                .format(options.fcdense_depth))
-        b_type = 'basic'
-        s_type = 'basic'
-        return NetworkConfig(n_units_per_block, b_type, s_type)
+    elif hasattr(options, 'densenet_version') and options.densenet_version is not None:
+        assert options.fcdense_depth is not None
+        if options.densenet_version in ['atv1', 'loglog', 'atv2']:
+            if options.fcdense_depth == 103:
+                n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
+            else:
+                raise ValueError('FC dense net depth {} is undefined'\
+                    .format(options.fcdense_depth))
+            b_type = 'basic'
+            s_type = 'basic'
+            return NetworkConfig(n_units_per_block, b_type, s_type)
+
+        elif options.densenet_version == 'c2f':
+            if options.fcdense_depth == 22:
+                n_units_per_block = [5, 6, 6, 4]
+            else:
+                raise ValueError('FCN coarse2fine depth {} is undefined'.format(options.c2f_depth))
+            b_type = 'bottleneck'
+            s_type = 'basic'
+            return NetworkConfig(n_units_per_block, b_type, s_type)
 
     elif options.num_units is not None: 
         #option.n is set
@@ -816,7 +827,7 @@ def parser_add_densenet_arguments(parser):
                              help='depth of densenet for predefined networks',
                              type=int)
     parser.add_argument('--densenet_version', help='specify the version of densenet to use',
-                        type=str, default='atv1', choices=['atv1', 'atv2', 'dense', 'loglog'])
+                        type=str, default='atv1', choices=['atv1', 'atv2', 'dense', 'loglog', 'c2f'])
     parser.add_argument('-g', '--growth_rate', help='growth rate k for log dense',
                         type=int, default=16)
     parser.add_argument('--bottleneck_width', help='multiplier of growth for width of bottleneck',
@@ -1517,14 +1528,15 @@ class AnytimeFCN(AnytimeNetwork):
         
 
     def _get_inputs(self):
+        HW = None
         if self.options.is_label_one_hot:
             # the label one-hot is in fact a distribution of labels. 
             # Void labeled pixels have 0-vector distribution.
             label_desc = InputDesc(tf.float32, 
-                [None, None, None, self.num_classes], 'label')
+                [None, HW, HW, self.num_classes], 'label')
         else:
-            label_desc = InputDesc(tf.int32, [None, None, None], 'label')
-        return [InputDesc(self.input_type, [None, None, None, 3], 'input'), label_desc]
+            label_desc = InputDesc(tf.int32, [None, HW, HW], 'label')
+        return [InputDesc(self.input_type, [None, HW, HW, 3], 'input'), label_desc]
 
 
     def _parse_inputs(self, inputs):
@@ -1595,7 +1607,6 @@ class AnytimeFCN(AnytimeNetwork):
         layer_idx = unit_idx // self.width
         # first idx that is > layer_idx
         bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
-
         label_img_idx = self.bi_to_scale_idx(bi)
 
         label = l_label[label_img_idx] # note this is a probability of label distri
@@ -1685,6 +1696,7 @@ def parser_add_fcdense_arguments(parser):
     depth_group.add_argument('--fcdense_depth',
                             help='depth of the network in number of conv',
                             type=int)
+
     return parser, depth_group
 
 
@@ -1997,7 +2009,7 @@ class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDensenetV2):
 
 
 ###########################
-# Multi-scale Dense-Network and its log-dense variant
+# Multi-scale Dense-Network 
 ###########################
 def parser_add_msdensenet_arguments(parser):
     parser, depth_group = parser_add_common_arguments(parser)
@@ -2066,8 +2078,8 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 with tf.variable_scope(scope_name+'.'+str(w)) as scope:
                     g = self.growth_rate_factor[w] * self.growth_rate
                     bnw = self.bottleneck_factor[w]
-                    has_smaller_scale = w > s_start or (w > 0 and k==0)
-                    if not has_smaller_scale:
+                    has_prev_scale = w > s_start or (w > 0 and k==0)
+                    if not has_prev_scale:
                         l = self._compute_edge(l_mf[w], g, bnw, 'normal')
                     else:
                         l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
@@ -2101,12 +2113,9 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         
     def _compute_ll_feats(self, image):
         l_mf = self._compute_init_l_feats(image)
-        ll_feats = [[ feat for feat in l_mf ]]
+        ll_feats = [ l_mf ]
         layer_idx = -1
         for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            if bi == 0: 
-                # Subtract one since the first layer is in the first block.
-                n_units -= 1
             ll_block_feats = self._compute_block(bi, n_units, layer_idx, l_mf) 
             layer_idx += n_units
             ll_feats.extend(ll_block_feats)
@@ -2118,4 +2127,128 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         #       concatenated with the generated layer i, scale j.
         # postcondition: ll_feats[i] is [ feature map at i for anytime prediction  ]
         ll_feats = [ [None if l_feats is None else l_feats[-1]] for l_feats in ll_feats ]
+        return ll_feats
+
+
+
+#####################
+# Coarse to Fine FCN
+#####################
+class AnytimeFCNCoarseToFine(AnytimeFCN):
+    def __init__(self, args):
+        super(AnytimeFCNCoarseToFine, self).__init__(args)
+        self.growth_rate = self.options.growth_rate
+        self.growth_rate_factor = [1,2,4,4]
+        self.bottleneck_factor = [1,2,4,4]
+        self.init_channel = self.growth_rate * 2
+        self.reduction_ratio = self.options.reduction_ratio
+        self.num_scales = len(self.network_config.n_units_per_block)
+        self.n_pools = self.num_scales - 1
+
+    def bi_to_scale_idx(self, bi):
+        """
+            Note that scale_idx 0 is the finest resolution. 
+        """
+        si = self.num_scales - bi - 1
+        return si
+
+    def _compute_transition(self, l_mf, layer_idx):
+        rr = self.reduction_ratio
+        l_feats = [None] * self.num_scales
+        for w, l in enumerate(l_mf):
+            if l is None:
+                continue
+            
+            with tf.variable_scope('transat_{:02d}_{:02d}'.format(layer_idx, w)):
+                ch_in = l.get_shape().as_list()[CHANNEL_DIM]
+                ch_out = int(ch_in * rr)
+                l = Conv2D('conv1x1', l, ch_out, 1, nl=BNReLU)
+                l_feats.append(l)
+        return l_feats
+
+
+    def _compute_edge(self, l, ch_out, bnw, 
+            l_type='normal', dyn_h=None, dyn_w=None, 
+            name=""):
+        if self.network_config.b_type == 'bottleneck':
+            bnw_ch = int(bnw * ch_out)
+            l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, nl=BNReLU)
+        if l_type == 'normal':
+            l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride=1, nl=BNReLU)
+        elif l_type == 'up':
+            assert dyn_h is not None and dyn_w is not None
+            l = Deconv2D('deconv3x3_'+name, l, ch_out, 3, stride=2, 
+                dyn_hw=[dyn_h, dyn_w], nl=BNReLU)
+        return l
+
+    def _compute_block(self, bi, n_units, layer_idx, l_mf):
+        ll_feats = []
+        for k in range(n_units):
+            layer_idx += 1
+            scope_name = self.compute_scope_basename(layer_idx)
+            s_start = 0
+            s_end = self.num_scales 
+            l_feats = [None] * self.num_scales
+            for w in range(s_start, s_end):
+                with tf.variable_scope(scope_name+'.'+str(w)) as scope:
+                    g = self.growth_rate_factor[w] * self.growth_rate
+                    bnw = self.bottleneck_factor[w] 
+                    has_prev_scale = w < self.num_scales - 1 and l_mf[w+1] is not None
+                    if not has_prev_scale:
+                        l = self._compute_edge(l_mf[w], g, bnw, 'normal')
+                    else:
+                        l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
+                        dyn_h = tf.shape(l)[HEIGHT_DIM]
+                        dyn_w = tf.shape(l)[WIDTH_DIM] 
+                        lp = self._compute_edge(l_mf[w+1], g/2, bnw, 'up', 
+                            dyn_h=dyn_h, dyn_w=dyn_w, name='e2')
+                        l = tf.concat([l, lp], CHANNEL_DIM, name='concat_ms')
+                    l_feats[w] = l
+            #end for w
+            new_l_mf = [None] * self.num_scales
+            for w in range(s_start, s_end):
+                with tf.variable_scope(scope_name+'.'+str(w) + '.merge') as scope:
+                    new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], CHANNEL_DIM, name='merge_feats')
+            ll_feats.append(new_l_mf)
+            l_mf = new_l_mf
+        return ll_feats
+
+
+    def _compute_init_l_feats(self, image):
+        """
+            Compute the initial features based on the input image. 
+            The images are first downsampled for the coarse resolution, before using 
+            convolutions.
+        """
+        l_init_feats = []
+        l = image
+        for i in range(self.n_pools + 1):
+            ch_out = self.growth_rate * 2 * self.growth_rate_factor[i]
+            l = Conv2D('conv0_scale_{}'.format(i), l, ch_out, 3, nl=BNReLU)
+            l_init_feats.append(l) 
+            if i == self.n_pools:
+                break
+            l = AvgPooling('img_{}'.format(i+1), l, 2, padding='SAME')
+        return l_init_feats
+
+
+    def _compute_ll_feats(self, image):
+        l_mf = self._compute_init_l_feats(image)
+        ll_feats = [ l_mf ]
+        layer_idx = -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            ll_block_feats = self._compute_block(bi, n_units, layer_idx, l_mf)
+            layer_idx += n_units
+            ll_feats.extend(ll_block_feats)
+            l_mf = ll_block_feats[-1]
+            if bi < self.n_blocks - 1 and self.reduction_ratio < 1:
+                l_mf = self._compute_transition(l_mf, layer_idx)
+        
+        def li_to_scale_idx(layer_idx):
+            # first idx that is > layer_idx
+            bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
+            scale_idx = self.bi_to_scale_idx(bi)
+            return scale_idx
+        ll_feats = ll_feats[1:]
+        ll_feats = [ [ l_feats[li_to_scale_idx(li)] ] for li, l_feats in enumerate(ll_feats) ] 
         return ll_feats
