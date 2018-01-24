@@ -276,13 +276,10 @@ if __name__ == '__main__':
                 lr *= 0.995
                 lr_schedule.append((i+1, lr))
         elif args.operation == 'finetune':
+            init_epoch = 750 // (args.batch_size // args.nr_gpu)
             args.batch_size = args.nr_gpu * 1
-            #init_epoch = 250 
-            init_epoch = 0
-            max_epoch = init_epoch + 300 + 250
-            lr = 1e-3
-            #lr = 1e-4
-            #lr_multiplier = 0.7 ** (1. / (max_epoch - init_epoch))
+            max_epoch = init_epoch * 2
+            lr = 1e-4 #args.init_lr * 0.995**750
             lr_multiplier = 0.995 
             lr_schedule = []
             for i in range(max_epoch):
