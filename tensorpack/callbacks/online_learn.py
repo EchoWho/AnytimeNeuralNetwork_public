@@ -4,7 +4,7 @@ from .base import Callback
 from ..tfutils import get_op_tensor_name, get_op_or_tensor_by_name
 from tensorpack.utils import logger
 
-__all__ = ['Exp3CPU', 'RWMCPU', 'FixedDistributionCPU', 'ThompsonSamplingCPU']
+__all__ = ['Exp3CPU', 'RWMCPU', 'FixedDistributionCPU', 'ThompsonSamplingCPU', 'AdaptiveLossWeight']
 
 class Exp3CPU(Callback):
 
@@ -288,3 +288,68 @@ class ThompsonSamplingCPU(Callback):
     def _before_run(self, _):
         #print "fetch name: {}".format(self.rewards[self._select].name)
         return self.rewards
+
+
+class AdaptiveLossWeight(Callback):
+
+    def __init__(self, K, weight_name, loss_names, gamma=0.3, update_per=100, momentum=0.99):
+        self.weight_name = weight_name
+        self.loss_names = loss_names
+        self.K = K
+        self.gamma = gamma
+        self.update_per = update_per
+        self.momentum = momentum
+
+           
+    def _setup_graph(self):
+        _, self.w_var_name = get_op_tensor_name(self.weight_name)
+
+        _, l_var_names = zip(*[get_op_tensor_name(nm) \
+                for nm in self.loss_names])
+        self.l_var_names = list(l_var_names)
+
+        all_vars = tf.global_variables()
+        for v in all_vars:
+            if v.name == self.w_var_name:
+                self.weight = v
+                break
+        else:
+            raise ValueError("{} does not exist as VAR".format(self.w_var_name))
+
+        self.losses = []
+        for nm in self.l_var_names:
+            self.losses.append(get_op_or_tensor_by_name(nm))
+        
+        self.weight_holder = tf.placeholder(tf.float32, shape=(self.K,), name='adaW_holder')
+        self.assign_op = self.weight.assign(self.weight_holder)
+
+    
+    def _before_train(self):
+        self.avg_losses = None
+
+
+    def _after_run(self, ctx, run_vals):
+        losses = run_vals.results
+        if self.avg_losses is None:
+            self.avg_losses = np.asarray(losses,dtype=np.float32)
+            self.cnt = 0
+        else:
+            self.avg_losses = self.avg_losses * self.momentum \
+                + np.asarray(losses,dtype=np.float32) * (1 - self.momentum)
+
+        self.cnt += 1
+        if self.cnt % self.update_per == 0:
+            self.cnt = 0
+            self._weight = 1. / (self.avg_losses + 1e-8)
+            self._weight /= np.max(self._weight)
+            self._weight = self._weight * (1-self.gamma) \
+                    + np.ones(self.K, dtype=np.float32) * self.gamma
+            self.assign_op.eval(feed_dict={self.weight_holder : self._weight})
+
+
+    def _trigger_epoch(self):
+        logger.info("AdaLoss: weights: {}".format(self._weight))
+
+
+    def _before_run(self, _):
+        return self.losses 
