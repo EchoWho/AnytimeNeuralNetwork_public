@@ -8,7 +8,8 @@ from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.tfutils.tower import get_current_tower_context
 from tensorpack.utils import anytime_loss, logger, utils, fs
-from tensorpack.callbacks import Exp3CPU, RWMCPU, FixedDistributionCPU, ThompsonSamplingCPU
+from tensorpack.callbacks import Exp3CPU, RWMCPU, \
+        FixedDistributionCPU, ThompsonSamplingCPU, AdaptiveLossWeight
 
 from tensorflow.contrib.layers import variance_scaling_initializer
 from tensorflow.contrib.layers import xavier_initializer
@@ -227,6 +228,8 @@ def parser_add_common_arguments(parser):
                         type=np.float32, default=2.0)
     parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
                         type=np.float32, default=0.85)
+    parser.add_argument('--is_select_arr', help='Whether select_idx is an int or an array of float',
+                        default=False, action='store_true')
 
     ## loss_weight computation
     parser.add_argument('-f', '--func_type', 
@@ -397,7 +400,7 @@ class AnytimeNetwork(ModelDesc):
 
     def compute_loss_select_callbacks(self):
         logger.info("AANN samples with method {}".format(self.options.ls_method))
-        if self.options.ls_method > 0:
+        if self.options.ls_method > 0 and not self.options.is_select_arr:
             reward_names = [ 'tower0/reward_{:02d}:0'.format(i) for i in range(self.ls_K)]
             select_idx_name = '{}:0'.format(self.select_idx_name)
             if self.options.ls_method == 3:
@@ -405,13 +408,13 @@ class AnytimeNetwork(ModelDesc):
             elif self.options.ls_method == 6:
                 online_learn_cb = FixedDistributionCPU(self.ls_K, select_idx_name, 
                     self.weights[self.weights>0])
-            elif self.options.ls_method == 1000:
+            elif self.options.ls_method == 7:
                 # custom schedule. select_idx will be initiated for use.
                 # set the cb to be None to force use to give 
                 # a custom schedule/selector cb
                 online_learn_cb = None
             else:    
-                gamma = self.options.exp3_gamma
+                gamma = self.options.exp_gamma
                 if self.options.ls_method == 1:
                     online_learn_func = Exp3CPU
                     gamma = 1.0
@@ -424,6 +427,18 @@ class AnytimeNetwork(ModelDesc):
                 online_learn_cb = online_learn_func(self.ls_K, gamma, 
                     select_idx_name, reward_names)
             online_learn_cbs = [ online_learn_cb ]
+
+        elif self.options.ls_method > 0:
+            # implied self.options.is_select_arr == True
+            loss_names = ['tower0/anytime_cost_{:02d}'.format(i) \
+                    for i in range(self.ls_K)]
+            select_idx_name = '{}:0'.format(self.select_idx_name)
+            gamma = self.options.exp_gamma
+            online_learn_cb = AdaptiveLossWeight(self.ls_K, 
+                    select_idx_name, loss_names, 
+                    gamma, update_per=100, momentum=0.99)
+            online_learn_cbs = [online_learn_cb]
+
         else:
             online_learn_cbs = []
         return online_learn_cbs
@@ -572,17 +587,25 @@ class AnytimeNetwork(ModelDesc):
                             l = BatchNorm('bn', l)
                         
                         logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
+                    anytime_cost_i = tf.identity(cost, 
+                            name='anytime_cost_{:02d}'.format(anytime_idx))
+
                     #end scope of layer.w.pred
 
                     ## Compute the contribution of the cost to total cost
                     # Additional weight for unit_idx. 
                     add_weight = 0
-                    if select_idx is not None:
+                    if select_idx is not None and not self.options.is_select_arr:
                         add_weight = tf.cond(tf.equal(anytime_idx, 
                                                       select_idx),
                             lambda: tf.constant(self.weights_sum, 
                                                 dtype=tf.float32),
                             lambda: tf.constant(0, dtype=tf.float32))
+
+                    elif select_idx is not None:
+                        # implied is_select_arr == True
+                        add_weight = select_idx[anytime_idx]
+
                     if self.options.sum_rand_ratio > 0:
                         total_cost += (cost_weight + add_weight / \
                             self.options.sum_rand_ratio) * cost
@@ -645,7 +668,8 @@ class AnytimeNetwork(ModelDesc):
 
     def _get_select_idx(self):
         select_idx = None
-        if self.options.ls_method > 0:
+
+        if self.options.ls_method > 0 and not self.options.is_select_arr:
             init_idx = self.options.init_select_idx
             if init_idx is None:
                 init_idx = self.ls_K - 1
@@ -657,8 +681,20 @@ class AnytimeNetwork(ModelDesc):
             tf.summary.scalar(self.select_idx_name, select_idx)
             for i in range(self.ls_K):
                 weight_i = tf.cast(tf.equal(select_idx, i), tf.float32, 
-                                   name='weight_{:02d}'.format(i))
+                    name='weight_{:02d}'.format(i))
                 #add_moving_summary(weight_i)
+
+        elif self.options.ls_method > 0: 
+            # implied self.options.is_select_arr == True
+            select_idx = tf.get_variable(self.select_idx_name, (self.ls_K,), 
+                    tf.float32,
+                    initializer=tf.constant_initializer([1.0]*self.ls_K), 
+                    trainable=False)
+            for i in range(self.ls_K):
+                weight_i = tf.identity(select_idx[i], 
+                    'weight_{:02d}'.format(i))
+                add_moving_summary(weight_i)
+
         return select_idx
 
 class AnytimeResnet(AnytimeNetwork):
@@ -2036,6 +2072,8 @@ def parser_add_msdensenet_arguments(parser):
                         type=float, default=0.5)
     parser.add_argument('--prune', help='Prune method min or max: prune minimum or maximum amount',
                         type=str, default='max', choices=['max'])
+    parser.add_argument('--dropout_kp', help='Dropout keep probability',
+                        type=float, default=1)
 
 
 class AnytimeMultiScaleDenseNet(AnytimeNetwork):
@@ -2048,6 +2086,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         self.bottleneck_factor = [1,2,4,4]
         self.init_channel = self.growth_rate * 2
         self.reduction_ratio = self.options.reduction_ratio
+        self.dropout_kp = args.dropout_kp
 
     def _compute_init_l_feats(self, image):
         l_feats = []
@@ -2155,6 +2194,7 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         self.reduction_ratio = self.options.reduction_ratio
         self.num_scales = len(self.network_config.n_units_per_block)
         self.n_pools = self.num_scales - 1
+        self.dropout_kp = args.dropout_kp
 
     def bi_to_scale_idx(self, bi):
         """
@@ -2217,7 +2257,9 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                         edges.append(self._compute_edge(l_mf[w+1], g//2, bnw, 'up',
                             dyn_hw=dyn_hw, name='eu'))
                     l_feats[w] = tf.concat(edges, self.ch_dim, name='concat_edges')
-
+                    if self.dropout_kp < 1:
+                        l_feats[w] = Dropout('dropout', l_feats[w], keep_prob=self.dropout_kp)
+                    
                     #has_prev_scale = w < self.num_scales - 1 and l_mf[w+1] is not None
                     #if not has_prev_scale:
                     #    l = self._compute_edge(l_mf[w], g, bnw, 'normal')
@@ -2250,6 +2292,8 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 ch_in = l.get_shape().as_list()[self.ch_dim]
                 ch_out = int(ch_in * rr)
                 l = Conv2D('conv1x1', l, ch_out, 1, nl=BNReLU)
+                if self.dropout_kp < 1:
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l_feats[w] = l
         return l_feats
 
@@ -2297,10 +2341,17 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         for li, l_feats in enumerate(ll_feats):
             if self.weights[li] == 0:
                 continue
+            # Merge with the final feature of the first block.
+            # si == self.n_pools equals it already, so no merge there.
             si = li_to_scale_idx(li)
             if si == self.n_pools:
-                ll_feats_ret[li] = [l_feats[si]]
+                l = l_feats[si]
             else:
-                ll_feats_ret[li] = [tf.concat([ l_feats[si], l_feats_block0[si] ], 
-                    self.ch_dim, name='force_merge_{}'.format(li))]
+                l = tf.concat([ l_feats[si], l_feats_block0[si] ], 
+                    self.ch_dim, name='force_merge_{}'.format(li))
+            # also add 1x1 conv to ensure predictors have some freedom 
+            ch_out = min(l.get_shape().as_list()[self.ch_dim], 128)
+            l = Conv2D('pred_feat_{}_1x1'.format(li), l, ch_out, 1, nl=BNReLU) 
+            ll_feats_ret[li] = [l]
+
         return ll_feats_ret
