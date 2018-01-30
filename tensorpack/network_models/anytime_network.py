@@ -905,7 +905,7 @@ class AnytimeResNeXt(AnytimeResnet):
                 l = (LinearWrap(merged_feats)
                     .Conv2D('conv1x1_0', self.num_paths * ch_per_path, 1, nl=BNReLU)
                     .GroupedConv2D('conv3x3_1', self.num_paths, ch_per_path, 3, sum_paths=False, stride=stride, nl=BNReLU) 
-                    .GroupedConv2D('conv1x1_2', self.num_paths, ch_base*4, 1, sum_paths=True)())
+                    .Conv2D('conv1x1_2', ch_base*4, 1)())
                 l = BatchNorm('bn_3', l)
 
                 shortcut = l_feats[w]
