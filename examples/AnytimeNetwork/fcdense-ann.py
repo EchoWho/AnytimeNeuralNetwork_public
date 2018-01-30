@@ -269,20 +269,20 @@ if __name__ == '__main__':
             sys.exit()
         
         if args.operation == 'train':
-            max_epoch = 750
+            max_epoch = 700
             lr = args.init_lr
             lr_schedule = []
             for i in range(max_epoch):
                 lr *= 0.995
                 lr_schedule.append((i+1, lr))
         elif args.operation == 'finetune':
-            args.batch_size = args.nr_gpu * 1
-            #init_epoch = 250 
-            init_epoch = 0
-            max_epoch = init_epoch + 300 + 250
-            lr = 1e-3
-            #lr = 1e-4
-            #lr_multiplier = 0.7 ** (1. / (max_epoch - init_epoch))
+            batch_ratio = args.batch_size // args.nr_gpu
+            args.batch_size = args.nr_gpu
+            args.batch_norm_decay = 0.9 ** (1.0 / batch_ratio) 
+
+            init_epoch = 750 // batch_ratio
+            max_epoch = int(init_epoch * 1.25)
+            lr = args.init_lr * 0.995**750 
             lr_multiplier = 0.995 
             lr_schedule = []
             for i in range(max_epoch):
@@ -325,7 +325,15 @@ if __name__ == '__main__':
     logger.info("TF version: {}".format(tf.__version__))
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
-        config.session_init = SaverRestore(args.load)
+        def var_filter_rmsprop(name):
+            lastname = name[-9:-1]
+            if lastname == 'RMSProp:' or lastname == 'SProp_1:':
+                return False
+            return True
+        var_filter = lambda x : True
+        if args.operation == 'finetune':
+            var_filter = var_filter_rmsprop
+        config.session_init = SaverRestore(args.load, var_filter=var_filter)
     config.nr_tower = args.nr_gpu
     SyncMultiGPUTrainer(config).train()
 

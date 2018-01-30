@@ -17,7 +17,7 @@ from .base import RNGDataFlow, DataFlow
 from .common import MapData
 
 __all__ = ['HDF5Data', 'LMDBData', 'LMDBDataDecoder', 'LMDBDataPoint', 'LMDBDataPointIndexed',
-           'CaffeLMDB', 'SVMLightData', 'TFRecordData', 'BinaryData']
+           'CaffeLMDB', 'SVMLightData', 'TFRecordData', 'BinaryData', 'NPZData']
 
 """
 Adapters for different data format.
@@ -300,6 +300,29 @@ class BinaryData(DataFlow):
             for _ in range(self._size):
                 yield [np.asarray(struct.unpack(self.dp_format, 
                     fin.read(self.row_n_bytes)),dtype=np.float32)]
+
+class NPZData(DataFlow):
+
+    def __init__(self, path, keys, select_range=None):
+        self.path = path
+        self.keys = keys
+        self.data = np.load(path)
+
+        if select_range is not None:
+            start = select_range[0]
+            end = select_range[1]
+            self.data_temp={}
+            for key in keys:
+                self.data_temp[key] = self.data[key][start:end]
+            self.data=self.data_temp
+
+    def size(self):
+        return self.data[self.keys[0]].shape[0] 
+
+    def get_data(self):
+        for i in range(self.size()):
+            yield [self.data[key][i] for key in self.keys]
+
 
 from ..utils.develop import create_dummy_class   # noqa
 try:
