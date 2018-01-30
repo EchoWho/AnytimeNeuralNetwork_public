@@ -4,14 +4,14 @@
 # Num gpus: 8
 
 # Exp 71 (imagenet ResNeXt nr_gpu=8)
-#
+# 3137..3144
 # Num gpus: 8
 
-# Exp 72
-#
-#
+# Exp 72 (imagenet DenseNet nr_gpu=8)
+# 3147..3154
+# Num gpus: 8
 
-for i in {3132..3134}
+for i in {3132..3134} {3137..3144} {3147..3154}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -196,4 +196,12 @@ done
 
 # Exp 70 (imagenet msdense f=4 for control)
 # 3132..3134
+# Num gpus: 8
+
+# Exp 71 (imagenet ResNeXt nr_gpu=8)
+# 3137..3144
+# Num gpus: 8
+
+# Exp 72 (imagenet DenseNet nr_gpu=8)
+# 3147..3154
 # Num gpus: 8
