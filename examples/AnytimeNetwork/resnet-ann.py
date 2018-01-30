@@ -148,8 +148,6 @@ if __name__ == '__main__':
                         default=False, action='store_true')
     parser.add_argument('--store_images_labels', help='whether store input image and labels in npz during eval', 
                         default=False, action='store_true')
-    parser.add_argument('--resnet_version', help='Version of resnet to use',
-                        default='resnet', choices=['resnet', 'resnext'])
     anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
     if args.resnet_version == 'resnet':

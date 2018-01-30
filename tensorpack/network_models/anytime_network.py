@@ -77,13 +77,13 @@ def compute_cfg(options):
 
     elif hasattr(options, 'densenet_depth') and options.densenet_depth is not None:
         if options.densenet_depth == 121:
-            n_units_per_block = [6, 12, 24, 16]
+            n_units_per_block = [6, 12, 24, 16] # 58; s = 9
         elif options.densenet_depth == 169:
-            n_units_per_block = [6, 12, 32, 32]
+            n_units_per_block = [6, 12, 32, 32] # 82; s = 14
         elif options.densenet_depth == 201:
-            n_units_per_block = [6, 12, 48, 32]
+            n_units_per_block = [6, 12, 48, 32] # 98; s = 17
         elif options.densenet_depth == 265:
-            n_units_per_block = [6, 12, 64, 48]
+            n_units_per_block = [6, 12, 64, 48] # 130; s = 24
         elif options.densenet_depth == 197:
             n_units_per_block = [16, 16, 32, 32]
         elif options.densenet_depth == 217:
@@ -185,6 +185,8 @@ def parser_add_common_arguments(parser):
                         help='number of units per stack, '
                         +'i.e., number of units per prediction, or prediction period',
                         type=int, default=1)
+    parser.add_argument('--min_predict_unit', help='Min unit idx for anytime prediction, 0 based',
+                        type=int, default=0)
     parser.add_argument('--weights_at_block_ends', 
                         help='Whether only have weights>0 at block ends, useful for fcn',
                         default=False, action='store_true') 
@@ -284,6 +286,9 @@ def parser_add_resnet_arguments(parser):
     depth_group.add_argument('-d', '--depth',
                             help='depth of the network in number of conv',
                             type=int)
+
+    parser.add_argument('--resnet_version', help='Version of resnet to use',
+                        default='resnet', choices=['resnet', 'resnext'])
     return parser
 
 class AnytimeNetwork(ModelDesc):
