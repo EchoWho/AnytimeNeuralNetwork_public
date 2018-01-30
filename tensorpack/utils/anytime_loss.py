@@ -223,4 +223,7 @@ def loss_weights(N, args, cfg=None):
         weights_tmp[np.cumsum(cfg)-1] = weights
         weights = weights_tmp
 
+    if hasattr(args, "min_predict_unit") and args.min_predict_unit > 0:
+        weights[:args.min_predict_unit] = 0.0
+        
     return weights
