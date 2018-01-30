@@ -11,7 +11,7 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeResnet
+from tensorpack.network_models.anytime_network import AnytimeResnet, AnytimeResNeXt
 
 from get_augmented_data import get_cifar_augmented_data, get_svhn_augmented_data
 
@@ -72,12 +72,14 @@ def evaluate(model_cls, ds, eval_names):
         f_store_out = open(store_fn, 'wb')
 
     l_labels = []
+    l_images = []
     l_preds = []
     l_feats = []
     for idx, output in enumerate(pred.get_result()):
         # o contains a list of predictios at various locations; each pred contains a small batch
         image, label = output[0:2]
         l_labels.extend(label)
+        l_images.extend(image)
         anytime_preds = output[2]
         anytime_feats = output[3]
 
@@ -90,9 +92,12 @@ def evaluate(model_cls, ds, eval_names):
 
     # since the labels comes in batches
     l_labels = np.asarray(l_labels)
+    l_images = np.asarray(l_images)
     l_preds = np.asarray(l_preds)
     l_feats = np.asarray(l_feats)
     if args.store_feats_preds:
+        if args.store_images_labels:
+            np.savez(args.store_basename + '_XY.npz', l_images=l_images, l_labels=l_labels)
         np.savez(args.store_basename + '.npz', l_preds=l_preds, l_feats=l_feats)
 
     logger.info("N samples predicted: {}".format(len(l_labels)))
@@ -141,9 +146,17 @@ if __name__ == '__main__':
                         type=str, default='distill_target')
     parser.add_argument('--store_feats_preds', help='whether store final feature and predictins in npz', 
                         default=False, action='store_true')
+    parser.add_argument('--store_images_labels', help='whether store input image and labels in npz during eval', 
+                        default=False, action='store_true')
+    parser.add_argument('--resnet_version', help='Version of resnet to use',
+                        default='resnet', choices=['resnet', 'resnext'])
     anytime_network.parser_add_resnet_arguments(parser)
-    model_cls = AnytimeResnet
     args = parser.parse_args()
+    if args.resnet_version == 'resnet':
+        model_cls = AnytimeResnet
+    elif args.resnet_version == 'resnext':
+        model_cls = AnytimeResNeXt
+        args.b_type = 'bottleneck'
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()

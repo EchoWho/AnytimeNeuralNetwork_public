@@ -8,7 +8,7 @@ from .common import layer_register, VariableHolder
 from ..utils.argtools import shape2d, shape4d
 import numpy as np
 
-__all__ = ['Conv2D', 'Deconv2D', 'AtrousConv2D']
+__all__ = ['Conv2D', 'Deconv2D', 'AtrousConv2D', 'GroupedConv2D']
 
 
 @layer_register()
@@ -249,6 +249,84 @@ def AtrousConv2D(x, ch_out, kernel_shape, dilation_rate,
     
     conv.set_shape(tf.TensorShape(out_shape))
     ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
+    ret.variables = VariableHolder(W=W)
+    if use_bias:
+        ret.variables.b = b
+    return ret
+
+
+@layer_register()
+def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
+        sum_paths=False, padding='SAME', stride=1, 
+        W_init=None, b_init=None, nl=tf.identity,
+        use_bias=False, data_format='NHWC'):
+    """
+    Grouped conv 2d for ResNeXt. Uses depthwise conv 2d and reshape and sum.
+   
+    Args:
+        x : 4D tensor of data_format
+        num_paths : number of groups
+        path_ch_out : number of ch_out per group
+        kernel_shape : (h,w) tuple or an int
+        sum_paths : whether the groups are summed together (if True) 
+            or concatenated (if False (default))
+        padding, W_init, b_init, nl, use_bias, data_format : see Conv2D
+
+    Returns:
+        tf.Tensor named ``output`` with attribute `variables`.
+
+    Variable Names:
+
+    * ``W``: weights
+    * ``b``: bias
+    """
+
+    in_shape = x.get_shape().as_list()
+    ch_dim = 3 if data_format == 'NHWC' else 1
+    ch_in = in_shape[ch_dim]
+    assert ch_in % num_paths == 0, "Grouped conv requires n_groups to divide ch_in" 
+    ch_in_per_path = ch_in // num_paths
+    ch_out = path_ch_out if sum_paths else num_paths * path_ch_out
+
+    kernel_shape = shape2d(kernel_shape)
+    padding = padding.upper()
+    filter_shape = kernel_shape + [ch_in, path_ch_out]
+    stride = shape4d(stride, data_format=data_format)
+
+    if W_init is None:
+        W_init = tf.contrib.layers.variance_scaling_initializer()
+    if b_init is None:
+        b_init = tf.constant_initializer()
+
+    W = tf.get_variable('W', filter_shape, initializer=W_init)
+    if use_bias:
+        b = tf.get_variable('b', [ch_out], initializer=b_init)
+
+    x = tf.nn.depthwise_conv2d(x, W, stride, padding, rate=None, data_format=data_format)
+    out_shape = x.get_shape().as_list()
+
+    # First reshape to expose the dimension by input channels 
+    shape_depthwise = [num_paths, ch_in_per_path, path_ch_out]
+    if data_format == 'NHWC':
+        x = tf.reshape(x, [-1, out_shape[1], out_shape[2]] + shape_depthwise)
+    else:
+        x = tf.reshape(x, [-1] + shape_depthwise + [out_shape[2], out_shape[3]])
+
+    # Then reduce sum to remove the input channel leaving output dim and (path dim)
+    if sum_paths:
+        sum_axis = [ch_dim, ch_dim + 1]
+    else:
+        sum_axis = ch_dim + 1
+    x = tf.reduce_sum(x, sum_axis) 
+
+    # reshape to output shape if path dim did not collapse
+    if not sum_paths:
+        if data_format == 'NHWC':
+            x = tf.reshape(x, [-1, out_shape[1], out_shape[2], ch_out])
+        else:
+            x = tf.reshape(x, [-1, ch_out, out_shape[2], out_shape[3]])
+
+    ret = nl(tf.nn.bias_add(x, b, data_format=data_format) if use_bias else x, name='output')
     ret.variables = VariableHolder(W=W)
     if use_bias:
         ret.variables.b = b
