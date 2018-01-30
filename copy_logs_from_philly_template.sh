@@ -3,7 +3,7 @@
 COPY_LOC=$1
 FROM_LOC=$2
 
-TO_LOC="/home/dedey/experiment_log"
+TO_LOC="/mnt/experiment_log"
 
 # Mount the etc folder for the job from philly to local machine
 echo $FROM_LOC $TO_LOC
