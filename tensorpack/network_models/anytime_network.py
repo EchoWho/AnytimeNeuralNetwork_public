@@ -2233,6 +2233,9 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
             if bi < self.n_blocks - 1 and self.reduction_ratio < 1:
                 l_mf = self._compute_transition(l_mf, layer_idx)
 
+        # remove the init feat as required by anytime network interface
+        ll_feats = ll_feats[1:]
+
         # precondition: ll_feats[i][j] is the feature used to generate layer i, scale j
         #       concatenated with the generated layer i, scale j.
         # postcondition: ll_feats[i] is [ feature map at i for anytime prediction  ]
