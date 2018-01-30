@@ -17,7 +17,7 @@ from tensorpack.utils import utils
 from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeResnet
+from tensorpack.network_models.anytime_network import AnytimeResnet, AnytimeResNeXt
 
 import get_augmented_data
 
@@ -26,13 +26,13 @@ INPUT_SIZE = 224
 get_data = get_augmented_data.get_ilsvrc_augmented_data
 
 
-def get_config():
+def get_config(model_cls):
     # prepare dataset
     dataset_train = get_data('train', args, do_multiprocess=True)
     dataset_val = get_data('val', args, do_multiprocess=True) 
     steps_per_epoch = dataset_train.size() // args.nr_gpu
 
-    model=AnytimeResnet(INPUT_SIZE, args)
+    model = model_cls(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
     #lr_schedule = [(1, 1e-1/3), (30, 1e-2/3), (60, 1e-3/3), (90, 1e-4/3), (105, 1e-5/3)]
@@ -53,9 +53,9 @@ def get_config():
         max_epoch=128,
     )
 
-def eval_on_ILSVRC12(subset):
+def eval_on_ILSVRC12(subset, model_cls):
     ds = get_data(subset, args, do_multiprocess=False)
-    model = AnytimeResnet(INPUT_SIZE, args)
+    model = model_cls(INPUT_SIZE, args)
 
     output_names = []
     for i, w in enumerate(model.weights):
@@ -99,6 +99,11 @@ if __name__ == '__main__':
     anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
     args.ds_name="ilsvrc"
+    if args.resnet_version == 'resnet':
+        model_cls = AnytimeResnet
+    elif args.resnet_version == 'resnext':
+        model_cls = AnytimeResNeXt
+        args.b_type = 'bottleneck'
     
     assert args.init_channel == 64
     args.num_classes = 1000
@@ -125,10 +130,10 @@ if __name__ == '__main__':
     if do_eval:
         for subset in args.evaluate:
             if subset in ['train', 'val']:
-                eval_on_ILSVRC12(subset)
+                eval_on_ILSVRC12(subset, model_cls)
         sys.exit()
 
-    config = get_config()
+    config = get_config(model_cls)
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
     config.nr_tower = args.nr_gpu
