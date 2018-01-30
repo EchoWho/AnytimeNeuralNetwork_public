@@ -82,7 +82,7 @@ class SaverRestore(SessionInit):
     """
     Restore a tensorflow checkpoint saved by :class:`tf.train.Saver` or :class:`ModelSaver`.
     """
-    def __init__(self, model_path, prefix=None):
+    def __init__(self, model_path, prefix=None, var_filter=lambda x:True):
         """
         Args:
             model_path (str): a model name (model-xxxx) or a ``checkpoint`` file.
@@ -91,6 +91,7 @@ class SaverRestore(SessionInit):
         model_path = get_checkpoint_path(model_path)
         self.path = model_path
         self.prefix = prefix
+        self.var_filter = var_filter
 
     def _setup_graph(self):
         dic = self._get_restore_dict()
@@ -115,8 +116,12 @@ class SaverRestore(SessionInit):
         for v in graph_vars:
             name = get_savename_from_varname(v.name, varname_prefix=self.prefix)
             if reader.has_tensor(name):
-                func(reader, name, v)
-                chkpt_vars_used.add(name)
+                if not self.var_filter(name):
+                    chkpt_vars_used.add(name)
+                    logger.info('SaverRestore ignores var {}'.format(name))
+                else:
+                    func(reader, name, v)
+                    chkpt_vars_used.add(name)
             else:
                 vname = v.op.name
                 if not is_training_name(vname):
