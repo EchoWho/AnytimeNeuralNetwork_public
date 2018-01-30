@@ -1,17 +1,17 @@
 #!/bin/bash
-# Exp 67 (imagenet resnet 50, 101)
-# 3118..3119
-# Num gpus: 4
-
-# Exp 68 (imagenet msdense 23, 33, 38)
-# 3122..3124
-# Num gpus: 4
-
-# Exp 69 (imagenet msdense 23, 33, 38, nr_gpu=8
-# 3127..3129
+# Exp 70 (imagenet msdense f=4 for control)
+# 3132..3134
 # Num gpus: 8
 
-for i in {3127..3129}
+# Exp 71 (imagenet ResNeXt nr_gpu=8)
+#
+# Num gpus: 8
+
+# Exp 72
+#
+#
+
+for i in {3132..3134}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -192,4 +192,8 @@ done
 
 # Exp 69 (imagenet msdense 23, 33, 38, nr_gpu=8
 # 3127..3129
+# Num gpus: 8
+
+# Exp 70 (imagenet msdense f=4 for control)
+# 3132..3134
 # Num gpus: 8
