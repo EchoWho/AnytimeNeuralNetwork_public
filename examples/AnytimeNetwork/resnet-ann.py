@@ -11,7 +11,7 @@ from tensorpack.utils import logger
 from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeResnet
+from tensorpack.network_models.anytime_network import AnytimeResnet, AnytimeResNeXt
 
 from get_augmented_data import get_cifar_augmented_data, get_svhn_augmented_data
 
@@ -148,9 +148,15 @@ if __name__ == '__main__':
                         default=False, action='store_true')
     parser.add_argument('--store_images_labels', help='whether store input image and labels in npz during eval', 
                         default=False, action='store_true')
+    parser.add_argument('--resnet_version', help='Version of resnet to use',
+                        default='resnet', choices=['resnet', 'resnext'])
     anytime_network.parser_add_resnet_arguments(parser)
-    model_cls = AnytimeResnet
     args = parser.parse_args()
+    if args.resnet_version == 'resnet':
+        model_cls = AnytimeResnet
+    elif args.resnet_version == 'resnext':
+        model_cls = AnytimeResNeXt
+        args.b_type = 'bottleneck'
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir()

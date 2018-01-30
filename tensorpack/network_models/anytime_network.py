@@ -512,10 +512,10 @@ class AnytimeNetwork(ModelDesc):
         logger.info("sampling loss with method {}".format(self.options.ls_method))
         select_idx = self._get_select_idx()
         
-        with argscope([Conv2D, Deconv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
+        with argscope([Conv2D, Deconv2D, GroupedConv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format=self.data_format), \
-            argscope([Conv2D, Deconv2D], nl=tf.identity, use_bias=False), \
-            argscope([Conv2D], W_init=self.w_init), \
+            argscope([Conv2D, Deconv2D, GroupedConv2D], nl=tf.identity, use_bias=False), \
+            argscope([Conv2D, GroupedConv2D], W_init=self.w_init), \
             argscope([BatchNorm], decay=self.options.batch_norm_decay):
 
             image, label = self._parse_inputs(inputs)
@@ -863,6 +863,61 @@ class AnytimeResnet(AnytimeNetwork):
             # end for each k in n_units
         #end for each block
         return ll_feats
+
+
+class AnytimeResNeXt(AnytimeResnet): 
+
+    def __init__(self, input_size, args):
+        super(AnytimeResNeXt, self).__init__(input_size, args)
+        # ResNeXt always uses bottleneck structure
+        self.num_paths = 32
+
+
+    def compute_ch_per_path(self, path, ch_base):
+        # ratio of ch_base to ch_per_path
+        # ratio table: (1,1), (2, 1.60), (4, 2.67), (8, 4.67), (32, 16.11)
+        ratio = (8 * path + np.sqrt(64 * path**2 + 612 * path)) / 34.
+        ch_per_path = int(np.ceil(ch_base / ratio))
+        return ch_per_path
+
+
+    def residual_bottleneck(self, name, l_feats, ch_in_to_ch_base=4):
+        assert ch_in_to_ch_base in [1,2,4], ch_in_to_ch_base
+        ch_in = l_feats[0].get_shape().as_list()[self.ch_dim] 
+        ch_base = ch_in // ch_in_to_ch_base
+        ch_per_path = self.compute_ch_per_path(self.num_paths, ch_base)
+
+        stride=1
+        if ch_in_to_ch_base == 2:
+            # the first unit of block 2,3,4,... (1based)
+            stride = 2
+        
+        l_new_feats = []
+        for w in range(self.width):
+            with tf.variable_scope('{}.{}.0'.format(name, w)) as scope:
+                l = BatchNorm('bn0', l_feats[w])
+                l = tf.nn.relu(l)
+                if w == 0:
+                    merged_feats = l
+                else:
+                    merged_feats = tf.concat([merged_feats, l], self.ch_dim, name='concat')
+
+                l = (LinearWrap(merged_feats)
+                    .Conv2D('conv1x1_0', self.num_paths * ch_per_path, 1, nl=BNReLU)
+                    .GroupedConv2D('conv3x3_1', self.num_paths, ch_per_path, 3, sum_paths=False, stride=stride, nl=BNReLU) 
+                    .GroupedConv2D('conv1x1_2', self.num_paths, ch_base*4, 1, sum_paths=True)())
+                l = BatchNorm('bn_3', l)
+
+                shortcut = l_feats[w]
+                if ch_in_to_ch_base < 4:
+                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, 1, stride=stride)
+                    shortcut = BatchNorm('bn_short', shortcut)
+                l = l + shortcut
+                l_new_feats.append(l)
+            #end var_scope
+        #end for
+        return l_new_feats
+
 
 
 ################################################
