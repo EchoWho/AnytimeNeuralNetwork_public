@@ -11,7 +11,11 @@
 # 3147..3154
 # Num gpus: 8
 
-for i in {3132..3134} {3137..3144} {3147..3154}
+# Exp 73 (cifar svhn with adaloss)
+# 3157..3204
+# Num gpus : 1
+
+for i in {3157..3204}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -205,3 +209,7 @@ done
 # Exp 72 (imagenet DenseNet nr_gpu=8)
 # 3147..3154
 # Num gpus: 8
+
+# Exp 73 (cifar svhn with adaloss)
+# 3157..3204
+# Num gpus : 1
