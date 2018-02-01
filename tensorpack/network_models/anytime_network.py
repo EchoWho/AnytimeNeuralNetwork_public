@@ -592,6 +592,7 @@ class AnytimeNetwork(ModelDesc):
                             l = BatchNorm('bn', l)
                         
                         logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
+                    #end with scope
                     anytime_cost_i = tf.identity(cost, 
                             name='anytime_cost_{:02d}'.format(anytime_idx))
 
