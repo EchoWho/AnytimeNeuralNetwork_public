@@ -329,18 +329,21 @@ class AdaptiveLossWeight(Callback):
 
 
     def _after_run(self, ctx, run_vals):
-        losses = run_vals.results
+        losses = np.asarray(run_vals.results)
         if self.avg_losses is None:
-            self.avg_losses = np.asarray(losses,dtype=np.float32)
+            self.avg_losses = losses
+            self.avg_losses_sq = self.avg_losses ** 2
             self.cnt = 0
         else:
             self.avg_losses = self.avg_losses * self.momentum \
-                + np.asarray(losses,dtype=np.float32) * (1 - self.momentum)
+                + losses * (1 - self.momentum)
+            self.avg_losses_sq = self.avg_losses_sq * self.momentum \
+                + losses**2 * (1 - self.momentum)
 
         self.cnt += 1
         if self.cnt % self.update_per == 0:
             self.cnt = 0
-            self._weight = 1. / (self.avg_losses + 1e-8)
+            self._weight = 1. / np.sqrt(self.avg_losses_sq + 1e-8)
             self._weight /= np.max(self._weight)
             self._weight = self._weight * (1-self.gamma) \
                     + np.ones(self.K, dtype=np.float32) * self.gamma
