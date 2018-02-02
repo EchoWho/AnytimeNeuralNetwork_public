@@ -35,6 +35,8 @@ FUNC_TYPE_OPT = 2
 # func type for computing ANN/AANN
 FUNC_TYPE_ANN = 5
 
+# SAMLOSS/ls_method for adaloss
+ADALOSS_LS_METHOD=100
 
 """
     cfg is a tuple that contains
@@ -315,7 +317,13 @@ class AnytimeNetwork(ModelDesc):
         self.alter_label_activate_frac = self.options.alter_label_activate_frac
         self.alter_loss_w = self.options.alter_loss_w
 
-        self.weights = anytime_loss.loss_weights(self.total_units, args, 
+        self.options.ls_method = self.options.samloss
+        if self.options.ls_method == ADALOSS_LS_METHOD:
+            self.options.is_select_arr = True
+            self.options.sum_rand_ratio = 0.0
+            self.options.func_type = FUNC_TYPE_ANN
+
+        self.weights = anytime_loss.loss_weights(self.total_units, self.options, 
             cfg=self.network_config.n_units_per_block)
         self.weights_sum = np.sum(self.weights)
         self.ls_K = np.sum(np.asarray(self.weights) > 0)
@@ -323,7 +331,7 @@ class AnytimeNetwork(ModelDesc):
 
         # special names and conditions
         self.select_idx_name = "select_idx"
-        self.options.ls_method = self.options.samloss
+
         # (UGLY) due to the history of development. 1,...,5 requires rewards
         self.options.require_rewards = self.options.samloss < 6 and \
             self.options.samloss > 0
@@ -592,6 +600,7 @@ class AnytimeNetwork(ModelDesc):
                             l = BatchNorm('bn', l)
                         
                         logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
+                    #end with scope
                     anytime_cost_i = tf.identity(cost, 
                             name='anytime_cost_{:02d}'.format(anytime_idx))
 
