@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import scipy.linalg as linalg
 from .base import Callback
 from ..tfutils import get_op_tensor_name, get_op_or_tensor_by_name
 from tensorpack.utils import logger
@@ -332,19 +333,27 @@ class AdaptiveLossWeight(Callback):
         losses = np.asarray(run_vals.results)
         if self.avg_losses is None:
             self.avg_losses = losses
-            self.avg_losses_sq = self.avg_losses ** 2
+            self.avg_losses_sq = losses ** 2
+            self.avg_losses_outer = np.outer(losses, losses)
             self.cnt = 0
         else:
             self.avg_losses = self.avg_losses * self.momentum \
                 + losses * (1 - self.momentum)
             self.avg_losses_sq = self.avg_losses_sq * self.momentum \
                 + losses**2 * (1 - self.momentum)
+            self.avg_losses_outer = self.avg_losses_outer * self.momentum \
+                + np.outer(losses, losses) * (1 - self.momentum)
 
         self.cnt += 1
         if self.cnt % self.update_per == 0:
             self.cnt = 0
-            self._weight = 1. / np.sqrt(self.avg_losses_sq + 1e-8)
+            #self._weight = 1. / np.sqrt(self.avg_losses_sq + 1e-8)
+            regularizer = np.diag(np.diag(self.avg_losses_outer) * (1 + 1e-8))
+            self._weight = linalg.solve(\
+                linalg.sqrtm(self.avg_losses_outer + regularizer), np.ones(self.K))
             self._weight /= np.max(self._weight)
+            # This is worse than without
+            #self._weight = np.maximum(self._weight, 0)
             self._weight = self._weight * (1-self.gamma) \
                     + np.ones(self.K, dtype=np.float32) * self.gamma
             self.assign_op.eval(feed_dict={self.weight_holder : self._weight})
