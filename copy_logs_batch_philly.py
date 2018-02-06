@@ -10,11 +10,12 @@ def collect_info(cluster=None):
     user = 'dedey'
     password = 'DigDug2god?'
     vc = 'msrlabs'
-    status = 'Passed'
-    num_finished_jobs = '30'
+    status = 'Pass'
+    num_finished_jobs = '12'
 
     cmd = "https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(
         cluster, vc, num_finished_jobs, user, status)
+    print cmd
 
     response = StringIO.StringIO()
 
@@ -47,17 +48,16 @@ def copy_passed_logs_from_json(json_data=None):
         job_status = job['status']
         ann_in_name = job_name.find('_ann')
         if ann_in_name > 0:
-            if job_status == 'Pass':
-                # The name of the scratch directory on Philly where logs are kept
-                philly_scratch_dir = job['scratch']
+            # The name of the scratch directory on Philly where logs are kept
+            philly_scratch_dir = job['scratch']
 
-                # The name of the folder on the local machine to put logs in
-                local_dir = os.path.join('/home/dedey/DATADRIVE1/ann_models_logs', job_name.split('.')[0])
+            # The name of the folder on the local machine to put logs in
+            local_dir = os.path.join('/home/dedey/DATADRIVE1/ann_models_logs', job_name.split('.')[0])
 
-                # Call the bash script with the arguments
-                print 'Going to copy: ' + philly_scratch_dir + ' to ' + local_dir
-                output = subprocess.check_output(['./copy_logs_from_philly_template.sh', local_dir, philly_scratch_dir])
-                print output
+            # Call the bash script with the arguments
+            print 'Going to copy: ' + philly_scratch_dir + ' to ' + local_dir
+            output = subprocess.check_output(['./copy_logs_from_philly_template.sh', local_dir, philly_scratch_dir])
+            print output
 
 
 def main():
@@ -69,7 +69,6 @@ def main():
     #copy_passed_logs_from_json(json_data=json_data)
     # From cam
     json_data = collect_info(cluster='cam')
-    pdb.set_trace()
     copy_passed_logs_from_json(json_data=json_data)
 
 if __name__ == '__main__':
