@@ -15,7 +15,11 @@
 # 3157..3204
 # Num gpus : 1
 
-for i in {3157..3204}
+# Exp 74 (cifar svhn with resnext)
+# 3207..3296
+# Num gpus : 4
+
+for i in {3207..3296}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -23,7 +27,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="4"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
