@@ -11,7 +11,7 @@ def collect_info(cluster=None):
     password = 'DigDug2god?'
     vc = 'msrlabs'
     status = 'Passed'
-    num_finished_jobs = '3000'
+    num_finished_jobs = '30'
 
     cmd = "https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(
         cluster, vc, num_finished_jobs, user, status)
@@ -52,7 +52,7 @@ def copy_passed_logs_from_json(json_data=None):
                 philly_scratch_dir = job['scratch']
 
                 # The name of the folder on the local machine to put logs in
-                local_dir = os.path.join('/home/dedey/ann_models_logs', job_name.split('.')[0])
+                local_dir = os.path.join('/home/dedey/DATADRIVE1/ann_models_logs', job_name.split('.')[0])
 
                 # Call the bash script with the arguments
                 print 'Going to copy: ' + philly_scratch_dir + ' to ' + local_dir
@@ -69,6 +69,7 @@ def main():
     #copy_passed_logs_from_json(json_data=json_data)
     # From cam
     json_data = collect_info(cluster='cam')
+    pdb.set_trace()
     copy_passed_logs_from_json(json_data=json_data)
 
 if __name__ == '__main__':
