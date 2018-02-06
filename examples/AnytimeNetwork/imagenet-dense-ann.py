@@ -90,6 +90,7 @@ if __name__ == '__main__':
         model_cls = AnytimeLogDensenetV2
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
+        #args.reduction_ratio = 0.5
     elif args.densenet_version == 'loglog':
         model_cls = AnytimeLogLogDenseNet
 
