@@ -19,7 +19,11 @@
 # 3207..3296
 # Num gpus : 4
 
-for i in {3207..3296}
+# Exp 75 (imagenet DenseNet reproduce rerun)
+# 3299..3306 
+# Num gpus : 8
+
+for i in {3299..3306}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -217,3 +221,11 @@ done
 # Exp 73 (cifar svhn with adaloss)
 # 3157..3204
 # Num gpus : 1
+
+# Exp 74 (cifar svhn with resnext)
+# 3207..3296
+# Num gpus : 4
+
+# Exp 75 (imagenet DenseNet reproduce rerun)
+# 3299..3306 
+# Num gpus : 8
