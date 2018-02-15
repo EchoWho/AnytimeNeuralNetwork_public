@@ -73,6 +73,7 @@ if __name__ == '__main__':
     anytime_network.parser_add_densenet_arguments(parser)
     args = parser.parse_args()
     lr_multiplier = 1.0 * args.batch_size / 64
+    args.dropout_kp = 0.8
     if args.densenet_version == 'atv1':
         model_cls = AnytimeDensenet
         lr_multiplier *= 1
