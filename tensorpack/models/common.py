@@ -138,7 +138,7 @@ def layer_register(
 
                         
                         if hasattr(outputs, 'info'):
-                            logger.info("{} flops: {}".format(
+                            logger.info("{} flops (multi-add): {}".format(
                                 scope.name, outputs.info.flops))
             else:
                 # run the actual function
