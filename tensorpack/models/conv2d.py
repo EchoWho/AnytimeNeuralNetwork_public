@@ -65,6 +65,7 @@ def Conv2D(x, out_channel, kernel_shape,
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
 
+    flops = None
     if split == 1:
         conv = tf.nn.conv2d(x, W, stride, padding, data_format=data_format)
         if log_flops:
@@ -73,7 +74,7 @@ def Conv2D(x, out_channel, kernel_shape,
             w_dim = h_dim + 1
             if in_shape[h_dim] is not None:
                 flops *= in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
-                logger.info("conv consume FLOPS {}".format(flops))
+                #logger.info("conv consume FLOPS {}".format(flops))
     else:
         inputs = tf.split(x, split, channel_axis)
         kernels = tf.split(W, split, 3)
@@ -85,6 +86,8 @@ def Conv2D(x, out_channel, kernel_shape,
     ret.variables = VariableHolder(W=W)
     if use_bias:
         ret.variables.b = b
+    if log_flops:
+        ret.flops = VariableHolder(flops=flops) 
     return ret
 
 
