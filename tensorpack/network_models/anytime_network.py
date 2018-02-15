@@ -1323,13 +1323,28 @@ class AnytimeDensenet(AnytimeNetwork):
         return ll_feats
 
 
-class DenseNet(AnytimeDensenet):
+class DenseNet(AnytimeNetwork):
     """
         This class is for reproducing densenet results. 
         There is no choices of selecting connections as in AnytimeDensenet
     """
     def __init__(self, input_size, args):
         super(DenseNet, self).__init__(input_size, args)
+        self.reduction_ratio = self.options.reduction_ratio
+        self.growth_rate = self.options.growth_rate
+        self.bottleneck_width = self.options.bottleneck_width
+        self.dropout_kp = self.options.dropout_kp
+
+        if not self.options.use_init_ch:
+            default_ch = self.growth_rate * 2
+            if self.init_channel != default_ch:
+                self.init_channel = default_ch
+                logger.info("Densenet sets the init_channel to be " \
+                    + "2*growth_rate by default. " \
+                    + "I'm setting this automatically!")
+        
+        # width > 1 is not implemented for densenet
+        assert self.width == 1,self.width
 
 
     def compute_block(self, pmls, layer_idx, n_units, growth):
@@ -1370,7 +1385,8 @@ class DenseNet(AnytimeDensenet):
             layer_idx += n_units
 
         pmls = pmls[1:]
-        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] for li, ml in enumerate(pmls)]
+        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
+            for li, ml in enumerate(pmls) ]
         return ll_feats
 
 
