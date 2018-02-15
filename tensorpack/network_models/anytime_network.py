@@ -269,6 +269,8 @@ def parser_add_common_arguments(parser):
                         type=str, default='var_scale', choices=['var_scale', 'xavier'])
     parser.add_argument('--data_format', help='data format NCHW or NHWC',
                         type=str, default='NCHW', choices=['NCHW', 'NHWC'])
+    parser.add_argument('--use_bias', help='Whether convolutions should use bias',
+                        default=False, action='store_true')
 
     ## Special options to force input as uint8 and do mean/std process in graph in order to save memory
     # during cpu - gpu communication
@@ -527,7 +529,7 @@ class AnytimeNetwork(ModelDesc):
         
         with argscope([Conv2D, Deconv2D, GroupedConv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
                       data_format=self.data_format), \
-            argscope([Conv2D, Deconv2D, GroupedConv2D], nl=tf.identity, use_bias=False), \
+            argscope([Conv2D, Deconv2D, GroupedConv2D], nl=tf.identity, use_bias=self.options.use_bias), \
             argscope([Conv2D, GroupedConv2D], W_init=self.w_init), \
             argscope([BatchNorm], decay=self.options.batch_norm_decay):
 
