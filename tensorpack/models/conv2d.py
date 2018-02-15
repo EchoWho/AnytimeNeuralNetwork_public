@@ -87,7 +87,7 @@ def Conv2D(x, out_channel, kernel_shape,
     if use_bias:
         ret.variables.b = b
     if log_flops:
-        ret.flops = VariableHolder(flops=flops) 
+        ret.info = VariableHolder(flops=flops) 
     return ret
 
 
