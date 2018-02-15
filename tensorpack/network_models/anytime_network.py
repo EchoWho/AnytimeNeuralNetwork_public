@@ -966,8 +966,6 @@ def parser_add_densenet_arguments(parser):
                         type=np.float32, default=1)
     parser.add_argument('--log_dense_base', help='base of log',
                         type=np.float32, default=2)
-    parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
-                        type=np.float32, default=1)
     parser.add_argument('--transition_batch_size', 
                         help='number of layers to transit together per conv; ' +\
                              '-1 means all previous layers transition together using 1x1 conv',
@@ -978,7 +976,9 @@ def parser_add_densenet_arguments(parser):
     parser.add_argument('--pre_activate', help='whether BNReLU pre conv or after',
                         default=False, action='store_true')
     parser.add_argument('--dropout_kp', help='Dropout probability',
-                        type=np.float32, default=0.8)
+                        type=np.float32, default=1.0)
+    parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
+                        type=np.float32, default=1.0)
     parser.add_argument('--loglog_growth_multiplier', help='Loglog recursion depth 0 growth rate multiplier',
                         type=np.float32, default=1.0)
     return parser, depth_group
@@ -1340,8 +1340,7 @@ class DenseNet(AnytimeDensenet):
                 ch_out = int(ch_in * self.reduction_ratio)
                 pml = BNReLU('trans_bnrelu', pml)
                 pml = Conv2D('conv1x1', pml, ch_out, 1)
-                if self.dropout_kp < 1:
-                    pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
+                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
                 pml = AvgPooling('pool', pml, 2, padding='SAME')
 
         for k in range(n_units):
@@ -1353,12 +1352,10 @@ class DenseNet(AnytimeDensenet):
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
                     l = Conv2D('conv1x1', l, bnw, 1)
-                    if self.dropout_kp < 1:
-                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     l = BNReLU('bottleneck_bnrelu', l)
                 l = Conv2D('conv3x3', l, growth, 3)
-                if self.dropout_kp < 1:
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pml = tf.concat([pml, l], self.ch_dim, name='concat')
                 pmls.append(pml)
         return pmls
