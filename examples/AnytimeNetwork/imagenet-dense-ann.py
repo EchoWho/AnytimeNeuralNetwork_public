@@ -90,7 +90,7 @@ if __name__ == '__main__':
         model_cls = AnytimeLogDensenetV2
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
-        #args.reduction_ratio = 0.5
+        args.reduction_ratio = 0.5
     elif args.densenet_version == 'loglog':
         model_cls = AnytimeLogLogDenseNet
 
@@ -110,27 +110,17 @@ if __name__ == '__main__':
     # Scale learning rate with the batch size linearly 
     # lr_rate represent how much we need to scale up down lr based on batch size
     lr_rate = args.batch_size / 256.0
-    lr_decay_epoch = 15
+    lr_decay_epoch = 30
     # step**6 approx 0.005 and step**5 approx 0.01
-    lr_decay_step = 0.4135 
-    max_epoch = 105
-    lr_schedule = [(1, 1e-1 * lr_rate)]
-    for epochi in range(lr_decay_epoch, max_epoch, lr_decay_epoch):
-        last_lr = lr_schedule[-1][1]
-        lr_schedule.append((epochi, last_lr * lr_decay_step))
-    def populate_lr_schedule(lr_schedule, max_epoch):
-        lr_schedule.append((max_epoch+1, lr_schedule[-1][1]))
-        change_iter = iter(lr_schedule)
-        change = next(change_iter)
-        assert change[0] == 1
-        populated_schedule = []
-        for i in range(1,max_epoch+1):
-            if change[0] <= i:
-                lr = change[1]
-                change = next(change_iter)
-            populated_schedule.append((i, lr))
-        return populated_schedule
-    lr_schedule = populate_lr_schedule(lr_schedule, max_epoch)
+    lr_decay = 0.1 
+    curr_lr = 0.1
+    max_epoch = 90
+    lr_schedule = [] #(1, 1e-1 * lr_rate)]
+    for epochi in range(1, max_epoch+1):
+        lr_schedule.append( (epochi, curr_lr) ) 
+        if epochi % lr_decay_epoch == 0:
+            curr_lr *= lr_decay
+    print lr_schedule
     args.init_lr = lr_schedule[0][1]
     args.batch_norm_decay=0.9**(lr_rate)  # according to Torch blog
 
