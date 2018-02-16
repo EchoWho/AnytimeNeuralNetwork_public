@@ -111,16 +111,16 @@ def compute_cfg(options):
             s_type = 'basic'
             # g =6
         elif options.msdensenet_depth == 38: 
-            n_units_per_block = [9, 10, 9, 9]
+            n_units_per_block = [9,8,9,8] #[9, 10, 9, 9]
             s_type = 'imagenet'
             # g = 16
             # s = 7
         elif options.msdensenet_depth == 33:
-            n_units_per_block = [8, 8, 8, 8]
+            n_units_per_block = [8,7,7,7] #[8, 8, 8, 8]
             s_type = 'imagenet'
             # s = 6
         elif options.msdensenet_depth == 23:
-            n_units_per_block = [5, 6, 6, 5]
+            n_units_per_block = [5,5,4,5] #[5, 6, 6, 5]
             s_type = 'imagenet'
             # s = 4
         else:
