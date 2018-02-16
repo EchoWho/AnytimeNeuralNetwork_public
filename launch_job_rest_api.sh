@@ -19,6 +19,10 @@
 # 3472..3480
 # Num gpus : 8
 
+# Exp 85 (cifar/svhn adaloss with s=1)
+# 3483..3518
+# Num gpus : 1
+
 # for i in {3449..3452} {3461..3469} # 4gpu ;   
 # do
 # 	USERNAME="dedey"
@@ -289,4 +293,15 @@ done
 # 3455..3458
 # Num gpus : 8
 
+# Exp 83 (msdense ilsvrc adaloss 4gpu)
+# 3461..3469
+# Num gpus : 4
+
+# Exp 84 (msdense copy of 83 w/ 8gpu)
+# 3472..3480
+# Num gpus : 8
+
+# Exp 85 (cifar/svhn adaloss with s=1)
+# 3483..3518
+# Num gpus : 1
 
