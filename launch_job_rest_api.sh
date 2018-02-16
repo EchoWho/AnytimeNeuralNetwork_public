@@ -3,8 +3,66 @@
 # 3351..3446
 # Num gpus : 1
 
+# Exp 81 (resnet ilsvrc adaloss 4gpu)
+# 3449..3452
+# Num gpus : 4
 
-for i in {3351..3446}
+# Exp 82 (resnet ilsrvc adaloss 8gpu copy of 81)
+# 3455..3458
+# Num gpus : 8
+
+# Exp 83 (msdense ilsvrc adaloss 4gpu)
+# 3461..3469
+# Num gpus : 4
+
+# Exp 84 (msdense copy of 83 w/ 8gpu)
+# 3472..3480
+# Num gpus : 8
+
+# Exp 85 (cifar/svhn adaloss with s=1)
+# 3483..3518
+# Num gpus : 1
+
+# Exp 86 (DenseNet reproduce round 3)
+# 3521..3523
+# Num gpus : 4
+
+# Exp 87 (copy of 86 with 8 gpu)
+# 3526..3528
+# Num gpus : 8
+
+# FOR I IN {3449..3452} {3461..3469} {3521..3523} # 4GPU ; {3483..3518} #1GPU 
+# do
+# 	USERNAME="dedey"
+# 	PASSWORD="DigDug2god?"
+# 	CLUSTER="cam"
+# 	JOBSCRIPT="run_exp_$i.sh"
+# 	SPECIAL_NAME="_ann"
+# 	VC="msrlabs"
+# 	NUM_GPUS="4"
+
+# 	CMD="https://philly/api/submit?"
+# 	CMD+="buildId=0000&"
+# 	CMD+="customDockerName=custom-tf-1-1-0-python-2-7&"
+# 	CMD+="toolType=cust&"
+# 	CMD+="clusterId=$CLUSTER&"
+# 	CMD+="vcId=$VC&"
+# 	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork_master%2F$JOBSCRIPT&"
+# 	CMD+="minGPUs=$NUM_GPUS&"
+# 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
+# 	CMD+="isdebug=false&"
+# 	CMD+="iscrossrack=false&"
+# 	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
+# 	CMD+="oneProcessPerContainer=true&"
+# 	CMD+="userName=$USERNAME"
+
+# 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
+
+# 	echo "$CMD"
+# done
+
+
+for i in {3455..3458} {3472..3480} {3526..3528} #8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -12,7 +70,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -33,41 +91,6 @@ do
 
 	echo "$CMD"
 done
-
-
-# # For running jobs on PhillyOnAzure
-# for i in {3299..3306} {3329..3332} # {3341..3348} {3335..3338} {3309..3326}  #4gpus
-# do
-# 	USERNAME="dedey"
-# 	PASSWORD="Urdu2god?"
-# 	CLUSTER="eu1"
-# 	JOBSCRIPT="run_exp_$i.sh"
-# 	SPECIAL_NAME="_ann"
-# 	VC="msrlabs"
-# 	NUM_GPUS="8"
-
-# 	CMD="https://philly/api/submit?"
-# 	CMD+="buildId=0000&"
-# 	CMD+="customDockerName=custom-tf-1-1-0-python-2-7&"
-# 	CMD+="toolType=cust&"
-# 	CMD+="clusterId=$CLUSTER&"
-# 	CMD+="vcId=$VC&"
-# 	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork_master%2F$JOBSCRIPT&"
-# 	CMD+="minGPUs=$NUM_GPUS&"
-# 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
-# 	CMD+="isdebug=false&"
-# 	CMD+="iscrossrack=false&"
-# 	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
-# 	CMD+="oneProcessPerContainer=true&"
-# 	CMD+="rackid=p100-gpc02&"
-# 	CMD+="userName=$USERNAME"
-
-# 	echo "$CMD"
-
-# 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
-
-# done
-
 
 
 # Exp 31
@@ -265,3 +288,31 @@ done
 # Exp 80 (cifar/svhn adaloss competitor)
 # 3351..3446
 # Num gpus : 1
+
+# Exp 81 (resnet ilsvrc adaloss 4gpu)
+# 3449..3452
+# Num gpus : 4
+
+# Exp 82 (resnet ilsrvc adaloss 8gpu copy of 81)
+# 3455..3458
+# Num gpus : 8
+
+# Exp 83 (msdense ilsvrc adaloss 4gpu)
+# 3461..3469
+# Num gpus : 4
+
+# Exp 84 (msdense copy of 83 w/ 8gpu)
+# 3472..3480
+# Num gpus : 8
+
+# Exp 85 (cifar/svhn adaloss with s=1)
+# 3483..3518
+# Num gpus : 1
+
+# Exp 86 (DenseNet reproduce round 3)
+# 3521..3523
+# Num gpus : 4
+
+# Exp 87 (copy of 86 with 8 gpu)
+# 3526..3528
+# Num gpus : 8

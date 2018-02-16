@@ -106,21 +106,17 @@ def compute_cfg(options):
         return NetworkConfig(n_units_per_block, b_type, s_type)#, default_growth_rate)
 
     elif hasattr(options, 'msdensenet_depth') and options.msdensenet_depth is not None:
-        if options.msdensenet_depth == 24:
-            n_units_per_block = [7, 8, 8]
-            s_type = 'basic'
-            # g =6
-        elif options.msdensenet_depth == 38: 
-            n_units_per_block = [9, 10, 9, 9]
+        if options.msdensenet_depth == 38: 
+            n_units_per_block = [10,9,10,9] #[9, 10, 9, 9]
             s_type = 'imagenet'
             # g = 16
             # s = 7
         elif options.msdensenet_depth == 33:
-            n_units_per_block = [8, 8, 8, 8]
+            n_units_per_block = [9,8,8,8] #[8, 8, 8, 8]
             s_type = 'imagenet'
             # s = 6
         elif options.msdensenet_depth == 23:
-            n_units_per_block = [5, 6, 6, 5]
+            n_units_per_block = [6,6,5,6] #[5, 6, 6, 5]
             s_type = 'imagenet'
             # s = 4
         else:
@@ -2180,18 +2176,19 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
     def _compute_init_l_feats(self, image):
         l_feats = []
         for w in range(self.num_scales):
-            with tf.variable_scope('init_conv'+str(w)) as scope:
+            scope_name = self.compute_scope_basename(0)
+            with tf.variable_scope(scope_name+'.'+str(w)) as scope:
                 ch_out = self.init_channel * self.growth_rate_factor[w]
                 if w == 0:
                     if self.network_config.s_type == 'basic':
-                        l = Conv2D('conv0', image, ch_out, 3, nl=BNReLU) #, nl=BNReLU) 
+                        l = Conv2D('conv3x3', image, ch_out, 3, nl=BNReLU) #, nl=BNReLU) 
                     else:
                         assert self.network_config.s_type == 'imagenet'
                         l = (LinearWrap(image)
-                            .Conv2D('conv0', ch_out, 7, stride=2, nl=BNReLU)
+                            .Conv2D('conv7x7', ch_out, 7, stride=2, nl=BNReLU)
                             .MaxPooling('pool0', shape=3, stride=2, padding='SAME')())
                 else:
-                    l = Conv2D('conv0', l, ch_out, 3, stride=2, nl=BNReLU) 
+                    l = Conv2D('conv3x3', l, ch_out, 3, stride=2, nl=BNReLU) 
                 l_feats.append(l)
         return l_feats
 
@@ -2222,7 +2219,8 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                         l = self._compute_edge(l_mf[w], g, bnw, 'normal')
                     else:
                         l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
-                        lp = self._compute_edge(l_mf[w-1], g/2, bnw, 'down', name='e2')
+                        bnw_prev = self.bottleneck_factor[w-1]
+                        lp = self._compute_edge(l_mf[w-1], g/2, bnw_prev, 'down', name='e2')
                         l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
                     l_feats.append(l)
             #end for w
@@ -2233,6 +2231,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                         self.ch_dim, name='merge_feats')
             ll_feats.append(new_l_mf)
             l_mf = new_l_mf
+        #end for k in units
         return ll_feats
 
     def _compute_transition(self, ll_merged_feats, layer_idx):
@@ -2243,7 +2242,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 l_feats.append(None)
                 continue
 
-            with tf.variable_scope('transat_{:02d}_{:02d}'.format(layer_idx, w)):
+            with tf.variable_scope('transat_{:02d}_{:02d}'.format(layer_idx+1, w)):
                 ch_in = l.get_shape().as_list()[self.ch_dim]
                 ch_out = int(ch_in * rr)
                 l = Conv2D('conv1x1', l, ch_out, 1, nl=BNReLU)
@@ -2253,21 +2252,17 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
     def _compute_ll_feats(self, image):
         l_mf = self._compute_init_l_feats(image)
         ll_feats = [ l_mf ]
-        layer_idx = -1
+        layer_idx = 0
         for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            ll_block_feats = self._compute_block(bi, n_units, layer_idx, l_mf) 
-            layer_idx += n_units
+            ll_block_feats = self._compute_block(bi, n_units-1, layer_idx, l_mf) 
+            layer_idx += n_units-1
             ll_feats.extend(ll_block_feats)
             l_mf = ll_block_feats[-1]
-            if bi < self.n_blocks - 1 and self.reduction_ratio < 1:
+            if bi < self.n_blocks - 1:
                 l_mf = self._compute_transition(l_mf, layer_idx)
+                ll_feats.append(l_mf)
+                layer_idx += 1
 
-        # remove the init feat as required by anytime network interface
-        ll_feats = ll_feats[1:]
-
-        # precondition: ll_feats[i][j] is the feature used to generate layer i, scale j
-        #       concatenated with the generated layer i, scale j.
-        # postcondition: ll_feats[i] is [ feature map at i for anytime prediction  ]
         ll_feats = [ [None if l_feats is None else l_feats[-1]] for l_feats in ll_feats ]
         return ll_feats
 
