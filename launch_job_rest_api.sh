@@ -11,6 +11,14 @@
 # 3455..3458
 # Num gpus : 8
 
+# Exp 83 (msdense ilsvrc adaloss 4gpu)
+# 3461..3469
+# Num gpus : 4
+
+# Exp 84 (msdense copy of 83 w/ 8gpu)
+# 3472..3480
+# Num gpus : 8
+
 # for i in {3207..3296}
 # do
 # 	USERNAME="dedey"
@@ -43,7 +51,7 @@
 
 # For running jobs on PhillyOnAzure
 
-for i in {3449..3452} # 4gpu ;   {3455..3458} #8gpu
+for i in {3449..3452} {3461..3469} # 4gpu ;   {3455..3458} {3472..3480}#8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
