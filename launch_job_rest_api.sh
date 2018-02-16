@@ -19,7 +19,7 @@
 # 3472..3480
 # Num gpus : 8
 
-# for i in {3207..3296}
+# for i in {3449..3452} {3461..3469} # 4gpu ;   
 # do
 # 	USERNAME="dedey"
 # 	PASSWORD="DigDug2god?"
@@ -51,7 +51,7 @@
 
 # For running jobs on PhillyOnAzure
 
-for i in {3449..3452} {3461..3469} # 4gpu ;   {3455..3458} {3472..3480}#8gpu
+for i in {3455..3458} {3472..3480} #8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -59,7 +59,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
