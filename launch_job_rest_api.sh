@@ -3,6 +3,14 @@
 # 3351..3446
 # Num gpus : 1
 
+# Exp 81 (resnet ilsvrc adaloss 4gpu)
+# 3449..3452
+# Num gpus : 4
+
+# Exp 82 (resnet ilsrvc adaloss 8gpu copy of 81)
+# 3455..3458
+# Num gpus : 8
+
 # for i in {3207..3296}
 # do
 # 	USERNAME="dedey"
@@ -35,7 +43,7 @@
 
 # For running jobs on PhillyOnAzure
 
-for i in {3351..3446}
+for i in {3449..3452} # 4gpu ;   {3455..3458} #8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -43,7 +51,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="4"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -264,3 +272,13 @@ done
 # Exp 80 (cifar/svhn adaloss competitor)
 # 3351..3446
 # Num gpus : 1
+
+# Exp 81 (resnet ilsvrc adaloss 4gpu)
+# 3449..3452
+# Num gpus : 4
+
+# Exp 82 (resnet ilsrvc adaloss 8gpu copy of 81)
+# 3455..3458
+# Num gpus : 8
+
+

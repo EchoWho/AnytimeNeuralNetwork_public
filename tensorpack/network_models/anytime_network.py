@@ -2222,7 +2222,8 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                         l = self._compute_edge(l_mf[w], g, bnw, 'normal')
                     else:
                         l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
-                        lp = self._compute_edge(l_mf[w-1], g/2, bnw, 'down', name='e2')
+                        bnw_prev = self.bottleneck_factor[w-1]
+                        lp = self._compute_edge(l_mf[w-1], g/2, bnw_prev, 'down', name='e2')
                         l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
                     l_feats.append(l)
             #end for w
