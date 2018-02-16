@@ -135,6 +135,11 @@ def layer_register(
                         logger.info("{} output: {}".format(
                             scope.name, get_shape_str(outputs)))
                         _LAYER_LOGGED.add(scope.name)
+
+                        
+                        if hasattr(outputs, 'info'):
+                            logger.info("{} flops (multi-add): {}".format(
+                                scope.name, outputs.info.flops))
             else:
                 # run the actual function
                 outputs = func(*args, **actual_args)
