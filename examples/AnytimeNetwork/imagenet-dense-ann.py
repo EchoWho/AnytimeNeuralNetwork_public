@@ -113,8 +113,8 @@ if __name__ == '__main__':
     lr_decay_epoch = 30
     # step**6 approx 0.005 and step**5 approx 0.01
     lr_decay = 0.1 
-    curr_lr = 0.1
-    max_epoch = 90
+    curr_lr = 0.1 * lr_rate
+    max_epoch = 120
     lr_schedule = [] #(1, 1e-1 * lr_rate)]
     for epochi in range(1, max_epoch+1):
         lr_schedule.append( (epochi, curr_lr) ) 
