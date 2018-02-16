@@ -16,7 +16,7 @@ def Conv2D(x, out_channel, kernel_shape,
            padding='SAME', stride=1,
            W_init=None, b_init=None, W_mask=None,
            nl=tf.identity, split=1, use_bias=True,
-           data_format='NHWC'):
+           data_format='NHWC', log_flops=True):
     """
     2D convolution on 4D inputs.
 
@@ -65,8 +65,16 @@ def Conv2D(x, out_channel, kernel_shape,
     if use_bias:
         b = tf.get_variable('b', [out_channel], initializer=b_init)
 
+    flops = None
     if split == 1:
         conv = tf.nn.conv2d(x, W, stride, padding, data_format=data_format)
+        if log_flops:
+            flops = 1.0 * in_channel * out_channel * kernel_shape[0] * kernel_shape[1]
+            h_dim = 1 if data_format == 'NHWC' else 2
+            w_dim = h_dim + 1
+            if in_shape[h_dim] is not None:
+                flops *= in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
+                #logger.info("conv consume FLOPS {}".format(flops))
     else:
         inputs = tf.split(x, split, channel_axis)
         kernels = tf.split(W, split, 3)
@@ -78,6 +86,8 @@ def Conv2D(x, out_channel, kernel_shape,
     ret.variables = VariableHolder(W=W)
     if use_bias:
         ret.variables.b = b
+    if log_flops:
+        ret.info = VariableHolder(flops=flops) 
     return ret
 
 
