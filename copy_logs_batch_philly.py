@@ -8,7 +8,7 @@ import pdb
 
 def collect_info(cluster=None):
     user = 'dedey'
-    password = 'DigDug2god?'
+    password = 'Urdu2god?'
     vc = 'msrlabs'
     status = 'Pass'
     num_finished_jobs = '300'
