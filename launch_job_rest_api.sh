@@ -1,23 +1,7 @@
 #!/bin/bash
-# Exp 75 (imagenet DenseNet reproduce rerun)
-# 3299..3306 
-# Num gpus : 8
-
-# Exp 76 (resnext f=4)
-# 3309..3326
-# Num gpus : 4
-
-# Exp 77 (resnext imagenet)
-# 3329..3332
-# Num gpus : 8
-
-# Exp 78 (resnext imagenet gpu 4)
-# 3335..3338
-# Num gpus : 4
-
-# Exp 79 (densenet reproduce with 4 gpu)
-# 3341..3348
-# Num gpus : 4
+# Exp 80 (cifar/svhn adaloss competitor)
+# 3351..3446
+# Num gpus : 1
 
 # for i in {3207..3296}
 # do
@@ -51,7 +35,7 @@
 
 # For running jobs on PhillyOnAzure
 
-for i in {3299..3306} {3329..3332} # {3341..3348} {3335..3338} {3309..3326}  #4gpus
+for i in {3351..3446}
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -276,3 +260,7 @@ done
 # Exp 79 (densenet reproduce with 4 gpu)
 # 3341..3348
 # Num gpus : 4
+
+# Exp 80 (cifar/svhn adaloss competitor)
+# 3351..3446
+# Num gpus : 1
