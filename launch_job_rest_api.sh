@@ -23,7 +23,15 @@
 # 3483..3518
 # Num gpus : 1
 
-# for i in {3449..3452} {3461..3469} # 4gpu ;   
+# Exp 86 (DenseNet reproduce round 3)
+# 3521..3523
+# Num gpus : 4
+
+# Exp 87 (copy of 86 with 8 gpu)
+# 3526..3528
+# Num gpus : 8
+
+# FOR I IN {3449..3452} {3461..3469} {3521..3523} # 4GPU ;   
 # do
 # 	USERNAME="dedey"
 # 	PASSWORD="DigDug2god?"
@@ -55,7 +63,7 @@
 
 # For running jobs on PhillyOnAzure
 
-for i in {3455..3458} {3472..3480} #8gpu
+for i in {3455..3458} {3472..3480} {3526..3528} #8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="DigDug2god?"
@@ -305,3 +313,10 @@ done
 # 3483..3518
 # Num gpus : 1
 
+# Exp 86 (DenseNet reproduce round 3)
+# 3521..3523
+# Num gpus : 4
+
+# Exp 87 (copy of 86 with 8 gpu)
+# 3526..3528
+# Num gpus : 8
