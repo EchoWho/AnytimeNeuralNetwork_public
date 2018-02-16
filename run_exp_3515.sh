@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/resnet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--n=25 -c=16 -s=1 --ds_name=svhn --batch_size=64 --nr_gpu=1 --samloss=100 --exp_gamma=0.07 --sum_rand_ratio=0 --is_select_arr -f=5 
+-n=25 -c=16 -s=3 --ds_name=svhn --batch_size=64 --nr_gpu=1 --samloss=100 --exp_gamma=0.07 --sum_rand_ratio=0 --is_select_arr -f=5 
