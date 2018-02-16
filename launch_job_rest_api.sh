@@ -31,7 +31,7 @@
 # 3526..3528
 # Num gpus : 8
 
-# FOR I IN {3449..3452} {3461..3469} {3521..3523} # 4GPU ;   
+# FOR I IN {3449..3452} {3461..3469} {3521..3523} # 4GPU ; {3483..3518} #1GPU 
 # do
 # 	USERNAME="dedey"
 # 	PASSWORD="DigDug2god?"
