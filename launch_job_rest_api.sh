@@ -43,7 +43,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="8"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
