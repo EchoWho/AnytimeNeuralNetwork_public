@@ -7,7 +7,7 @@
 for i in {3351..3446}
 do
 	USERNAME="dedey"
-	PASSWORD="DigDug2god?"
+	PASSWORD="Urdu2god?"
 	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
@@ -39,7 +39,7 @@ done
 # for i in {3299..3306} {3329..3332} # {3341..3348} {3335..3338} {3309..3326}  #4gpus
 # do
 # 	USERNAME="dedey"
-# 	PASSWORD="DigDug2god?"
+# 	PASSWORD="Urdu2god?"
 # 	CLUSTER="eu1"
 # 	JOBSCRIPT="run_exp_$i.sh"
 # 	SPECIAL_NAME="_ann"
