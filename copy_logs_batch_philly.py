@@ -6,12 +6,10 @@ import os
 import pdb
 
 
-def collect_info(cluster=None):
+def collect_info(cluster=None, status='Pass', num_finished_jobs='500'):
     user = 'dedey'
-    password = 'DigDug2god?'
+    password = 'Urdu2god?'
     vc = 'msrlabs'
-    status = 'Pass'
-    num_finished_jobs = '200'
 
     cmd = "https://philly/api/list?jobType=cust&clusterId={}&vcId={}&numFinishedJobs={}&userName={}&status={}".format(
         cluster, vc, num_finished_jobs, user, status)
@@ -68,7 +66,9 @@ def main():
     #json_data = collect_info(cluster='rr1')
     #copy_passed_logs_from_json(json_data=json_data)
     # From cam
-    json_data = collect_info(cluster='cam')
+    json_data = collect_info(cluster='cam', status='Pass')
+    copy_passed_logs_from_json(json_data=json_data)
+    json_data = collect_info(cluster='cam', status='Failed')
     copy_passed_logs_from_json(json_data=json_data)
 
 if __name__ == '__main__':

@@ -61,17 +61,16 @@
 # 	echo "$CMD"
 # done
 
-# For running jobs on PhillyOnAzure
 
-for i in {3455..3458} {3472..3480} {3526..3528} #8gpu
+for i in {3483..3518} #1gpu
 do
 	USERNAME="dedey"
-	PASSWORD="DigDug2god?"
-	CLUSTER="eu1"
+	PASSWORD="Urdu2god?"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="8"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -86,15 +85,12 @@ do
 	CMD+="iscrossrack=false&"
 	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
 	CMD+="oneProcessPerContainer=true&"
-	CMD+="rackid=p100-gpc02&"
 	CMD+="userName=$USERNAME"
-
-	echo "$CMD"
 
 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
 
+	echo "$CMD"
 done
-
 
 
 # Exp 31
