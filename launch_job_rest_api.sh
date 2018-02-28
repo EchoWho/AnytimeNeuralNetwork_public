@@ -1,37 +1,13 @@
 #!/bin/bash
-# Exp 80 (cifar/svhn adaloss competitor)
-# 3351..3446
-# Num gpus : 1
-
-# Exp 81 (resnet ilsvrc adaloss 4gpu)
-# 3449..3452
+# Exp 88 (DenseNet d > 121)
+# 3531..3539
 # Num gpus : 4
 
-# Exp 82 (resnet ilsrvc adaloss 8gpu copy of 81)
-# 3455..3458
+# Exp 89 (DenseNet d > 121 copy of 88 w/ 8 gpu)
+# 3542..3550
 # Num gpus : 8
 
-# Exp 83 (msdense ilsvrc adaloss 4gpu)
-# 3461..3469
-# Num gpus : 4
-
-# Exp 84 (msdense copy of 83 w/ 8gpu)
-# 3472..3480
-# Num gpus : 8
-
-# Exp 85 (cifar/svhn adaloss with s=1)
-# 3483..3518
-# Num gpus : 1
-
-# Exp 86 (DenseNet reproduce round 3)
-# 3521..3523
-# Num gpus : 4
-
-# Exp 87 (copy of 86 with 8 gpu)
-# 3526..3528
-# Num gpus : 8
-
-# FOR I IN {3449..3452} {3461..3469} {3521..3523} # 4GPU ; {3483..3518} #1GPU 
+# FOR I IN {3531..3539}
 # do
 # 	USERNAME="dedey"
 # 	PASSWORD="DigDug2god?"
@@ -62,7 +38,7 @@
 # done
 
 
-for i in {3483..3518} #1gpu
+for i in {3531..3539} #4gpu  ;   {3542..3550}   # 8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -70,7 +46,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="4"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -315,4 +291,12 @@ done
 
 # Exp 87 (copy of 86 with 8 gpu)
 # 3526..3528
+# Num gpus : 8
+
+# Exp 88 (DenseNet d > 121)
+# 3531..3539
+# Num gpus : 4
+
+# Exp 89 (DenseNet d > 121 copy of 88 w/ 8 gpu)
+# 3542..3550
 # Num gpus : 8
