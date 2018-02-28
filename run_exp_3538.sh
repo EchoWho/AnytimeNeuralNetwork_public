@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-dense-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--f=2 --samloss=0  --densenet_depth=265 -s=24 --batch_size=128 --nr_gpu=4 --densenet_version=dense --min_predict_unit=10 --reduction_ratio=0.5 --opt_at=-1 -g=32 --num_classes=1000 
+-f=2 --samloss=0  --densenet_depth=265 -s=24 --batch_size=64 --nr_gpu=4 --densenet_version=dense --min_predict_unit=10 --reduction_ratio=0.5 --opt_at=-1 -g=32 --num_classes=1000 
