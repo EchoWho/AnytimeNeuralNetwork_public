@@ -344,7 +344,7 @@ class AdaptiveLossWeight(Callback):
         self.cnt += 1
         if self.cnt % self.update_per == 0:
             self.cnt = 0
-            self._weight = 1. / np.sqrt(self.avg_losses_sq + 1e-8)
+            self._weight = 1. / self.avg_losses + 1e-8
             self._weight /= np.max(self._weight)
             self._weight = self._weight * (1-self.gamma) \
                     + np.ones(self.K, dtype=np.float32) * self.gamma
