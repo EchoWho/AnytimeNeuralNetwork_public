@@ -1,10 +1,10 @@
 #!/bin/bash
-# Exp 88 (DenseNet d > 121)
-# 3531..3539
+# Exp 90 (LogDense 4 gpu)
+# 3553..3558
 # Num gpus : 4
 
-# Exp 89 (DenseNet d > 121 copy of 88 w/ 8 gpu)
-# 3542..3550
+# Exp 91 (LogDense 8 gpu)
+# 3561..3566
 # Num gpus : 8
 
 # FOR I IN {3531..3539}
@@ -38,7 +38,7 @@
 # done
 
 
-for i in {3531..3539} #4gpu  ;   {3542..3550}   # 8gpu
+for i in {3553..3558} # 4gpu; {3561..3566} #8 gpu
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -299,4 +299,12 @@ done
 
 # Exp 89 (DenseNet d > 121 copy of 88 w/ 8 gpu)
 # 3542..3550
+# Num gpus : 8
+
+# Exp 90 (LogDense 4 gpu)
+# 3553..3558
+# Num gpus : 4
+
+# Exp 91 (LogDense 8 gpu)
+# 3561..3566
 # Num gpus : 8
