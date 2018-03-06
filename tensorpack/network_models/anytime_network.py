@@ -93,7 +93,7 @@ def compute_cfg(options):
         elif options.densenet_depth == 229:
             n_units_per_block = [16, 16, 48, 32]
         elif options.densenet_depth == 369:
-            n_units_per_block = [8, 16, 80, 80]
+            n_units_per_block = [8, 16, 80, 80] # 184; s = 35
         elif options.densenet_depth == 409:
             n_units_per_block = [6, 12, 120, 64] 
         elif options.densenet_depth == 205:
@@ -970,7 +970,7 @@ def parser_add_densenet_arguments(parser):
                         help='When transition together, whether use W_mask to force indepence',
                         default=False, action='store_true')
     parser.add_argument('--pre_activate', help='whether BNReLU pre conv or after',
-                        default=False, action='store_true')
+                        type=int, default=1, choices=[0, 1])
     parser.add_argument('--dropout_kp', help='Dropout probability',
                         type=np.float32, default=1.0)
     parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
@@ -978,6 +978,73 @@ def parser_add_densenet_arguments(parser):
     parser.add_argument('--loglog_growth_multiplier', help='Loglog recursion depth 0 growth rate multiplier',
                         type=np.float32, default=1.0)
     return parser, depth_group
+
+
+class DenseNet(AnytimeNetwork):
+    """
+        This class is for reproducing densenet results. 
+    """
+    def __init__(self, input_size, args):
+        super(DenseNet, self).__init__(input_size, args)
+        self.reduction_ratio = self.options.reduction_ratio
+        self.growth_rate = self.options.growth_rate
+        self.bottleneck_width = self.options.bottleneck_width
+        self.dropout_kp = self.options.dropout_kp
+
+        if not self.options.use_init_ch:
+            default_ch = self.growth_rate * 2
+            if self.init_channel != default_ch:
+                self.init_channel = default_ch
+                logger.info("Densenet sets the init_channel to be " \
+                    + "2*growth_rate by default. " \
+                    + "I'm setting this automatically!")
+        
+        # width > 1 is not implemented for densenet
+        assert self.width == 1,self.width
+
+
+    def compute_block(self, pmls, layer_idx, n_units, growth):
+        pml = pmls[-1]
+        if layer_idx > -1:
+            with tf.variable_scope('transit_after_{}'.format(layer_idx)) as scope:
+                ch_in = pml.get_shape().as_list()[self.ch_dim]
+                ch_out = int(ch_in * self.reduction_ratio)
+                pml = BNReLU('trans_bnrelu', pml)
+                pml = Conv2D('conv1x1', pml, ch_out, 1)
+                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
+                pml = AvgPooling('pool', pml, 2, padding='SAME')
+
+        for k in range(n_units):
+            layer_idx +=1
+            scope_name = self.compute_scope_basename(layer_idx)
+            with tf.variable_scope(scope_name) as scope:
+                l = pml
+                l = BNReLU('pre_bnrelu', l)
+                if self.network_config.b_type == 'bottleneck':
+                    bnw = int(self.bottleneck_width * growth)
+                    l = Conv2D('conv1x1', l, bnw, 1)
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    l = BNReLU('bottleneck_bnrelu', l)
+                l = Conv2D('conv3x3', l, growth, 3)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                pml = tf.concat([pml, l], self.ch_dim, name='concat')
+                pmls.append(pml)
+        return pmls
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        pmls = [l_feats[0]]
+        growth = self.growth_rate
+        layer_idx = -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            pmls = self.compute_block(pmls, layer_idx, n_units, growth)
+            layer_idx += n_units
+
+        pmls = pmls[1:]
+        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
+            for li, ml in enumerate(pmls) ]
+        return ll_feats
+
 
 
 class AnytimeLogDenseNetV1(AnytimeNetwork):
@@ -995,7 +1062,6 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
         ## deprecated. don't use
         self.transition_batch_size = self.options.transition_batch_size
         self.use_transition_mask = self.options.use_transition_mask
-        self.pre_activate = self.options.pre_activate
         self.dropout_kp = self.options.dropout_kp
 
         if not self.options.use_init_ch:
@@ -1157,15 +1223,18 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
                         exponential_diffs.append(int_df)
                 self.exponential_diffs = exponential_diffs
             diffs = self.exponential_diffs 
+
         elif self.dense_select_method == 1:
             # all at the end with log(i)
             diffs = list(range(int(np.log2(ui + 1) \
                 / np.log2(self.log_dense_base) * self.log_dense_coef) + 1))
+
         elif self.dense_select_method == 2:
             # all at the end with log(L)
             n_select = int((np.log2(self.total_units +1) \
                 / np.log2(self.log_dense_base) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
+
         elif self.dense_select_method == 3:
             # Evenly spaced connections (select log)
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
@@ -1181,6 +1250,7 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
         elif self.dense_select_method == 4: 
             # select all
             diffs = list(range(ui+1))
+
         elif self.dense_select_method == 5: 
             # mini dense 
             # For all x_i, x_i is close to x_L 
@@ -1203,11 +1273,13 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
             # BD(xi, xj) <= log(i-j)
             n_select = ui // 2 + 1
             diffs = list(range(n_select))
+
         elif self.dense_select_method == 7:
             # select from every other layer 
             # starting from the previous layer (diff==0)
             # BD(xi, xj) <= 2
             diffs = list(range(0, ui+1, 2))
+
         elif self.dense_select_method == 8:
             # select at the end with 0.5 *i
             # also select the key hubs at 0.25 *i, 0.125*i, ...
@@ -1298,72 +1370,6 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
                 growth *= self.growth_rate_multiplier
                 pls = self.compute_transition(pls, bi)
         
-        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
-            for li, ml in enumerate(pmls) ]
-        return ll_feats
-
-
-class DenseNet(AnytimeNetwork):
-    """
-        This class is for reproducing densenet results. 
-    """
-    def __init__(self, input_size, args):
-        super(DenseNet, self).__init__(input_size, args)
-        self.reduction_ratio = self.options.reduction_ratio
-        self.growth_rate = self.options.growth_rate
-        self.bottleneck_width = self.options.bottleneck_width
-        self.dropout_kp = self.options.dropout_kp
-
-        if not self.options.use_init_ch:
-            default_ch = self.growth_rate * 2
-            if self.init_channel != default_ch:
-                self.init_channel = default_ch
-                logger.info("Densenet sets the init_channel to be " \
-                    + "2*growth_rate by default. " \
-                    + "I'm setting this automatically!")
-        
-        # width > 1 is not implemented for densenet
-        assert self.width == 1,self.width
-
-
-    def compute_block(self, pmls, layer_idx, n_units, growth):
-        pml = pmls[-1]
-        if layer_idx > -1:
-            with tf.variable_scope('transit_after_{}'.format(layer_idx)) as scope:
-                ch_in = pml.get_shape().as_list()[self.ch_dim]
-                ch_out = int(ch_in * self.reduction_ratio)
-                pml = BNReLU('trans_bnrelu', pml)
-                pml = Conv2D('conv1x1', pml, ch_out, 1)
-                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
-                pml = AvgPooling('pool', pml, 2, padding='SAME')
-
-        for k in range(n_units):
-            layer_idx +=1
-            scope_name = self.compute_scope_basename(layer_idx)
-            with tf.variable_scope(scope_name) as scope:
-                l = pml
-                l = BNReLU('pre_bnrelu', l)
-                if self.network_config.b_type == 'bottleneck':
-                    bnw = int(self.bottleneck_width * growth)
-                    l = Conv2D('conv1x1', l, bnw, 1)
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                    l = BNReLU('bottleneck_bnrelu', l)
-                l = Conv2D('conv3x3', l, growth, 3)
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                pml = tf.concat([pml, l], self.ch_dim, name='concat')
-                pmls.append(pml)
-        return pmls
-
-    def _compute_ll_feats(self, image):
-        l_feats = self._compute_init_l_feats(image)
-        pmls = [l_feats[0]]
-        growth = self.growth_rate
-        layer_idx = -1
-        for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            pmls = self.compute_block(pmls, layer_idx, n_units, growth)
-            layer_idx += n_units
-
-        pmls = pmls[1:]
         ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
             for li, ml in enumerate(pmls) ]
         return ll_feats
