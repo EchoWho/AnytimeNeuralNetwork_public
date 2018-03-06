@@ -11,7 +11,7 @@ from tensorpack.utils import utils
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import \
-AnytimeDensenet, DenseNet, AnytimeLogDensenetV2, AnytimeLogLogDenseNet
+AnytimeLogDenseNetV1, AnytimeLogDenseNetV2, DenseNet, AnytimeLogLogDenseNet
 
 
 from get_augmented_data import get_cifar_augmented_data, get_svhn_augmented_data
@@ -75,10 +75,10 @@ if __name__ == '__main__':
     lr_multiplier = 1.0 * args.batch_size / 64
     args.dropout_kp = 0.8
     if args.densenet_version == 'atv1':
-        model_cls = AnytimeDensenet
+        model_cls = AnytimeLogDenseNetV1
         lr_multiplier *= 1
     elif args.densenet_version == 'atv2':
-        model_cls = AnytimeLogDensenetV2
+        model_cls = AnytimeLogDenseNetV2
         lr_multiplier *= 2.0
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
