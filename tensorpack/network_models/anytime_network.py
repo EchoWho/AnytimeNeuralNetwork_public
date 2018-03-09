@@ -93,7 +93,7 @@ def compute_cfg(options):
         elif options.densenet_depth == 229:
             n_units_per_block = [16, 16, 48, 32]
         elif options.densenet_depth == 369:
-            n_units_per_block = [8, 16, 80, 80]
+            n_units_per_block = [8, 16, 80, 80] # 184; s = 35
         elif options.densenet_depth == 409:
             n_units_per_block = [6, 12, 120, 64] 
         elif options.densenet_depth == 205:
@@ -970,7 +970,7 @@ def parser_add_densenet_arguments(parser):
                         help='When transition together, whether use W_mask to force indepence',
                         default=False, action='store_true')
     parser.add_argument('--pre_activate', help='whether BNReLU pre conv or after',
-                        default=False, action='store_true')
+                        type=int, default=1, choices=[0, 1])
     parser.add_argument('--dropout_kp', help='Dropout probability',
                         type=np.float32, default=1.0)
     parser.add_argument('--reduction_ratio', help='reduction ratio at transitions',
@@ -980,9 +980,76 @@ def parser_add_densenet_arguments(parser):
     return parser, depth_group
 
 
-class AnytimeDensenet(AnytimeNetwork):
+class DenseNet(AnytimeNetwork):
+    """
+        This class is for reproducing densenet results. 
+    """
     def __init__(self, input_size, args):
-        super(AnytimeDensenet, self).__init__(input_size, args)
+        super(DenseNet, self).__init__(input_size, args)
+        self.reduction_ratio = self.options.reduction_ratio
+        self.growth_rate = self.options.growth_rate
+        self.bottleneck_width = self.options.bottleneck_width
+        self.dropout_kp = self.options.dropout_kp
+
+        if not self.options.use_init_ch:
+            default_ch = self.growth_rate * 2
+            if self.init_channel != default_ch:
+                self.init_channel = default_ch
+                logger.info("Densenet sets the init_channel to be " \
+                    + "2*growth_rate by default. " \
+                    + "I'm setting this automatically!")
+        
+        # width > 1 is not implemented for densenet
+        assert self.width == 1,self.width
+
+
+    def compute_block(self, pmls, layer_idx, n_units, growth):
+        pml = pmls[-1]
+        if layer_idx > -1:
+            with tf.variable_scope('transit_after_{}'.format(layer_idx)) as scope:
+                ch_in = pml.get_shape().as_list()[self.ch_dim]
+                ch_out = int(ch_in * self.reduction_ratio)
+                pml = BNReLU('trans_bnrelu', pml)
+                pml = Conv2D('conv1x1', pml, ch_out, 1)
+                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
+                pml = AvgPooling('pool', pml, 2, padding='SAME')
+
+        for k in range(n_units):
+            layer_idx +=1
+            scope_name = self.compute_scope_basename(layer_idx)
+            with tf.variable_scope(scope_name) as scope:
+                l = pml
+                l = BNReLU('pre_bnrelu', l)
+                if self.network_config.b_type == 'bottleneck':
+                    bnw = int(self.bottleneck_width * growth)
+                    l = Conv2D('conv1x1', l, bnw, 1)
+                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    l = BNReLU('bottleneck_bnrelu', l)
+                l = Conv2D('conv3x3', l, growth, 3)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                pml = tf.concat([pml, l], self.ch_dim, name='concat')
+                pmls.append(pml)
+        return pmls
+
+    def _compute_ll_feats(self, image):
+        l_feats = self._compute_init_l_feats(image)
+        pmls = [l_feats[0]]
+        growth = self.growth_rate
+        layer_idx = -1
+        for bi, n_units in enumerate(self.network_config.n_units_per_block):
+            pmls = self.compute_block(pmls, layer_idx, n_units, growth)
+            layer_idx += n_units
+
+        pmls = pmls[1:]
+        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
+            for li, ml in enumerate(pmls) ]
+        return ll_feats
+
+
+
+class AnytimeLogDenseNetV1(AnytimeNetwork):
+    def __init__(self, input_size, args):
+        super(AnytimeLogDenseNetV1, self).__init__(input_size, args)
         self.dense_select_method = self.options.dense_select_method
         self.log_dense_coef = self.options.log_dense_coef
         self.log_dense_base = self.options.log_dense_base
@@ -995,7 +1062,6 @@ class AnytimeDensenet(AnytimeNetwork):
         ## deprecated. don't use
         self.transition_batch_size = self.options.transition_batch_size
         self.use_transition_mask = self.options.use_transition_mask
-        self.pre_activate = self.options.pre_activate
         self.dropout_kp = self.options.dropout_kp
 
         if not self.options.use_init_ch:
@@ -1157,15 +1223,18 @@ class AnytimeDensenet(AnytimeNetwork):
                         exponential_diffs.append(int_df)
                 self.exponential_diffs = exponential_diffs
             diffs = self.exponential_diffs 
+
         elif self.dense_select_method == 1:
             # all at the end with log(i)
             diffs = list(range(int(np.log2(ui + 1) \
                 / np.log2(self.log_dense_base) * self.log_dense_coef) + 1))
+
         elif self.dense_select_method == 2:
             # all at the end with log(L)
             n_select = int((np.log2(self.total_units +1) \
                 / np.log2(self.log_dense_base) + 1) * self.log_dense_coef)
             diffs = list(range(int(np.log2(self.total_units + 1)) + 1))
+
         elif self.dense_select_method == 3:
             # Evenly spaced connections (select log)
             n_select = int((np.log2(self.total_units +1) + 1) * self.log_dense_coef)
@@ -1181,6 +1250,7 @@ class AnytimeDensenet(AnytimeNetwork):
         elif self.dense_select_method == 4: 
             # select all
             diffs = list(range(ui+1))
+
         elif self.dense_select_method == 5: 
             # mini dense 
             # For all x_i, x_i is close to x_L 
@@ -1203,11 +1273,13 @@ class AnytimeDensenet(AnytimeNetwork):
             # BD(xi, xj) <= log(i-j)
             n_select = ui // 2 + 1
             diffs = list(range(n_select))
+
         elif self.dense_select_method == 7:
             # select from every other layer 
             # starting from the previous layer (diff==0)
             # BD(xi, xj) <= 2
             diffs = list(range(0, ui+1, 2))
+
         elif self.dense_select_method == 8:
             # select at the end with 0.5 *i
             # also select the key hubs at 0.25 *i, 0.125*i, ...
@@ -1243,31 +1315,21 @@ class AnytimeDensenet(AnytimeNetwork):
                 
                 ml = tf.concat([pls[sli] for sli in sl_indices], \
                                self.ch_dim, name='concat_feat')
-                # pre activation
-                if self.pre_activate:
-                    ml = BNReLU('bnrelu_merged', ml)
-                    nl = tf.identity
-                else:
-                    nl = BNReLU
+                l = BNReLU('bnrelu_merged', ml)
+
                 layer_growth = self._compute_layer_growth(unit_idx, growth)
                 if self.network_config.b_type == 'bottleneck':
                     bottleneck_width = int(self.options.bottleneck_width * layer_growth)
-                    #ch_in = ml.get_shape().as_list()[self.ch_dim]
-                    #bottleneck_width = min(ch_in, bottleneck_width)
-                    l = Conv2D('conv1x1', ml, bottleneck_width, 1, nl=BNReLU)
-                    if self.dropout_kp < 1:
-                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                    l = Conv2D('conv3x3', l, layer_growth, 3, nl=nl)
-                else:
-                    l = Conv2D('conv3x3', ml, layer_growth, 3, nl=nl)
-                if self.dropout_kp < 1:
+                    l = Conv2D('conv1x1', l, bottleneck_width, 1, nl=BNReLU)
                     l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    l = Conv2D('conv3x3', l, layer_growth, 3)
+                else:
+                    l = Conv2D('conv3x3', l, layer_growth, 3)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
 
                 # If the feature is used for prediction, store it.
                 if self.weights[unit_idx] > 0:
-                    if self.pre_activate:
-                        l = BNReLU('bnrelu_local', l)
                     pmls.append(tf.concat([ml, l], self.ch_dim, name='concat_pred'))
                 else:
                     pmls.append(None)
@@ -1288,15 +1350,9 @@ class AnytimeDensenet(AnytimeNetwork):
             ch_out = int(ch_in * self.growth_rate_multiplier * self.reduction_ratio)
 
             with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)): 
-                if self.pre_activate:
-                    pl = BNReLU('bnrelu_transit', pl)
-                    nl = lambda name, x : tf.identity(x, name=name)
-                else:
-                    nl = BNReLU
+                pl = BNReLU('bnrelu_transit', pl)
                 l = Conv2D('conv', pl, ch_out, 1)
-                if self.dropout_kp < 1:
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                l = nl('nl', l)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l = AvgPooling('pool', l, 2, padding='SAME')
                 new_pls.append(l)
         return new_pls
@@ -1314,79 +1370,12 @@ class AnytimeDensenet(AnytimeNetwork):
                 growth *= self.growth_rate_multiplier
                 pls = self.compute_transition(pls, bi)
         
-        ll_feats = [ [ feat ] for feat in pmls ]
-        assert len(ll_feats) == self.total_units
-        return ll_feats
-
-
-class DenseNet(AnytimeNetwork):
-    """
-        This class is for reproducing densenet results. 
-        There is no choices of selecting connections as in AnytimeDensenet
-    """
-    def __init__(self, input_size, args):
-        super(DenseNet, self).__init__(input_size, args)
-        self.reduction_ratio = self.options.reduction_ratio
-        self.growth_rate = self.options.growth_rate
-        self.bottleneck_width = self.options.bottleneck_width
-        self.dropout_kp = self.options.dropout_kp
-
-        if not self.options.use_init_ch:
-            default_ch = self.growth_rate * 2
-            if self.init_channel != default_ch:
-                self.init_channel = default_ch
-                logger.info("Densenet sets the init_channel to be " \
-                    + "2*growth_rate by default. " \
-                    + "I'm setting this automatically!")
-        
-        # width > 1 is not implemented for densenet
-        assert self.width == 1,self.width
-
-
-    def compute_block(self, pmls, layer_idx, n_units, growth):
-        pml = pmls[-1]
-        if layer_idx > -1:
-            with tf.variable_scope('transit_after_{}'.format(layer_idx)) as scope:
-                ch_in = pml.get_shape().as_list()[self.ch_dim]
-                ch_out = int(ch_in * self.reduction_ratio)
-                pml = BNReLU('trans_bnrelu', pml)
-                pml = Conv2D('conv1x1', pml, ch_out, 1)
-                pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
-                pml = AvgPooling('pool', pml, 2, padding='SAME')
-
-        for k in range(n_units):
-            layer_idx +=1
-            scope_name = self.compute_scope_basename(layer_idx)
-            with tf.variable_scope(scope_name) as scope:
-                l = pml
-                l = BNReLU('pre_bnrelu', l)
-                if self.network_config.b_type == 'bottleneck':
-                    bnw = int(self.bottleneck_width * growth)
-                    l = Conv2D('conv1x1', l, bnw, 1)
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                    l = BNReLU('bottleneck_bnrelu', l)
-                l = Conv2D('conv3x3', l, growth, 3)
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                pml = tf.concat([pml, l], self.ch_dim, name='concat')
-                pmls.append(pml)
-        return pmls
-
-    def _compute_ll_feats(self, image):
-        l_feats = self._compute_init_l_feats(image)
-        pmls = [l_feats[0]]
-        growth = self.growth_rate
-        layer_idx = -1
-        for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            pmls = self.compute_block(pmls, layer_idx, n_units, growth)
-            layer_idx += n_units
-
-        pmls = pmls[1:]
         ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
             for li, ml in enumerate(pmls) ]
         return ll_feats
 
 
-class AnytimeLogDensenetV2(AnytimeDensenet):
+class AnytimeLogDenseNetV2(AnytimeLogDenseNetV1):
     """
         This version of dense net will do block compression 
         by compression a block into log L layers. 
@@ -1394,7 +1383,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
         even in log-dense
     """
     def __init__(self, input_size, args):
-        super(AnytimeLogDensenetV2, self).__init__(input_size, args)
+        super(AnytimeLogDenseNetV2, self).__init__(input_size, args)
 
     
     def special_filter(self, ui, x):
@@ -1419,29 +1408,20 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 
                 ml = tf.concat([bcml] + [pls[sli - pli_offset] for sli in sl_indices], \
                                self.ch_dim, name='concat_feat')
-                if self.pre_activate:
-                    ml = BNReLU('bnrelu_merged', ml) 
-                    nl = tf.identity
-                else:
-                    nl = BNReLU
+                l = BNReLU('bnrelu_merged', ml) 
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
-                    l = Conv2D('conv1x1', ml, bnw, 1, nl=BNReLU)
-                    if self.dropout_kp < 1:
-                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                    l = Conv2D('conv3x3', l, growth, 3, nl=nl)
-                else:
-                    l = Conv2D('conv3x3', ml, growth, 3, nl=nl) 
-                # dense connections need drop out to regularize
-                if self.dropout_kp < 1:
+                    l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
                     l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                    l = Conv2D('conv3x3', l, growth, 3)
+                else:
+                    l = Conv2D('conv3x3', l, growth, 3) 
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 pls.append(l)
 
                 if self.weights[layer_idx] > 0:
-                    if self.pre_activate:
-                        l = BNReLU('bnrelu_local', l)
-                    ml = tf.concat([ml, l], self.ch_dim, name='concat_pred')
-                    l_mls.append(ml)
+                    l = tf.concat([ml, l], self.ch_dim, name='concat_pred')
+                    l_mls.append(l)
                 else:
                     l_mls.append(None) 
         return pls, l_mls
@@ -1455,21 +1435,15 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
         with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
             l = tf.concat(pls, self.ch_dim, name='concat_new')
             ch_new = l.get_shape().as_list()[self.ch_dim]
-            if self.pre_activate:
-                l = BNReLU('pre_bnrelu', l)
-                bcml = BNReLU('pre_bnrelu_old', bcml)
-                nl = tf.identity
-            else:
-                nl = BNReLU
-            l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1, nl=nl)
-            if self.dropout_kp < 1:
-                l = Dropout('dropout_new', l, keep_prob=self.dropout_kp)
+            l = BNReLU('pre_bnrelu', l)
+            l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1)
+            l = Dropout('dropout_new', l, keep_prob=self.dropout_kp)
             l = AvgPooling('pool_new', l, 2, padding='SAME')
 
             ch_old = bcml.get_shape().as_list()[self.ch_dim]
-            bcml = Conv2D('conv1x1_old', bcml, ch_old, 1, nl=nl)
-            if self.dropout_kp < 1:
-                bcml = Dropout('dropout_old', bcml, keep_prob=self.dropout_kp)
+            bcml = BNReLU('pre_bnrelu_old', bcml)
+            bcml = Conv2D('conv1x1_old', bcml, ch_old, 1)
+            bcml = Dropout('dropout_old', bcml, keep_prob=self.dropout_kp)
             bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
             
             bcml = tf.concat([bcml, l], self.ch_dim, name='concat_all')
@@ -1490,7 +1464,8 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
                 ch_out = growth * (int(np.log2(self.total_units + 1)) + 1)
                 bcml = self.update_compressed_feature(layer_idx, ch_out, pls, bcml)
         
-        ll_feats = [ [ml] for ml in l_mls ]
+        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
+            for li, ml in enumerate(l_mls) ]
         assert len(ll_feats) == self.total_units
         return ll_feats
 
@@ -1498,7 +1473,7 @@ class AnytimeLogDensenetV2(AnytimeDensenet):
 ############################
 # Log-Log dense
 ############################
-class AnytimeLogLogDenseNet(AnytimeDensenet):
+class AnytimeLogLogDenseNet(AnytimeLogDenseNetV1):
     def __init__(self, input_size, args):
         super(AnytimeLogLogDenseNet, self).__init__(input_size, args)
         self._recursion_depths = None
@@ -1875,8 +1850,7 @@ class FCDensenet(AnytimeFCN):
             stack = BNReLU('bnrelu', stack)
             ch_in = stack.get_shape().as_list()[self.ch_dim]
             stack = Conv2D('conv1x1', stack, ch_in, 1, use_bias=True)
-            if self.dropout_kp < 1:
-                stack = Dropout('dropout', stack, keep_prob=self.dropout_kp)
+            stack = Dropout('dropout', stack, keep_prob=self.dropout_kp)
             stack = MaxPooling('pool', stack, 2, padding='SAME')
         return stack
 
@@ -1939,7 +1913,6 @@ def AnytimeFCDenseNet(T_class):
             Use T_class to have pre_compute_connections, compute_transition,
             compute_block
 
-            Implement compute_ll_feats here to organize the feats
         """
 
         def __init__(self, args):
@@ -1984,21 +1957,16 @@ def AnytimeFCDenseNet(T_class):
                                        self.ch_dim, name='concat_feat'+name_appendix)
                         
                         # pre activation
-                        if self.pre_activate:
-                            ml = BNReLU('bnrelu_merged'+name_appendix, ml)
-                            nl = tf.identity
-                        else:
-                            nl = BNReLU
+                        l = BNReLU('bnrelu_merged'+name_appendix, ml)
 
                         # First conv
                         layer_growth = self._compute_layer_growth(unit_idx, growth)
                         if self.network_config.b_type == 'bottleneck':
                             bottleneck_width = int(self.options.bottleneck_width * layer_growth)
-                            l = Conv2D('conv1x1'+name_appendix, ml, bottleneck_width, 1, nl=BNReLU)
+                            l = Conv2D('conv1x1'+name_appendix, l, bottleneck_width, 1, nl=BNReLU)
                         else:
-                            l = Conv2D('conv3x3'+name_appendix, ml, layer_growth, 3, nl=nl)
-                        if self.dropout_kp < 1:
-                            l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                            l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3)
+                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                         
                         # accumulate conv results
                         if idx_st == 0:
@@ -2009,19 +1977,14 @@ def AnytimeFCDenseNet(T_class):
                     # for bottleneck case, 2nd conv using the accumulated result
                     l = l_sum
                     if self.network_config.b_type == 'bottleneck':
-                        l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3, nl=nl)
-                        if self.dropout_kp < 1:
-                            l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                        l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3)
+                        l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     pls.append(l)
 
                     # If the feature is used for prediction, store it.
                     if self.weights[unit_idx] > 0:
-                        if self.pre_activate:
-                            l = BNReLU('bnrelu_local', l)
-                        if max_merge < len(sl_indices):
-                            pred_feat = [pls[sli] for sli in sl_indices] + [l]
-                        else:
-                            pred_feat = [ml, l]
+                        # TODO if there are more than max merge layers, this will cause error
+                        pred_feat = [pls[sli] for sli in sl_indices] + [l]
                         pmls.append(tf.concat(pred_feat, self.ch_dim, name='concat_pred'))
                     else:
                         pmls.append(None)
@@ -2049,8 +2012,9 @@ def AnytimeFCDenseNet(T_class):
                     dyn_h = tf.shape(skip_pls[0])[self.h_dim]
                     dyn_w = tf.shape(skip_pls[0])[self.w_dim]
                     #kernel_shape=3, stride=2
+                    pl = BNReLU('pre_bnrelu', pl) 
                     new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
-                        dyn_hw=[dyn_h, dyn_w], nl=BNReLU))
+                        dyn_hw=[dyn_h, dyn_w]))
             return new_pls
 
 
@@ -2085,7 +2049,7 @@ def AnytimeFCDenseNet(T_class):
 
 ## Version 2 of anytime FCN for dense-net
 # 
-class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDensenetV2):  
+class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDenseNetV2):  
     
     def __init__(self, args):
         super(AnytimeFCDenseNetV2, self).__init__(args)
@@ -2103,15 +2067,14 @@ class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDensenetV2):
         """
         with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
             l = tf.concat(pls, self.ch_dim, name='concat_new')
-            #ch_new = l.get_shape().as_list()[self.ch_dim]
-            #ch_old = bcml.get_shape().as_list()[self.ch_dim] 
-            #ch_skip = sml.get_shape().as_list()[self.ch_dim] 
             dyn_h = tf.shape(sml)[self.h_dim]
             dyn_w = tf.shape(sml)[self.w_dim]
+            l = BNReLU('pre_bnrelu', l)
             l = Deconv2D('deconv_new', l, ch_out, 3, 2, 
-                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
+                dyn_hw=[dyn_h,dyn_w])
+            bcml = BNReLU('pre_bnrelu_bcml', bcml)
             bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, 
-                dyn_hw=[dyn_h,dyn_w], nl=BNReLU)
+                dyn_hw=[dyn_h,dyn_w])
             bcml = tf.concat([sml, l, bcml], self.ch_dim, name='concat_all')
         return bcml
 
@@ -2134,7 +2097,8 @@ class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDensenetV2):
                 sml = l_skips[self.bi_to_scale_idx(bi) - 1]
                 bcml = self.update_compressed_feature_up(layer_idx, ch_out, pls, bcml, sml)
         
-        ll_feats = [ [ml] for ml in l_mls ]
+        ll_feats = [ [ BNReLU('bnrelu_{}'.format(li), ml) ] if self.weights[li] > 0 else [None] 
+            for li, ml in enumerate(l_mls) ]
         assert len(ll_feats) == self.total_units
         return ll_feats
 
