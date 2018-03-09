@@ -18,7 +18,8 @@ from tensorpack.utils.stats import RatioCounter
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import \
-    AnytimeDensenet, DenseNet, AnytimeLogDensenetV2, AnytimeLogLogDenseNet
+    AnytimeLogDenseNetV1, AnytimeLogDenseNetV2, \
+    DenseNet, AnytimeLogLogDenseNet
 
 import get_augmented_data
 
@@ -85,9 +86,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.ds_name="ilsvrc"
     if args.densenet_version == 'atv1':
-        model_cls = AnytimeDensenet
+        model_cls = AnytimeLogDenseNetV1
     elif args.densenet_version == 'atv2':
-        model_cls = AnytimeLogDensenetV2
+        model_cls = AnytimeLogDenseNetV2
     elif args.densenet_version == 'dense':
         model_cls = DenseNet
         args.reduction_ratio = 0.5
