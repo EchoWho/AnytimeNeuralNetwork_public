@@ -38,7 +38,7 @@
 # done
 
 
-for i in {3531..3539} #4gpu  ;   {3542..3550}   # 8gpu
+for i in {3542..3550}   # 8gpu
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -46,7 +46,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
