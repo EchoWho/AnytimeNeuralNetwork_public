@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/resnet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--n=17 -c=32 -s=1 -opt_at=19 --ds_name=cifar100 --batch_size=64 --nr_gpu=1 -f=2 --samloss=0 
+-n=17 -c=32 -s=1 --opt_at=19 --ds_name=cifar100 --batch_size=64 --nr_gpu=1 -f=2 --samloss=0 
