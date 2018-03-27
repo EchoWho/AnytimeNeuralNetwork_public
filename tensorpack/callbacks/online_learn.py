@@ -293,13 +293,15 @@ class ThompsonSamplingCPU(Callback):
 
 class AdaptiveLossWeight(Callback):
 
-    def __init__(self, K, weight_name, loss_names, gamma=0.3, update_per=100, momentum=0.99):
+    def __init__(self, K, weight_name, loss_names, gamma=0.3, 
+                 update_per=100, momentum=0.99, final_extra=0.0):
         self.weight_name = weight_name
         self.loss_names = loss_names
         self.K = K
         self.gamma = gamma
         self.update_per = update_per
         self.momentum = momentum
+        self.final_extra = final_extra
 
            
     def _setup_graph(self):
@@ -345,6 +347,8 @@ class AdaptiveLossWeight(Callback):
         if self.cnt % self.update_per == 0:
             self.cnt = 0
             self._weight = 1. / self.avg_losses + 1e-8
+            self._weight /= np.max(self._weight)
+            self._weight[-1] += self.final_extra
             self._weight /= np.max(self._weight)
             self._weight = self._weight * (1-self.gamma) \
                     + np.ones(self.K, dtype=np.float32) * self.gamma

@@ -7,6 +7,15 @@
 # 3561..3566
 # Num gpus : 8
 
+# Exp 92 (adaloss grid search on cifar10, cifar100)
+# 3569..3784
+# Num gpus : 1
+
+# Exp 93 (baseline optimal on cifar 100 for n=9, n=17, n=25
+# 3787..3889
+# Num gpus : 1
+
+
 # FOR I IN {3531..3539}
 # do
 # 	USERNAME="dedey"
@@ -38,7 +47,7 @@
 # done
 
 
-for i in {3561..3566}
+for i in {3569..3784} {3787..3889} # 1 GPU
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -46,7 +55,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="8"
+	NUM_GPUS="1"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -308,3 +317,11 @@ done
 # Exp 91 (LogDense 8 gpu)
 # 3561..3566
 # Num gpus : 8
+
+# Exp 92 (adaloss grid search on cifar10, cifar100)
+# 3569..3784
+# Num gpus : 1
+
+# Exp 93 (baseline optimal on cifar 100 for n=9, n=17, n=25
+# 3787..3889
+# Num gpus : 1
