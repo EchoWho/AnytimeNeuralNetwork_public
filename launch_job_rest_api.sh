@@ -38,7 +38,7 @@
 # done
 
 
-for i in {3553..3558} # 4gpu; {3561..3566} #8 gpu
+for i in {3561..3566}
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
