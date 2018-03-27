@@ -15,7 +15,6 @@
 # 3787..3889
 # Num gpus : 1
 
-
 # FOR I IN {3531..3539}
 # do
 # 	USERNAME="dedey"
