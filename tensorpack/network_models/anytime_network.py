@@ -224,6 +224,14 @@ def parser_add_common_arguments(parser):
                         type=int, default=6)
     parser.add_argument('--exp_gamma', help='Gamma for exp3 in sample loss',
                         type=np.float32, default=0.3)
+    parser.add_argument('--adaloss_gamma', help='Gamma for adaloss',
+                        type=np.float32, default=0.07)
+    parser.add_argument('--adaloss_momentum', help='Adaloss momentum',
+                        type=np.float32, default=0.99)
+    parser.add_argument('--adaloss_update_per', help='Adaloss update weights every number of iter',
+                        type=int, default=100)
+    parser.add_argument('--adaloss_final_extra', help='Adaloss up-weights the final loss',
+                        type=np.float32, default=0.0)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
                         type=np.float32, default=2.0)
     parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
@@ -447,7 +455,10 @@ class AnytimeNetwork(ModelDesc):
             gamma = self.options.exp_gamma
             online_learn_cb = AdaptiveLossWeight(self.ls_K, 
                     select_idx_name, loss_names, 
-                    gamma, update_per=100, momentum=0.99)
+                    gamma=self.options.adaloss_gamma, 
+                    update_per=self.options.adaloss_update_per, 
+                    momentum=self.options.adaloss_momentum,
+                    final_extra=self.options.adaloss_final_extra)
             online_learn_cbs = [online_learn_cb]
 
         else:
