@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: param.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
+
 
 import tensorflow as tf
 from abc import abstractmethod, ABCMeta
@@ -11,7 +11,7 @@ import os
 
 from .base import Callback
 from ..utils import logger
-from ..tfutils import get_op_tensor_name
+from ..tfutils.common import get_op_tensor_name
 
 __all__ = ['HyperParam', 'GraphVarParam', 'ObjAttrParam',
            'HyperParamSetter', 'HumanHyperParamSetter',
@@ -66,13 +66,13 @@ class GraphVarParam(HyperParam):
 
     def setup_graph(self):
         """ Will setup the assign operator for that variable. """
-        all_vars = tf.global_variables()
+        all_vars = tf.global_variables() + tf.local_variables()
         for v in all_vars:
             if v.name == self.var_name:
                 self.var = v
                 break
         else:
-            raise ValueError("{} is not a VARIABLE in the graph!".format(self.var_name))
+            raise ValueError("{} is not a variable in the graph!".format(self.var_name))
 
     def set_value(self, v):
         """ Assign the variable a new value. """
@@ -112,6 +112,8 @@ class HyperParamSetter(Callback):
     An abstract base callback to set hyperparameters.
     """
 
+    _chief_only = False
+
     def __init__(self, param):
         """
         Args:
@@ -123,7 +125,8 @@ class HyperParamSetter(Callback):
             param = GraphVarParam(param)
         assert isinstance(param, HyperParam), type(param)
         self.param = param
-        self.last_value = None
+        self._last_value = None
+        self._last_epoch_set = -1
 
     def _setup_graph(self):
         self.param.setup_graph()
@@ -139,10 +142,13 @@ class HyperParamSetter(Callback):
             set, or return None to do nothing.
         """
         ret = self._get_value_to_set()
-        if ret is not None and ret != self.last_value:
-            logger.info("{} at epoch {} will change to {:.8f}".format(
-                self.param.readable_name, self.epoch_num + 1, ret))
-        self.last_value = ret
+        if ret is not None and ret != self._last_value:
+            if self.epoch_num != self._last_epoch_set:
+                # Print this message at most once every epoch
+                logger.info("[HyperParamSetter] At global_step={}, {} will change to {:.8f}".format(
+                    self.global_step, self.param.readable_name, ret))
+            self._last_epoch_set = self.epoch_num
+        self._last_value = ret
         return ret
 
     @abstractmethod
@@ -184,8 +190,8 @@ class HumanHyperParamSetter(HyperParamSetter):
                 If the pair is not found, the param will not be changed.
         """
         super(HumanHyperParamSetter, self).__init__(param)
-        self.file_name = os.path.join(logger.LOG_DIR, file_name)
-        logger.info("Use {} to control hyperparam {}.".format(
+        self.file_name = os.path.join(logger.get_logger_dir(), file_name)
+        logger.info("Use {} to set hyperparam: '{}'.".format(
             self.file_name, self.param.readable_name))
 
     def _get_value_to_set(self):
@@ -199,7 +205,7 @@ class HumanHyperParamSetter(HyperParamSetter):
             dic = {str(k): float(v) for k, v in lines}
             ret = dic[self.param.readable_name]
             return ret
-        except:
+        except Exception:
             logger.warn(
                 "Cannot find {} in {}".format(
                     self.param.readable_name, self.file_name))
@@ -211,15 +217,18 @@ class ScheduledHyperParamSetter(HyperParamSetter):
     Set hyperparameters by a predefined epoch-based schedule.
     """
 
-    def __init__(self, param, schedule, interp=None):
+    def __init__(self, param, schedule, interp=None, step_based=False):
         """
         Args:
             param: same as in :class:`HyperParamSetter`.
             schedule (list): with the format ``[(epoch1, val1), (epoch2, val2), (epoch3, val3)]``.
                 Each ``(ep, val)`` pair means to set the param
-                to "val" __after__ the completion of `ep` th epoch.
-                If ep == 0, the value will be set before the first epoch.
+                to "val" **after** the completion of epoch `ep`.
+                If ep == 0, the value will be set before the first epoch
+                (because by default the first is epoch 1).
             interp: None: no interpolation. 'linear': linear interpolation
+            step_based (bool): interpret ``schedule`` as (step, value) instead
+                of (epoch, value).
 
         Example:
             .. code-block:: python
@@ -232,27 +241,34 @@ class ScheduledHyperParamSetter(HyperParamSetter):
         if interp is not None:
             assert interp == 'linear'
         self.interp = interp
+        self._step = step_based
         super(ScheduledHyperParamSetter, self).__init__(param)
 
     def _get_value_to_set(self):
-        if self.interp is None:
-            for e, v in self.schedule:
-                if e == self.epoch_num:
-                    return v
+        refnum = self.global_step if self._step else self.epoch_num
+        laste, lastv = None, None
+        for e, v in self.schedule:
+            if e == refnum:
+                return v
+            if e > refnum:
+                break
+            laste, lastv = e, v
+        if laste is None or laste == e:
+            # hasn't reached the first scheduled point, or reached the end of all scheduled points
             return None
+        if self.interp is not None:
+            v = (refnum - laste) * 1. / (e - laste) * (v - lastv) + lastv
         else:
-            laste, lastv = None, None
-            for e, v in self.schedule:
-                if e == self.epoch_num:
-                    return v
-                if e > self.epoch_num:
-                    break
-                laste, lastv = e, v
-            if laste is None or laste == e:
-                # hasn't reached the first scheduled point, or reached the end of all scheduled points
-                return None
-            v = (self.epoch_num - laste) * 1. / (e - laste) * (v - lastv) + lastv
-            return v
+            v = lastv
+        return v
+
+    def _trigger_epoch(self):
+        if not self._step:
+            self.trigger()
+
+    def _trigger_step(self):
+        if self._step:
+            self.trigger()
 
 
 class HyperParamSetterWithFunc(HyperParamSetter):
@@ -296,12 +312,15 @@ class StatMonitorParamSetter(HyperParamSetter):
             last_k (int): last k epochs.
             reverse (bool): monitor increasing instead of decreasing.
 
-        This callback will change param by ``new_value = value_func(old_value)``, when:
+        This callback will change ``param`` by ``new_value = value_func(old_value)``, when:
         ``min(stats) >= stats[0] - threshold``, where
-        ``stats = [stat_name in last k epochs]``
+        ``stats = [the values of stat_name in last k epochs]``
+
+        If ``reverse`` is True, it will change the ``param`` when:
+        ``max(stats) <= stats[0] + threshold``.
 
         Example:
-            If validation error wasn't decreasing for 5 epochs, anneal the learning rate:
+            If validation error wasn't decreasing for 5 epochs, anneal the learning rate by 0.2:
 
             .. code-block:: python
 
@@ -317,7 +336,13 @@ class StatMonitorParamSetter(HyperParamSetter):
         self.last_changed_epoch = 0
 
     def _get_value_to_set(self):
-        hist = self.trainer.monitors.get_history(self.stat_name)
+        try:
+            hist = self.trainer.monitors.get_history(self.stat_name)
+        except KeyError:
+            logger.warn(
+                "[StatMonitorParamSetter] Key {} not found in monitor history! Ignore it.".format(self.stat_name))
+            return None
+
         if len(hist) < self.last_k + 1 or \
                 self.epoch_num - self.last_changed_epoch < self.last_k:
             return None
@@ -333,6 +358,7 @@ class StatMonitorParamSetter(HyperParamSetter):
             if hist_max > hist_first + self.threshold:  # large enough
                 return None
         self.last_changed_epoch = self.epoch_num
-        logger.info("[StatMonitorParamSetter] Triggered, history: " +
-                    ','.join(map(str, hist)))
+        logger.info(
+            "[StatMonitorParamSetter] Triggered, history of {}: ".format(
+                self.stat_name) + ','.join(map(str, hist)))
         return self.value_func(self.get_current_value())

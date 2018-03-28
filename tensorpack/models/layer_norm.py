@@ -1,16 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: layer_norm.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
+
 
 import tensorflow as tf
-from .common import layer_register
+from .common import layer_register, VariableHolder
+from ..utils.argtools import get_data_format
 
 __all__ = ['LayerNorm', 'InstanceNorm']
 
 
-@layer_register(log_shape=False)
-def LayerNorm(x, epsilon=1e-5, use_bias=True, use_scale=True, data_format='NHWC'):
+@layer_register()
+def LayerNorm(
+        x, epsilon=1e-5,
+        use_bias=True, use_scale=True,
+        gamma_init=None, data_format='channels_last'):
     """
     Layer Normalization layer, as described in the paper:
     `Layer Normalization <https://arxiv.org/abs/1607.06450>`_.
@@ -20,6 +24,7 @@ def LayerNorm(x, epsilon=1e-5, use_bias=True, use_scale=True, data_format='NHWC'
         epsilon (float): epsilon to avoid divide-by-zero.
         use_scale, use_bias (bool): whether to use the extra affine transformation or not.
     """
+    data_format = get_data_format(data_format, tfmode=False)
     shape = x.get_shape().as_list()
     ndims = len(shape)
     assert ndims in [2, 4]
@@ -41,16 +46,25 @@ def LayerNorm(x, epsilon=1e-5, use_bias=True, use_scale=True, data_format='NHWC'
     else:
         beta = tf.zeros([1] * ndims, name='beta')
     if use_scale:
-        gamma = tf.get_variable('gamma', [chan], initializer=tf.constant_initializer(1.0))
+        if gamma_init is None:
+            gamma_init = tf.constant_initializer(1.0)
+        gamma = tf.get_variable('gamma', [chan], initializer=gamma_init)
         gamma = tf.reshape(gamma, new_shape)
     else:
         gamma = tf.ones([1] * ndims, name='gamma')
 
-    return tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon, name='output')
+    ret = tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon, name='output')
+
+    vh = ret.variables = VariableHolder()
+    if use_scale:
+        vh.gamma = gamma
+    if use_bias:
+        vh.beta = beta
+    return ret
 
 
-@layer_register(log_shape=False)
-def InstanceNorm(x, epsilon=1e-5, data_format='NHWC', use_affine=True):
+@layer_register()
+def InstanceNorm(x, epsilon=1e-5, use_affine=True, gamma_init=None, data_format='channels_last'):
     """
     Instance Normalization, as in the paper:
     `Instance Normalization: The Missing Ingredient for Fast Stylization
@@ -61,6 +75,7 @@ def InstanceNorm(x, epsilon=1e-5, data_format='NHWC', use_affine=True):
         epsilon (float): avoid divide-by-zero
         use_affine (bool): whether to apply learnable affine transformation
     """
+    data_format = get_data_format(data_format, tfmode=False)
     shape = x.get_shape().as_list()
     assert len(shape) == 4, "Input of InstanceNorm has to be 4D!"
 
@@ -81,6 +96,14 @@ def InstanceNorm(x, epsilon=1e-5, data_format='NHWC', use_affine=True):
 
     beta = tf.get_variable('beta', [ch], initializer=tf.constant_initializer())
     beta = tf.reshape(beta, new_shape)
-    gamma = tf.get_variable('gamma', [ch], initializer=tf.constant_initializer(1.0))
+    if gamma_init is None:
+        gamma_init = tf.constant_initializer(1.0)
+    gamma = tf.get_variable('gamma', [ch], initializer=gamma_init)
     gamma = tf.reshape(gamma, new_shape)
-    return tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon, name='output')
+    ret = tf.nn.batch_normalization(x, mean, var, beta, gamma, epsilon, name='output')
+
+    vh = ret.variables = VariableHolder()
+    if use_affine:
+        vh.gamma = gamma
+        vh.beta = beta
+    return ret

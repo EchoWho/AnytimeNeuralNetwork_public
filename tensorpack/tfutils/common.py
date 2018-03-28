@@ -1,27 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: common.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
+
 
 import tensorflow as tf
-from tensorflow.python.training import training_util
 from six.moves import map
 from ..utils.argtools import graph_memoized
 
 __all__ = ['get_default_sess_config',
            'get_global_step_value',
            'get_global_step_var',
-           'get_op_tensor_name',
-           'get_tensors_by_names',
-           'get_op_or_tensor_by_name',
-           'get_tf_version_number',
+           # 'get_op_tensor_name',
+           # 'get_tensors_by_names',
+           # 'get_op_or_tensor_by_name',
+           # 'get_tf_version_number',
            ]
 
 
 def get_default_sess_config(mem_fraction=0.99):
     """
-    Return a better session config to use as default.
-    Tensorflow default session config consume too much resources.
+    Return a tf.ConfigProto to use as default session config.
+    You can modify the returned config to fit your needs.
 
     Args:
         mem_fraction(float): fraction of memory to use.
@@ -33,17 +32,24 @@ def get_default_sess_config(mem_fraction=0.99):
     conf.allow_soft_placement = True
     # conf.log_device_placement = True
 
-    # https://github.com/tensorflow/tensorflow/issues/9322#issuecomment-295758107
-    # can speed up a bit
     conf.intra_op_parallelism_threads = 1
     conf.inter_op_parallelism_threads = 0
+    # TF benchmark use cpu_count() - gpu_thread_count(), e.g. 80 - 8 * 2
+    # Didn't see much difference.
 
-    conf.gpu_options.per_process_gpu_memory_fraction = mem_fraction
-    conf.gpu_options.allocator_type = 'BFC'
+    conf.gpu_options.per_process_gpu_memory_fraction = 0.99
+    if get_tf_version_number() >= 1.2:
+        conf.gpu_options.force_gpu_compatible = True
+
     conf.gpu_options.allow_growth = True
-    # force gpu compatible?
 
-    conf.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+    # from tensorflow.core.protobuf import rewriter_config_pb2 as rwc
+    # conf.graph_options.rewrite_options.memory_optimization = \
+    #     rwc.RewriterConfig.HEURISTICS
+
+    # May hurt performance
+    # conf.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+    # conf.graph_options.place_pruned_graph = True
     return conf
 
 
@@ -51,21 +57,12 @@ def get_default_sess_config(mem_fraction=0.99):
 def get_global_step_var():
     """
     Returns:
-        tf.Tensor: the global_step variable in the current graph. create if
-        doesn't exist.
+        tf.Tensor: the global_step variable in the current graph. Create if
+            doesn't exist.
     """
-    scope = tf.get_variable_scope()
-    assert scope.name == '', \
-        "The global_step variable should be created under the root variable scope!"
-    assert not scope.reuse, \
-        "The global_step variable shouldn't be called under a reuse variable scope!"
-    if get_tf_version_number() <= 1.0:
-        var = tf.get_variable('global_step',
-                              initializer=tf.constant(0, dtype=tf.int64),
-                              trainable=False, dtype=tf.int64)
-        tf.add_to_collection(tf.GraphKeys.GLOBAL_STEP, var)
-    else:
-        var = training_util.get_or_create_global_step()
+    scope = tf.VariableScope(reuse=False, name='')  # the root vs
+    with tf.variable_scope(scope):
+        var = tf.train.get_or_create_global_step()
     return var
 
 
@@ -76,15 +73,6 @@ def get_global_step_value():
     return tf.train.global_step(
         tf.get_default_session(),
         get_global_step_var())
-
-
-# @memoized
-# def get_local_step_var():
-#     try:
-#         return tf.get_default_graph().get_tensor_by_name(LOCAL_STEP_VAR_NAME)
-#     except KeyError:
-#         logger.warn("get_local_step_var() is only available to use in callbacks!")
-#         raise
 
 
 def get_op_tensor_name(name):
@@ -125,6 +113,9 @@ def get_op_or_tensor_by_name(name):
 
     Args:
         name (list[str] or str): names of operations or tensors.
+
+    Raises:
+        KeyError, if the name doesn't exist
     """
     G = tf.get_default_graph()
 

@@ -1,44 +1,56 @@
 
-# Trainer
+# Trainers
 
-Training is **running something again and again**.
-Tensorpack base trainer implements the logic of *running the iteration*,
-and other trainers implement *what the iteration is*.
+Tensorpack trainers contain logic of:
 
-Most neural network training tasks are single-cost optimization.
-Tensorpack provides some trainer implementations for such tasks.
-These trainers will by default minimizes `ModelDesc.cost`.
-Therefore, you can use these trainers as long as you set `self.cost` in `ModelDesc._build_graph()`,
-as most examples did.
+1. Building the graph.
+2. Running the iterations (with callbacks).
 
-Existing trainers were implemented with certain prefetch mechanism,
-which will run significantly faster than a naive `sess.run(..., feed_dict={...})`.
+Usually you won't touch these methods directly, but use
+[higher-level interface](training-interface.html) on trainers.
+You'll only need to __select__ what trainer to use.
+But some basic knowledge of how they work is useful:
 
-There are also Multi-GPU trainers which include the logic of data-parallel Multi-GPU training.
-You can enable them by just changing one line, and all the necessary logic to achieve the best
-performance was baked into the trainers already.
-For example, SyncMultiGPUTrainer can train ResNet50 as fast as the [official benchmark](https://github.com/tensorflow/benchmarks).
+### Tower Trainer
 
-To use trainers, pass a `TrainConfig` to configure them:
+Following the terminology in TensorFlow,
+a __tower function__ is a callable that takes input tensors and adds __one replicate__ of the model to the graph.
 
-```python
-config = TrainConfig(
-           model=MyModel()
-           dataflow=my_dataflow,
-           callbacks=[...]
-         )
+Most types of neural-network training could fall into this category.
+All trainers in tensorpack is a subclass of [TowerTrainer](../modules/train.html#tensorpack.train.TowerTrainer).
+The concept of tower is used mainly to support:
 
-# start training (with a slow trainer. See 'tutorials - Input Pipeline' for details):
-# SimpleTrainer(config).train()
+1. Data-parallel multi-GPU training, where a replicate is built on each GPU.
+2. Graph construction for inference, where a replicate is built under inference mode.
 
-# start training with queue prefetch:
-QueueInputTrainer(config).train()
+You'll provide a tower function to use `TowerTrainer`.
+The function needs to follow some conventions:
 
-# start multi-GPU training with a synchronous update:
-# SyncMultiGPUTrainer(config).train()
-```
+1. It will always be called under a `TowerContext`.
+	 which will contain information about reuse, training/inference, scope name, etc.
+2. __It might get called multiple times__ for data-parallel training or inference.
+3. To respect variable reuse, use `tf.get_variable` instead of
+	 `tf.Variable` in the function, unless you want to force creation of new variables.
 
-Trainers just run some iterations, so there is no limit to where the data come from
-or what to do in an iteration.
-For example, [GAN trainer](../examples/GAN/GAN.py) minimizes
-two cost functions alternatively.
+In particular, when working with the `ModelDesc` interface, its `build_graph` method will be the tower function.
+
+### MultiGPU Trainers
+
+For data-parallel multi-GPU training, different [multi-GPU trainers](../modules/train.html)
+implement different parallel logic.
+They take care of device placement, gradient averaging and synchronoization
+in the efficient way and all reach the same performance as the
+[official TF benchmarks](https://www.tensorflow.org/performance/benchmarks).
+It takes only one line of code change to use them.
+
+Note some __common problems__ when using these trainers:
+
+1. In each iteration, all GPUs (all replicates of the model) take tensors from the `InputSource`,
+	instead of take one for all and split.
+	So the total batch size would become ``(batch size of InputSource/DataFlow) * #GPU``.
+
+	Splitting a tensor for data-parallel training makes no sense at all, only to put unnecessary shape constraints on the data.
+	By letting each GPU train on its own input tensors, they can train on inputs of different shapes simultaneously.
+
+2. The tower function (your model code) will get called multipile times.
+	You'll need to be very careful when modifying global states in those functions, e.g. adding ops to TF collections.

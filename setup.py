@@ -4,6 +4,7 @@ assert version > 30, "tensorpack installation requires setuptools > 30"
 from setuptools import setup
 import os
 import shutil
+import sys
 
 # setup metainfo
 CURRENT_DIR = os.path.dirname(__file__)
@@ -20,32 +21,20 @@ except ImportError:
 # configure requirements
 reqfile = os.path.join(CURRENT_DIR, 'requirements.txt')
 req = [x.strip() for x in open(reqfile).readlines()]
-reqfile = os.path.join(CURRENT_DIR, 'opt-requirements.txt')
-extra_req = [x.strip() for x in open(reqfile).readlines()]
-
-# parse scripts
-scripts = ['scripts/plot-point.py', 'scripts/dump-model-params.py']
-scripts_to_install = []
-for s in scripts:
-    dirname = os.path.dirname(s)
-    basename = os.path.basename(s)
-    if basename.endswith('.py'):
-        basename = basename[:-3]
-    newname = 'tpk-' + basename  # install scripts with a prefix to avoid name confusion
-    # setup.py could be executed the second time in the same dir
-    if not os.path.isfile(newname):
-        shutil.move(s, newname)
-    scripts_to_install.append(newname)
 
 setup(
     name='tensorpack',
     version=__version__,
     description='Neural Network Toolbox on TensorFlow',
     long_description=long_description,
+
     install_requires=req,
     tests_require=['flake8', 'scikit-image'],
     extras_require={
-        'all': extra_req
+        'all': ['pillow', 'scipy', 'h5py', 'lmdb>=0.92', 'matplotlib', 'scikit-learn'],
+        'all: python_version < "3.0"': ['tornado']
     },
-    scripts=scripts_to_install,
+
+    #include_package_data=True,
+    #package_data={'tensorpack': []},
 )
