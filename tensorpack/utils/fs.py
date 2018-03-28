@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: fs.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
+
 
 import os
 from six.moves import urllib
@@ -53,7 +53,7 @@ def download(url, dir, filename=None):
             fpath, _ = urllib.request.urlretrieve(url, fpath, reporthook=hook(t))
         statinfo = os.stat(fpath)
         size = statinfo.st_size
-    except:
+    except IOError:
         logger.error("Failed to download {}".format(url))
         raise
     assert size > 0, "Download an empty file!"
@@ -99,19 +99,9 @@ def get_dataset_path(*args):
                     +"but the app received a directory to be set as the TENSORPACK_DATASET")
         d = TENSORPACK_DATASET
     if d is None:
-        old_d = os.path.abspath(os.path.join(
-            os.path.dirname(__file__), '..', 'dataflow', 'dataset'))
-        old_d_ret = os.path.join(old_d, *args)
-        new_d = os.path.join(os.path.expanduser('~'), 'tensorpack_data')
-        if os.path.isdir(old_d_ret):
-            # there is an old dir containing data, use it for back-compat
-            logger.warn("You seem to have old data at {}. This is no longer \
-                the default location. You'll need to move it to {} \
-                (the new default location) or another directory set by \
-                $TENSORPACK_DATASET.".format(old_d, new_d))
-        d = new_d
+        d = os.path.join(os.path.expanduser('~'), 'tensorpack_data')
         if execute_only_once():
-            logger.warn("$TENSORPACK_DATASET not set, using {} for dataset.".format(d))
+            logger.warn("Env var $TENSORPACK_DATASET not set, using {} for datasets.".format(d))
         if not os.path.isdir(d):
             mkdir_p(d)
             logger.info("Created the directory {}.".format(d))

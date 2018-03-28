@@ -14,23 +14,27 @@
 
 import sys, os, re
 import mock
+import inspect
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 sys.path.insert(0, os.path.abspath('../'))
-os.environ['TENSORPACK_DOC_BUILDING'] = '1'
+os.environ['DOC_BUILDING'] = '1'
+ON_RTD = (os.environ.get('READTHEDOCS') == 'True')
 
 
-MOCK_MODULES = ['scipy', 'tabulate',
-                'sklearn.datasets', 'sklearn',
-                'scipy.misc', 'h5py', 'nltk',
-                'cv2', 'scipy.io', 'dill', 'zmq', 'subprocess32', 'lmdb',
-                'tornado.concurrent', 'tornado',
-                'msgpack', 'msgpack_numpy',
-                'gym', 'functools32']
+MOCK_MODULES = ['tabulate', 'h5py',
+                'cv2', 'zmq', 'subprocess32', 'lmdb',
+                'sklearn', 'sklearn.datasets',
+                'scipy', 'scipy.misc', 'scipy.io',
+                'tornado', 'tornado.concurrent',
+                'horovod', 'horovod.tensorflow',
+                'pyarrow', 'msgpack', 'msgpack_numpy',
+                'functools32']
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock(name=mod_name)
+sys.modules['cv2'].__version__ = '3.2.1'    # fake version
 
 import tensorpack
 
@@ -60,7 +64,7 @@ napoleon_include_special_with_doc = True
 napoleon_numpy_docstring = False
 napoleon_use_rtype = False
 
-if os.environ.get('READTHEDOCS') == 'True':
+if ON_RTD:
     intersphinx_timeout = 10
 else:
     # skip this when building locally
@@ -115,7 +119,7 @@ language = None
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build']
+exclude_patterns = ['build', 'README.md']
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -127,7 +131,7 @@ add_function_parentheses = True
 # If true, the current module name will be prepended to all description
 # unit titles (such as .. function::).
 add_module_names = True
-# TODO use module name, but remove `tensorpack.` ?
+# 'tensorpack.' prefix was removed by js
 
 # If true, sectionauthor and moduleauthor directives will be shown in the
 # output. They are ignored by default.
@@ -331,22 +335,86 @@ texinfo_documents = [
 
 suppress_warnings = ['image.nonlocal_uri']
 
+#autodoc_member_order = 'bysource'
+
 def process_signature(app, what, name, obj, options, signature,
             return_annotation):
     if signature:
         # replace Mock function names
         signature = re.sub('<Mock name=\'([^\']+)\'.*>', '\g<1>', signature)
         signature = re.sub('tensorflow', 'tf', signature)
+
+        # add scope name to layer signatures:
+        if hasattr(obj, 'use_scope') and hasattr(obj, 'symbolic_function'):
+            if obj.use_scope:
+                signature = signature[0] + 'scope_name, ' + signature[1:]
+            elif obj.use_scope is None:
+                signature = signature[0] + '[scope_name,] ' + signature[1:]
     # signature: arg list
     return signature, return_annotation
+
+def autodoc_skip_member(app, what, name, obj, skip, options):
+    # we hide something deliberately
+    if getattr(obj, '__HIDE_SPHINX_DOC__', False):
+        return True
+    if name == '__init__':
+        if obj.__doc__ and skip:
+            # include_init_with_doc doesn't work well for decorated init
+            # https://github.com/sphinx-doc/sphinx/issues/4258
+            return False
+    # Hide some names that are deprecated or not intended to be used
+    if name in [
+        # deprecated stuff:
+        'GaussianDeform',
+        'set_tower_func',
+        'TryResumeTraining',
+
+        # renamed stuff:
+        'dump_chkpt_vars',
+        'DumpTensor',
+        'DumpParamAsImage',
+        'StagingInputWrapper',
+        'PeriodicRunHooks',
+
+        # deprecated or renamed symbolic code
+        'Deconv2D', 'LeakyReLU',
+        'saliency_map', 'get_scalar_var', 'psnr',
+        'prediction_incorrect', 'huber_loss', 'SoftMax'
+
+        # internal only
+        'apply_default_prefetch',
+        'average_grads',
+        'aggregate_grads',
+        'allreduce_grads',
+        'PrefetchOnGPUs',
+        ]:
+        return True
+    if name in ['get_data', 'size', 'reset_state']:
+        # skip these methods with empty docstring
+        if not obj.__doc__ and inspect.isfunction(obj):
+            # https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
+            cls = getattr(inspect.getmodule(obj),
+                          obj.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0])
+            if issubclass(cls, tensorpack.DataFlow):
+                return True
+    return None
+
+def url_resolver(url):
+    if '.html' not in url:
+        return "https://github.com/ppwwyyxx/tensorpack/blob/master/" + url
+    else:
+        if ON_RTD:
+            return "http://tensorpack.readthedocs.io/en/latest/" + url
+        else:
+            return '/' + url
 
 def setup(app):
     from recommonmark.transform import AutoStructify
     app.connect('autodoc-process-signature', process_signature)
+    app.connect('autodoc-skip-member', autodoc_skip_member)
     app.add_config_value(
         'recommonmark_config',
-        {'url_resolver': lambda url: \
-         "https://github.com/ppwwyyxx/tensorpack/blob/master/" + url,
+        {'url_resolver': url_resolver,
          'auto_toc_tree_section': 'Contents',
          'enable_math': True,
          'enable_inline_math': True,
