@@ -1,102 +1,66 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: serialize.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
+import sys
 import msgpack
 import msgpack_numpy
-
-import struct
-import numpy as np
-from tensorflow.core.framework.tensor_pb2 import TensorProto
-from tensorflow.core.framework import types_pb2 as DataType
-# have to import like this: https://github.com/tensorflow/tensorflow/commit/955f038afbeb81302cea43058078e68574000bce
-
 msgpack_numpy.patch()
 
+# https://github.com/apache/arrow/pull/1223#issuecomment-359895666
+old_mod = sys.modules.get('torch', None)
+sys.modules['torch'] = None
+try:
+    import pyarrow as pa
+except ImportError:
+    pa = None
+if old_mod is not None:
+    sys.modules['torch'] = old_mod
+else:
+    del sys.modules['torch']
 
-__all__ = ['loads', 'dumps', 'dumps_for_tfop', 'dump_tensor_protos',
-           'to_tensor_proto']
+
+__all__ = ['loads', 'dumps']
 
 
-def dumps(obj):
+def dumps_msgpack(obj):
     """
     Serialize an object.
-
     Returns:
-        str
+        Implementation-dependent bytes-like object
     """
     return msgpack.dumps(obj, use_bin_type=True)
 
 
-def loads(buf):
+def loads_msgpack(buf):
     """
     Args:
-        buf (str): serialized object.
+        buf: the output of `dumps`.
     """
-    return msgpack.loads(buf)
+    return msgpack.loads(buf, raw=False)
 
 
-_DTYPE_DICT = {
-    np.float32: DataType.DT_FLOAT,
-    np.float64: DataType.DT_DOUBLE,
-    np.int32: DataType.DT_INT32,
-    np.int8: DataType.DT_INT8,
-    np.uint8: DataType.DT_UINT8,
-}
-_DTYPE_DICT = {np.dtype(k): v for k, v in _DTYPE_DICT.items()}
-
-
-# TODO support string tensor and scalar
-def to_tensor_proto(arr):
+def dumps_pyarrow(obj):
     """
-    Convert a numpy array to TensorProto
+    Serialize an object.
 
+    Returns:
+        Implementation-dependent bytes-like object
+    """
+    return pa.serialize(obj).to_buffer()
+
+
+def loads_pyarrow(buf):
+    """
     Args:
-        arr: numpy.ndarray. only supports common numerical types
+        buf: the output of `dumps`.
     """
-    dtype = _DTYPE_DICT[arr.dtype]
-
-    ret = TensorProto()
-    shape = ret.tensor_shape
-    for s in arr.shape:
-        d = shape.dim.add()
-        d.size = s
-
-    ret.dtype = dtype
-
-    buf = arr.tobytes()
-    ret.tensor_content = buf
-    return ret
+    return pa.deserialize(buf)
 
 
-def dump_tensor_protos(protos):
-    """
-    Serialize a list of :class:`TensorProto`, for communication between custom TensorFlow ops.
-
-    Args:
-        protos (list): list of :class:`TensorProto` instance
-
-    Notes:
-        The format is:
-
-        [#tensors(int32)]
-        (tensor1)[size of meta proto][serialized meta proto][size of buffer][buffer]
-        (tensor2)...
-    """
-
-    s = struct.pack('=i', len(protos))
-    for p in protos:
-        tensor_content = p.tensor_content
-        p.tensor_content = b'xxx'   # clear content
-        buf = p.SerializeToString()
-        s += struct.pack('=i', len(buf))
-        s += buf
-        s += struct.pack('=i', len(tensor_content))    # won't send stuff over 2G
-        s += tensor_content
-    return s
-
-
-def dumps_for_tfop(dp):
-    protos = [to_tensor_proto(arr) for arr in dp]
-    return dump_tensor_protos(protos)
+if pa is None:
+    loads = loads_msgpack
+    dumps = dumps_msgpack
+else:
+    loads = loads_pyarrow
+    dumps = dumps_pyarrow

@@ -1,40 +1,50 @@
 
-# tensorpack examples
+# Tensorpack Examples
 
-Training examples with __reproducible__ and meaningful performance.
+Training examples with __reproducible performance__.
+
+__The word "reproduce" should always mean reproduce performance__.
+With the magic of SGD, wrong deep learning code often appears to still work,
+especially if you try it on toy datasets.
+See [Unawareness of Deep Learning Mistakes](https://medium.com/@ppwwyyxx/unawareness-of-deep-learning-mistakes-d5b5774da0ba).
+
+Instead of showing you 10 arbitrary networks trained on toy datasets with random final performance,
+tensorpack examples try to faithfully replicate experiments and performance in the paper as much as possible,
+so you're confident that they are correct.
+
 
 ## Getting Started:
-+ [An illustrative mnist example with explanation of the framework](mnist-convnet.py)
-+ The same mnist example using [tf-slim](mnist-tfslim.py), [Keras](mnist-keras.py), and [with weights visualizations](mnist-visualizations.py)
+These examples don't have meaningful performance numbers. They are supposed to be just demos.
++ [An illustrative MNIST example with explanation of the framework](basics/mnist-convnet.py)
++ Tensorpack supports any symbolic libraries. See the same MNIST example written with [tf.layers](basics/mnist-tflayers.py), [tf-slim](basics/mnist-tfslim.py), and [with weights visualizations](basics/mnist-visualizations.py)
++ A tiny [Cifar ConvNet](basics/cifar-convnet.py) and [SVHN ConvNet](basics/svhn-digit-convnet.py)
++ If you've used Keras, check out [Keras examples](keras)
 + [A boilerplate file to start with, for your own tasks](boilerplate.py)
 
 ## Vision:
-+ [A tiny SVHN ConvNet with 97.8% accuracy](svhn-digit-convnet.py)
-+ [DoReFa-Net: training binary / low-bitwidth CNN on ImageNet](DoReFa-Net)
-+ [Train ResNet for ImageNet/Cifar10/SVHN](ResNet)
-+ [Generative Adversarial Network(GAN) variants](GAN), including DCGAN, InfoGAN, Conditional GAN, WGAN, BEGAN, DiscoGAN, Image to Image, CycleGAN.
-+ [Inception-BN with 71% accuracy](Inception/inception-bn.py)
-+ [InceptionV3 with 74% accuracy (similar to the official code)](Inception/inceptionv3.py)
-+ [Fully-convolutional Network for Holistically-Nested Edge Detection(HED)](HED)
-+ [Spatial Transformer Networks on MNIST addition](SpatialTransformer)
-+ [Visualize Saliency Maps by Guided ReLU](Saliency)
-+ [Similarity Learning on MNIST](SimilarityLearning)
-+ Load a pre-trained [AlexNet](load-alexnet.py) or [VGG16](load-vgg16.py) model.
-+ Load a pre-trained [Convolutional Pose Machines](ConvolutionalPoseMachines/).
+| Name | Performance |
+| ---  | --- |
+|	Train [ResNet](ResNet), [ShuffleNet and other models](ImageNetModels) on ImageNet		| reproduce paper	|
+|	[Train Faster-RCNN / Mask-RCNN on COCO](FasterRCNN)				|	reproduce paper		|
+| [DoReFa-Net: training binary / low-bitwidth CNN on ImageNet](DoReFa-Net) | reproduce paper |
+| [Generative Adversarial Network(GAN) variants](GAN), including DCGAN, InfoGAN, <br/> Conditional GAN, WGAN, BEGAN, DiscoGAN, Image to Image, CycleGAN | visually reproduce |
+| [Fully-convolutional Network for Holistically-Nested Edge Detection(HED)](HED) | visually reproduce |
+| [Spatial Transformer Networks on MNIST addition](SpatialTransformer) | reproduce paper |
+| [Visualize CNN saliency maps](Saliency) | visually reproduce |
+| [Similarity learning on MNIST](SimilarityLearning) | |
+| Single-image super-resolution using [EnhanceNet](SuperResolution) |  |
+| Learn steering filters with [Dynamic Filter Networks](DynamicFilterNetwork) | visually reproduce |
+| Load a pre-trained [AlexNet, VGG, or Convolutional Pose Machines](CaffeModels) | |
 
 ## Reinforcement Learning:
-+ [Deep Q-Network(DQN) variants on Atari games](DeepQNetwork), including DQN, DoubleDQN, DuelingDQN.
-+ [Asynchronous Advantage Actor-Critic(A3C) with demos on OpenAI Gym](A3C-Gym)
+| Name | Performance |
+| ---  | --- |
+| [Deep Q-Network(DQN) variants on Atari games](DeepQNetwork), including <br/> DQN, DoubleDQN, DuelingDQN.  | reproduce paper |
+| [Asynchronous Advantage Actor-Critic(A3C) on Atari games](A3C-Gym) | reproduce paper |
 
 ## Speech / NLP:
-+ [LSTM-CTC for speech recognition](CTC-TIMIT)
-+ [char-rnn for fun](Char-RNN)
-+ [LSTM language model on PennTreebank](PennTreebank)
-
-
-Note to contributors:
-
-Example needs to satisfy one of the following:
-+ Reproduce performance of a published or well-known paper.
-+ Get state-of-the-art performance on some task.
-+ Illustrate a new way of using the library that is currently not covered.
+| Name | Performance |
+| ---  | --- |
+| [LSTM-CTC for speech recognition](CTC-TIMIT) | reproduce paper |
+| [char-rnn for fun](Char-RNN) | fun |
+| [LSTM language model on PennTreebank](PennTreebank) | reproduce reference code |

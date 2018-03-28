@@ -1,14 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: ilsvrc.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
+
 import os
 import tarfile
-import cv2
-import six
 import numpy as np
-import xml.etree.ElementTree as ET
-import time
+import tqdm
 
 import tensorflow as tf
 from tensorflow.python.ops import control_flow_ops
@@ -18,14 +15,7 @@ from ...utils.fs import mkdir_p, download, get_dataset_path
 from ...utils.timer import timed_operation
 from ..base import RNGDataFlow
 
-import _ilsvrc_vgg_preprocess
-import _ilsvrc_inception_preprocess
-import _slim_imagenet
-
-
-slim = tf.contrib.slim
-
-__all__ = ['ILSVRCMeta', 'ILSVRC12', 'ILSVRC12TFRecord']
+__all__ = ['ILSVRCMeta', 'ILSVRC12', 'ILSVRC12Files']
 
 CAFFE_ILSVRC12_URL = "http://dl.caffe.berkeleyvision.org/caffe_ilsvrc12.tar.gz"
 
@@ -77,10 +67,10 @@ class ILSVRCMeta(object):
             dir = get_dataset_path('ilsvrc_metadata')
         self.dir = dir
         mkdir_p(self.dir)
-        self.caffepb = get_caffe_pb()
         f = os.path.join(self.dir, 'synsets.txt')
         if not os.path.isfile(f):
             self._download_caffe_meta()
+        self.caffepb = None
 
     def get_synset_words_1000(self):
         """
@@ -106,22 +96,33 @@ class ILSVRCMeta(object):
         fpath = download(CAFFE_ILSVRC12_URL, self.dir)
         tarfile.open(fpath, 'r:gz').extractall(self.dir)
 
-    def get_image_list(self, name):
+    def get_image_list(self, name, dir_structure='original'):
         """
         Args:
             name (str): 'train' or 'val' or 'test'
+            dir_structure (str): same as in :meth:`ILSVRC12.__init__()`.
         Returns:
             list: list of (image filename, label)
         """
         assert name in ['train', 'val', 'test']
+        assert dir_structure in ['original', 'train']
+        add_label_to_fname = (name != 'train' and dir_structure != 'original')
+        if add_label_to_fname:
+            synset = self.get_synset_1000()
+
         fname = os.path.join(self.dir, name + '.txt')
-        assert os.path.isfile(fname)
+        assert os.path.isfile(fname), fname
         with open(fname) as f:
             ret = []
             for line in f.readlines():
                 name, cls = line.strip().split()
-                ret.append((name, int(cls)))
-        assert len(ret)
+                cls = int(cls)
+
+                if add_label_to_fname:
+                    name = os.path.join(synset[cls], name)
+
+                ret.append((name.strip(), cls))
+        assert len(ret), fname
         return ret
 
     def get_per_pixel_mean(self, size=None):
@@ -131,6 +132,8 @@ class ILSVRCMeta(object):
         Returns:
             np.ndarray: per-pixel mean of shape (h, w, 3 (BGR)) in range [0, 255].
         """
+        if self.caffepb is None:
+            self.caffepb = get_caffe_pb()
         obj = self.caffepb.BlobProto()
 
         mean_file = os.path.join(self.dir, 'imagenet_mean.binaryproto')
@@ -143,26 +146,85 @@ class ILSVRCMeta(object):
         return arr
 
 
-class ILSVRC12(RNGDataFlow):
+def _guess_dir_structure(dir):
+    subdir = os.listdir(dir)[0]
+    # find a subdir starting with 'n'
+    if subdir.startswith('n') and \
+            os.path.isdir(os.path.join(dir, subdir)):
+        dir_structure = 'train'
+    else:
+        dir_structure = 'original'
+    logger.info(
+        "[ILSVRC12] Assuming directory {} has '{}' structure.".format(
+            dir, dir_structure))
+    return dir_structure
+
+
+class ILSVRC12Files(RNGDataFlow):
     """
-    Produces uint8 ILSVRC12 images of shape [h, w, 3(BGR)], and a label between [0, 999],
-    and optionally a bounding box of [xmin, ymin, xmax, ymax].
+    Same as :class:`ILSVRC12`, but produces filenames of the images instead of nparrays.
+    This could be useful when ``cv2.imread`` is a bottleneck and you want to
+    decode it in smarter ways (e.g. in parallel).
     """
-    def __init__(self, dir, name, meta_dir=None, shuffle=None,
-                 dir_structure='original', include_bb=False):
+    def __init__(self, dir, name, meta_dir=None,
+                 shuffle=None, dir_structure=None):
+        """
+        Same as in :class:`ILSVRC12`.
+        """
+        assert name in ['train', 'test', 'val'], name
+        assert os.path.isdir(dir), dir
+        self.full_dir = os.path.join(dir, name)
+        self.name = name
+        assert os.path.isdir(self.full_dir), self.full_dir
+        assert meta_dir is None or os.path.isdir(meta_dir), meta_dir
+        if shuffle is None:
+            shuffle = name == 'train'
+        self.shuffle = shuffle
+
+        if name == 'train':
+            dir_structure = 'train'
+        if dir_structure is None:
+            dir_structure = _guess_dir_structure(self.full_dir)
+
+        meta = ILSVRCMeta(meta_dir)
+        self.imglist = meta.get_image_list(name, dir_structure)
+
+        for fname, _ in self.imglist[:10]:
+            fname = os.path.join(self.full_dir, fname)
+            assert os.path.isfile(fname), fname
+
+    def size(self):
+        return len(self.imglist)
+
+    def get_data(self):
+        idxs = np.arange(len(self.imglist))
+        if self.shuffle:
+            self.rng.shuffle(idxs)
+        for k in idxs:
+            fname, label = self.imglist[k]
+            fname = os.path.join(self.full_dir, fname)
+            yield [fname, label]
+
+
+class ILSVRC12(ILSVRC12Files):
+    """
+    Produces uint8 ILSVRC12 images of shape [h, w, 3(BGR)], and a label between [0, 999].
+    """
+    def __init__(self, dir, name, meta_dir=None,
+                 shuffle=None, dir_structure=None):
         """
         Args:
-            dir (str): A directory containing a subdir named ``name``, where the
-                original ``ILSVRC12_img_{name}.tar`` gets decompressed.
-            name (str): 'train' or 'val' or 'test'.
+            dir (str): A directory containing a subdir named ``name``,
+                containing the images in a structure described below.
+            name (str): One of 'train' or 'val' or 'test'.
             shuffle (bool): shuffle the dataset.
                 Defaults to True if name=='train'.
-            dir_structure (str): The dir structure of 'val' and 'test' directory.
-                If is 'original', it expects the original decompressed
-                directory, which only has list of image files (as below).
-                If set to 'train', it expects the same two-level
-                directory structure simlar to 'train/'.
-            include_bb (bool): Include the bounding box. Maybe useful in training.
+            dir_structure (str): One of 'original' or 'train'.
+                The directory structure for the 'val' directory.
+                'original' means the original decompressed directory, which only has list of image files (as below).
+                If set to 'train', it expects the same two-level directory structure simlar to 'dir/train/'.
+                By default, it tries to automatically detect the structure.
+                You probably do not need to care about this option because 'original' is what people usually have.
 
         Examples:
 
@@ -183,7 +245,7 @@ class ILSVRC12(RNGDataFlow):
                 ILSVRC2012_test_00000001.JPEG
                 ...
 
-        With ILSVRC12_img_*.tar, you can use the following
+        With the downloaded ILSVRC12_img_*.tar, you can use the following
         command to build the above structure:
 
         .. code-block:: none
@@ -192,55 +254,42 @@ class ILSVRC12(RNGDataFlow):
             mkdir test && tar xvf ILSVRC12_img_test.tar -C test
             mkdir train && tar xvf ILSVRC12_img_train.tar -C train && cd train
             find -type f -name '*.tar' | parallel -P 10 'echo {} && mkdir -p {/.} && tar xf {} -C {/.}'
+
+        When `dir_structure=='train'`, `dir` should have the following structure:
+
+        .. code-block:: none
+
+            dir/
+              train/
+                n02134418/
+                  n02134418_198.JPEG
+                  ...
+                ...
+              val/
+                n01440764/
+                  ILSVRC2012_val_00000293.JPEG
+                  ...
+                ...
+              test/
+                ILSVRC2012_test_00000001.JPEG
+                ...
         """
-        assert name in ['train', 'test', 'val'], name
-        assert os.path.isdir(dir), dir
-        self.full_dir = os.path.join(dir, name)
-        self.name = name
-        assert os.path.isdir(self.full_dir), self.full_dir
-        if shuffle is None:
-            shuffle = name == 'train'
-        self.shuffle = shuffle
-        meta = ILSVRCMeta(meta_dir)
-        self.imglist = meta.get_image_list(name)
-        self.dir_structure = dir_structure
-        self.synset = meta.get_synset_1000()
+        super(ILSVRC12, self).__init__(
+            dir, name, meta_dir, shuffle, dir_structure)
 
-        if include_bb:
-            bbdir = os.path.join(dir, 'bbox') if not \
-                isinstance(include_bb, six.string_types) else include_bb
-            assert name == 'train', 'Bounding box only available for training'
-            self.bblist = ILSVRC12.get_training_bbox(bbdir, self.imglist)
-        self.include_bb = include_bb
-
-    def size(self):
-        return len(self.imglist)
-
+    """
+    There are some CMYK / png images, but cv2 seems robust to them.
+    https://github.com/tensorflow/models/blob/c0cd713f59cfe44fa049b3120c417cc4079c17e3/research/inception/inception/data/build_imagenet_data.py#L264-L300
+    """
     def get_data(self):
-        idxs = np.arange(len(self.imglist))
-        add_label_to_fname = (self.name != 'train' and self.dir_structure != 'original')
-        if self.shuffle:
-            self.rng.shuffle(idxs)
-        for k in idxs:
-            fname, label = self.imglist[k]
-            if add_label_to_fname:
-                fname = os.path.join(self.full_dir, self.synset[label], fname)
-            else:
-                fname = os.path.join(self.full_dir, fname)
-            im = cv2.imread(fname.strip(), cv2.IMREAD_COLOR)
+        for fname, label in super(ILSVRC12, self).get_data():
+            im = cv2.imread(fname, cv2.IMREAD_COLOR)
             assert im is not None, fname
-            if im.ndim == 2:
-                im = np.expand_dims(im, 2).repeat(3, 2)
-            if self.include_bb:
-                bb = self.bblist[k]
-                if bb is None:
-                    bb = [0, 0, im.shape[1] - 1, im.shape[0] - 1]
-                yield [im, label, bb]
-            else:
-                yield [im, label]
+            yield [im, label]
 
     @staticmethod
     def get_training_bbox(bbox_dir, imglist):
+        import xml.etree.ElementTree as ET
         ret = []
 
         def parse_bbox(fname):
@@ -250,15 +299,10 @@ class ILSVRC12(RNGDataFlow):
 
             box = root.find('object').find('bndbox').getchildren()
             box = map(lambda x: float(x.text), box)
-            # box[0] /= size[0]
-            # box[1] /= size[1]
-            # box[2] /= size[0]
-            # box[3] /= size[1]
             return np.asarray(box, dtype='float32')
 
         with timed_operation('Loading Bounding Boxes ...'):
             cnt = 0
-            import tqdm
             for k in tqdm.trange(len(imglist)):
                 fname = imglist[k][0]
                 fname = fname[:-4] + 'xml'
@@ -266,211 +310,22 @@ class ILSVRC12(RNGDataFlow):
                 try:
                     ret.append(parse_bbox(fname))
                     cnt += 1
-                except KeyboardInterrupt:
-                    raise
-                except:
+                except Exception:
                     ret.append(None)
             logger.info("{}/{} images have bounding box.".format(cnt, len(imglist)))
         return ret
 
+try:
+    import cv2
+except ImportError:
+    from ...utils.develop import create_dummy_class
+    ILSVRC12 = create_dummy_class('ILSVRC12', 'cv2')  # noqa
 
-
-class ILSVRC12TFRecord(RNGDataFlow):
-    def __init__(self, tfrecord_dir, subset, batch_size, height=224, width=224, preprocess='vgg'):
-        assert preprocess in ['vgg', 'inceptin'], preprocess
-        if subset[:4] == 'toy_':
-            self.subset = subset[4:]
-            self.is_toy = True
-        else:
-            self.subset = subset
-            self.is_toy = False
-        self.tfrecord_dir = tfrecord_dir
-        self.batch_size = batch_size
-        self.height = height
-        self.width = width
-        self.preprocess = preprocess
-        # construct graph 
-        self._get_data()
-
-    def size(self):
-        n_samples = 0
-        if self.is_toy:
-            n_samples = 1024
-        elif self.subset == 'train':
-            n_samples = 1281167
-        elif self.subset == 'validation':
-            n_samples = 50000
-        n_batch = n_samples // self.batch_size
-        remainder = n_samples % self.batch_size
-        #if remainder == 0:
-        #    return n_batch
-        #return n_batch + int(self.subset == 'validation')
-        return n_batch
-
-
-    def data_files(self):
-        tf_record_pattern = os.path.join(self.tfrecord_dir, '%s-*' % self.subset)
-        data_files = tf.gfile.Glob(tf_record_pattern)
-        if not data_files:
-            print('No files found for dataset %s at %s' % (self.subset,
-                                                           self.tfrecord_dir))
-
-            exit(-1)
-        return data_files
- 
-    def _get_data(self):
-        """
-            construct preprocessing graph on CPU. (copied from tf-slim)
-        """
-        is_training = self.subset == 'train'
-        dataset = _slim_imagenet.get_split(self.subset, self.tfrecord_dir)
-
-        def image_preprocess(image):
-            if self.preprocess == 'vgg':
-                image = _ilsvrc_vgg_preprocess.preprocess_image(image,
-                    self.height, self.width, is_training)
-            elif self.preprocess == 'inception':
-                image = _ilsvrc_inception_preprocess.preprocess_image(image,
-                    self.height, self.width, is_training)
-            return image
-
-        with tf.device('/cpu:0'):
-            provider = slim.dataset_data_provider.DatasetDataProvider(
-                dataset,
-                num_readers=FLAGS.num_readers,
-                common_queue_capacity=20 * self.batch_size,
-                common_queue_min=10 * self.batch_size, 
-                shuffle=is_training)
-            [image, label] = provider.get(['image', 'label'])
-            label -= FLAGS.labels_offset
-            
-            image = image_preprocess(image)
-
-            images, labels = tf.train.batch(
-                [image, label],
-                batch_size=self.batch_size,
-                num_threads=FLAGS.num_preprocess_threads, 
-                capacity=5 * self.batch_size,
-                allow_smaller_final_batch=not is_training)
-            
-            images = tf.cast(images, tf.float32)
-            images = tf.reshape(images, shape=[self.batch_size, self.height, self.width, 3])
-            labels = tf.reshape(labels, [self.batch_size])
-
-            batch_queue = slim.prefetch_queue.prefetch_queue(\
-                [images, labels], capacity=8)
-
-            images, labels = batch_queue.dequeue()
-            
-            
-            self.im = images
-            self.label = labels
-
-    def get_data(self):
-        for _ in range(self.size()):
-            # it's better to run a whole bunch of images together and in parallel
-            sess = tf.get_default_session()
-            if sess is not None:
-                t0 = time.time()
-                im, label = sess.run([self.im, self.label])
-                t_spent = time.time() - t0
-                logger.info('loading and preprocessing: {:.4f}sec'.format(t_spent))
-            else:
-                raise Exception("Expect there is a default session")
-            yield [im, label]
-
-    @staticmethod
-    def decode_jpeg(image_buffer, scope=None):
-        """Decode a JPEG string into one 3-D float image Tensor.
-            Args:
-            image_buffer: scalar string Tensor.
-            scope: Optional scope for op_scope.
-            Returns:
-            3-D float Tensor with values ranging from [0, 1).
-        """
-        with tf.name_scope(scope, 'decode_jpeg', [image_buffer]):
-            # Decode the string as an RGB JPEG.
-            # Note that the resulting image contains an unknown height and width
-            # that is set dynamically by decode_jpeg. In other words, the height
-            # and width of image is unknown at compile-time.
-            image = tf.image.decode_jpeg(image_buffer, channels=3)
-            # The immediate result of decode is uint8. of [h,w,c] shape
-            return image
-
-    @staticmethod
-    def parse_example_proto(example_serialized):
-      """Parses an Example proto containing a training example of an image.
-      The output of the build_image_data.py image preprocessing script is a dataset
-      containing serialized Example protocol buffers. Each Example proto contains
-      the following fields:
-        image/height: 462
-        image/width: 581
-        image/colorspace: 'RGB'
-        image/channels: 3
-        image/class/label: 615
-        image/class/synset: 'n03623198'
-        image/class/text: 'knee pad'
-        image/object/bbox/xmin: 0.1
-        image/object/bbox/xmax: 0.9
-        image/object/bbox/ymin: 0.2
-        image/object/bbox/ymax: 0.6
-        image/object/bbox/label: 615
-        image/format: 'JPEG'
-        image/filename: 'ILSVRC2012_val_00041207.JPEG'
-        image/encoded: <JPEG encoded string>
-      Args:
-        example_serialized: scalar Tensor tf.string containing a serialized
-          Example protocol buffer.
-      Returns:
-        image_buffer: Tensor tf.string containing the contents of a JPEG file.
-        label: Tensor tf.int32 containing the label.
-        bbox: 3-D float Tensor of bounding boxes arranged [1, num_boxes, coords]
-          where each coordinate is [0, 1) and the coordinates are arranged as
-          [ymin, xmin, ymax, xmax].
-        text: Tensor tf.string containing the human-readable label.
-      """
-      # Dense features in Example proto.
-      feature_map = {
-          'image/encoded': tf.FixedLenFeature([], dtype=tf.string,
-                                              default_value=''),
-          'image/class/label': tf.FixedLenFeature([1], dtype=tf.int64,
-                                                  default_value=-1),
-          'image/class/text': tf.FixedLenFeature([], dtype=tf.string,
-                                                 default_value=''),
-      }
-      sparse_float32 = tf.VarLenFeature(dtype=tf.float32)
-      # Sparse features in Example proto.
-      feature_map.update(
-          {k: sparse_float32 for k in ['image/object/bbox/xmin',
-                                       'image/object/bbox/ymin',
-                                       'image/object/bbox/xmax',
-                                       'image/object/bbox/ymax']})
-
-      features = tf.parse_single_example(example_serialized, feature_map)
-      label = tf.cast(features['image/class/label'], dtype=tf.int32)
-
-      xmin = tf.expand_dims(features['image/object/bbox/xmin'].values, 0)
-      ymin = tf.expand_dims(features['image/object/bbox/ymin'].values, 0)
-      xmax = tf.expand_dims(features['image/object/bbox/xmax'].values, 0)
-      ymax = tf.expand_dims(features['image/object/bbox/ymax'].values, 0)
-
-      # Note that we impose an ordering of (y, x) just to make life difficult.
-      bbox = tf.concat([ymin, xmin, ymax, xmax], 0)
-
-      # Force the variable number of bounding boxes into the shape
-      # [1, num_boxes, coords].
-      bbox = tf.expand_dims(bbox, 0)
-      bbox = tf.transpose(bbox, [0, 2, 1])
-
-      return features['image/encoded'], label, bbox, features['image/class/text']
-
-
-def test0():
+if __name__ == '__main__':
     meta = ILSVRCMeta()
     # print(meta.get_synset_words_1000())
 
-    ds = ILSVRC12('/home/wyx/data/fake_ilsvrc/', 'train', include_bb=True,
-                  shuffle=False)
+    ds = ILSVRC12('/home/wyx/data/fake_ilsvrc/', 'train', shuffle=False)
     ds.reset_state()
 
     for k in ds.get_data():
