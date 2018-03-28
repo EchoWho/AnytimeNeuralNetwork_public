@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: concurrency.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
+
+import numpy as np
 import multiprocessing
 import six
 from six.moves import queue, range
@@ -10,7 +11,7 @@ import tensorflow as tf
 
 from ..utils import logger
 from ..utils.concurrency import DIE, StoppableThread, ShareSessionThread
-from ..tfutils.model_utils import describe_model
+from ..tfutils.model_utils import describe_trainable_vars
 from .base import OnlinePredictor, OfflinePredictor, AsyncPredictorBase
 
 __all__ = ['MultiProcessPredictWorker', 'MultiProcessQueuePredictWorker',
@@ -36,12 +37,12 @@ class MultiProcessPredictWorker(multiprocessing.Process):
             have workers that run on multiGPUs
         """
         if self.idx != 0:
-            from tensorpack.models.common import disable_layer_logging
+            from tensorpack.models.registry import disable_layer_logging
             disable_layer_logging()
         self.predictor = OfflinePredictor(self.config)
         if self.idx == 0:
             with self.predictor.graph.as_default():
-                describe_model()
+                describe_trainable_vars()
 
 
 class MultiProcessQueuePredictWorker(MultiProcessPredictWorker):
@@ -71,7 +72,7 @@ class MultiProcessQueuePredictWorker(MultiProcessPredictWorker):
                 self.outqueue.put((DIE, None))
                 return
             else:
-                self.outqueue.put((tid, self.predictor(dp)))
+                self.outqueue.put((tid, self.predictor(*dp)))
 
 
 class PredictorWorkerThread(StoppableThread, ShareSessionThread):
@@ -89,7 +90,7 @@ class PredictorWorkerThread(StoppableThread, ShareSessionThread):
             while not self.stopped():
                 batched, futures = self.fetch_batch()
                 try:
-                    outputs = self.func(batched)
+                    outputs = self.func(*batched)
                 except tf.errors.CancelledError:
                     for f in futures:
                         f.cancel()
@@ -122,6 +123,9 @@ class PredictorWorkerThread(StoppableThread, ShareSessionThread):
                 futures.append(f)
             except queue.Empty:
                 break   # do not wait
+
+        for k in range(nr_input_var):
+            batched[k] = np.asarray(batched[k])
         return batched, futures
 
 

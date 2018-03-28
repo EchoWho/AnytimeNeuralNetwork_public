@@ -6,14 +6,14 @@
 import numpy as np
 import tensorflow as tf
 import os
-import sys
 import cv2
 import argparse
 
+
 from tensorpack import *
-from tensorpack.utils.viz import *
-import tensorpack.tfutils.symbolic_functions as symbf
+from tensorpack.utils.viz import interactive_imshow, stack_patches
 from tensorpack.tfutils.scope_utils import auto_reuse_variable_scope
+from tensorpack.dataflow import dataset
 from GAN import GANTrainer, RandomZData, GANModelDesc
 
 """
@@ -23,28 +23,38 @@ To train:
 To visualize:
     ./ConditionalGAN-mnist.py --sample --load path/to/model
 
-A pretrained model is at https://drive.google.com/open?id=0B9IPQTvr2BBkLUF2M0RXU1NYSkE
+A pretrained model is at http://models.tensorpack.com/GAN/
 """
 
 BATCH = 128
 
 
+def batch_flatten(x):
+    """
+    Flatten the tensor except the first dimension.
+    """
+    shape = x.get_shape().as_list()[1:]
+    if None not in shape:
+        return tf.reshape(x, [-1, int(np.prod(shape))])
+    return tf.reshape(x, tf.stack([tf.shape(x)[0], -1]))
+
+
 class Model(GANModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, (None, 28, 28), 'input'),
-                InputDesc(tf.int32, (None,), 'label')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, (None, 28, 28), 'input'),
+                tf.placeholder(tf.int32, (None,), 'label')]
 
     def generator(self, z, y):
-        l = FullyConnected('fc0', tf.concat([z, y], 1), 1024, nl=BNReLU)
-        l = FullyConnected('fc1', tf.concat([l, y], 1), 64 * 2 * 7 * 7, nl=BNReLU)
+        l = FullyConnected('fc0', tf.concat([z, y], 1), 1024, activation=BNReLU)
+        l = FullyConnected('fc1', tf.concat([l, y], 1), 64 * 2 * 7 * 7, activation=BNReLU)
         l = tf.reshape(l, [-1, 7, 7, 64 * 2])
 
         y = tf.reshape(y, [-1, 1, 1, 10])
         l = tf.concat([l, tf.tile(y, [1, 7, 7, 1])], 3)
-        l = Deconv2D('deconv1', l, [14, 14, 64 * 2], 5, 2, nl=BNReLU)
+        l = Conv2DTranspose('deconv1', l, 64 * 2, 5, 2, activation=BNReLU)
 
         l = tf.concat([l, tf.tile(y, [1, 14, 14, 1])], 3)
-        l = Deconv2D('deconv2', l, [28, 28, 1], 5, 2, nl=tf.identity)
+        l = Conv2DTranspose('deconv2', l, 1, 5, 2, activation=tf.identity)
         l = tf.nn.tanh(l, name='gen')
         return l
 
@@ -53,36 +63,36 @@ class Model(GANModelDesc):
         """ return a (b, 1) logits"""
         yv = y
         y = tf.reshape(y, [-1, 1, 1, 10])
-        with argscope(Conv2D, nl=tf.identity, kernel_shape=5, stride=2), \
-                argscope(LeakyReLU, alpha=0.2):
+        with argscope(Conv2D, kernel_size=5, strides=1):
             l = (LinearWrap(imgs)
                  .ConcatWith(tf.tile(y, [1, 28, 28, 1]), 3)
                  .Conv2D('conv0', 11)
-                 .LeakyReLU()
+                 .tf.nn.leaky_relu()
 
                  .ConcatWith(tf.tile(y, [1, 14, 14, 1]), 3)
                  .Conv2D('conv1', 74)
-                 .BatchNorm('bn1').LeakyReLU()
+                 .BatchNorm('bn1')
+                 .tf.nn.leaky_relu()
 
-                 .apply(symbf.batch_flatten)
+                 .apply(batch_flatten)
                  .ConcatWith(yv, 1)
-                 .FullyConnected('fc1', 1024, nl=tf.identity)
-                 .BatchNorm('bn2').LeakyReLU()
+                 .FullyConnected('fc1', 1024, activation=tf.identity)
+                 .BatchNorm('bn2')
+                 .tf.nn.leaky_relu()
 
                  .ConcatWith(yv, 1)
-                 .FullyConnected('fct', 1, nl=tf.identity)())
+                 .FullyConnected('fct', 1, activation=tf.identity)())
         return l
 
-    def _build_graph(self, input_vars):
-        image_pos, y = input_vars
+    def build_graph(self, image_pos, y):
         image_pos = tf.expand_dims(image_pos * 2.0 - 1, -1)
         y = tf.one_hot(y, 10, name='label_onehot')
 
         z = tf.random_uniform([BATCH, 100], -1, 1, name='z_train')
-        z = symbf.shapeless_placeholder(z, [0], name='z')
+        z = tf.placeholder_with_default(z, [None, 100], name='z')   # clear the static shape
 
-        with argscope([Conv2D, Deconv2D, FullyConnected],
-                      W_init=tf.truncated_normal_initializer(stddev=0.02)):
+        with argscope([Conv2D, Conv2DTranspose, FullyConnected],
+                      kernel_initializer=tf.truncated_normal_initializer(stddev=0.02)):
             with tf.variable_scope('gen'):
                 image_gen = self.generator(z, y)
                 tf.summary.image('gen', image_gen, 30)
@@ -93,26 +103,13 @@ class Model(GANModelDesc):
         self.build_losses(vecpos, vecneg)
         self.collect_variables()
 
-    def _get_optimizer(self):
-        lr = symbf.get_scalar_var('learning_rate', 2e-4, summary=True)
-        return tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3)
+    def optimizer(self):
+        return tf.train.AdamOptimizer(2e-4, beta1=0.5, epsilon=1e-3)
 
 
 def get_data():
     ds = ConcatData([dataset.Mnist('train'), dataset.Mnist('test')])
     return BatchData(ds, BATCH)
-
-
-def get_config():
-    logger.auto_set_dir()
-    dataset = get_data()
-    return TrainConfig(
-        dataflow=dataset,
-        callbacks=[ModelSaver()],
-        model=Model(),
-        steps_per_epoch=500,
-        max_epoch=100,
-    )
 
 
 def sample(model_path):
@@ -143,7 +140,10 @@ if __name__ == '__main__':
     if args.sample:
         sample(args.load)
     else:
-        config = get_config()
-        if args.load:
-            config.session_init = SaverRestore(args.load)
-        GANTrainer(config).train()
+        logger.auto_set_dir()
+        GANTrainer(QueueInput(get_data()), Model()).train_with_defaults(
+            callbacks=[ModelSaver()],
+            steps_per_epoch=500,
+            max_epoch=100,
+            session_init=SaverRestore(args.load) if args.load else None
+        )
