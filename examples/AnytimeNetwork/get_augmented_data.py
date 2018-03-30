@@ -117,7 +117,7 @@ def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
             ds = JoinData([ds, dstl])
         ds = LocallyShuffleData(ds, 1024*64)  # This is 64G~80G in memory images
     ds = PrefetchData(ds, 1024*8, 1) # prefetch around 8 G
-    ds = LMDBDataPoint(ds, deserialize=True)
+    ds = LMDBDataPoint(ds)
     ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), 0) # BGR uint8 data
     if isTrain:
         class Resize(imgaug.ImageAugmentor):
@@ -186,7 +186,7 @@ def get_pascal_voc_augmented_data(subset, options, do_multiprocess=True):
     if isTrain:
        ds = LocallyShuffleData(ds, 1024*7)
     ds = PrefetchData(ds, 1024*7, 1)
-    ds = LMDBDataPoint(ds, deserialize=True)
+    ds = LMDBDataPoint(ds)
     ds = MapDataComponent(ds, lambda x: x[0].astype(np.float32), 0)
 
     def one_hot(y_img, n_classes=n_classes, last_is_void=True):
@@ -246,7 +246,7 @@ def get_cityscapes_augmented_data(subset, options, do_multiprocess=True):
     if isTrain:
         ds = LocallyShuffleData(ds, 2048)
     ds = PrefetchData(ds, 1024 * 8, 1)
-    ds = LMDBDataPoint(ds, deserialize=True)
+    ds = LMDBDataPoint(ds)
     ds = MapDataComponent(ds, lambda x: x[0].astype(np.float32), 0)
 
     def one_hot(y_img, n_classes=n_classes):
