@@ -50,7 +50,8 @@ def FullyConnected(
             activity_regularizer=activity_regularizer)
         ret = layer.apply(inputs, scope=tf.get_variable_scope())
 
+    ret = tf.identity(ret, name='output')
     ret.variables = VariableHolder(W=layer.kernel)
     if use_bias:
         ret.variables.b = layer.bias
-    return tf.identity(ret, name='output')
+    return ret 
