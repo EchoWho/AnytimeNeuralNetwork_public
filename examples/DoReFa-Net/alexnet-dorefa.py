@@ -7,15 +7,18 @@ import cv2
 import tensorflow as tf
 import argparse
 import numpy as np
-import multiprocessing
-import msgpack
 import os
 import sys
 
+
 from tensorpack import *
-from tensorpack.tfutils.symbolic_functions import *
-from tensorpack.tfutils.summary import *
+from tensorpack.tfutils.symbolic_functions import prediction_incorrect
+from tensorpack.tfutils.summary import add_moving_summary, add_param_summary
 from tensorpack.tfutils.varreplace import remap_variables
+from tensorpack.dataflow import dataset
+from tensorpack.utils.gpu import get_nr_gpu
+
+from imagenet_utils import get_imagenet_dataflow, fbresnet_augmentor
 from dorefa import get_dorefa
 
 """
@@ -27,23 +30,21 @@ The original experiements are performed on a proprietary framework.
 This is our attempt to reproduce it on tensorpack & TensorFlow.
 
 Accuracy:
-    Trained with 4 GPUs and (W,A,G)=(1,2,6), it can reach top-1 single-crop validation error of 51%,
-    after 70 epochs. This number is a bit better than what's in the paper
-    probably due to more sophisticated augmentors.
+    Trained with 4 GPUs and (W,A,G)=(1,2,6), it can reach top-1 single-crop validation error of 47.6%,
+    after 70 epochs. This number is better than what's in the paper
+    due to more sophisticated augmentations.
 
-    Note that the effective batch size in SyncMultiGPUTrainer is actually
-    BATCH_SIZE * NUM_GPU. With a different number of GPUs in use, things might
-    be a bit different, especially for learning rate.
+    With (W,A,G)=(32,32,32) -- full precision baseline, 41.4% error.
+    With (W,A,G)=(1,32,32) -- BWN, 44.3% error
+    With (W,A,G)=(1,2,6), 47.6% error
+    With (W,A,G)=(1,2,4), 58.4% error
 
-    With (W,A,G)=(32,32,32) -- full precision baseline, 43% error.
-    With (W,A,G)=(1,32,32) -- BWN, 46% error.
-    With (W,A,G)=(1,2,6), 51% error.
-    With (W,A,G)=(1,2,4), 63% error.
+    Don't train with >4 GPUs because the batch size will be different.
 
 Speed:
-    About 2.2 iteration/s on 1 TitanX. (Each epoch is set to 10000 iterations)
+    About 11 iteration/s on 4 P100s. (Each epoch is set to 10000 iterations)
     Note that this code was written early without using NCHW format. You
-    should expect a 30% speed up after switching to NCHW format.
+    should expect a speed up if the code is ported to NCHW format.
 
 To Train, for example:
     ./alexnet-dorefa.py --dorefa 1,2,6 --data PATH --gpu 0,1
@@ -61,11 +62,11 @@ To Train, for example:
 
     And you'll need the following to be able to fetch data efficiently
         Fast disk random access (Not necessarily SSD. I used a RAID of HDD, but not sure if plain HDD is enough)
-        More than 12 CPU cores (for data processing)
+        More than 20 CPU cores (for data processing)
         More than 10G of free memory
 
-To Run Pretrained Model:
-    ./alexnet-dorefa.py --load alexnet-126.npy --run a.jpg --dorefa 1,2,6
+To run pretrained model:
+    ./alexnet-dorefa.py --load alexnet-126.npz --run a.jpg --dorefa 1,2,6
 """
 
 BITW = 1
@@ -76,17 +77,14 @@ BATCH_SIZE = None
 
 
 class Model(ModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, 224, 224, 3], 'input'),
-                InputDesc(tf.int32, [None], 'label')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, [None, 224, 224, 3], 'input'),
+                tf.placeholder(tf.int32, [None], 'label')]
 
-    def _build_graph(self, inputs):
-        image, label = inputs
+    def build_graph(self, image, label):
         image = image / 255.0
 
         fw, fa, fg = get_dorefa(BITW, BITA, BITG)
-
-        old_get_variable = tf.get_variable
 
         # monkey-patch tf.get_variable to apply fw
         def new_get_variable(v):
@@ -107,10 +105,10 @@ class Model(ModelDesc):
             return fa(nonlin(x))
 
         with remap_variables(new_get_variable), \
-                argscope(BatchNorm, decay=0.9, epsilon=1e-4), \
-                argscope([Conv2D, FullyConnected], use_bias=False, nl=tf.identity):
+                argscope(BatchNorm, momentum=0.9, epsilon=1e-4), \
+                argscope(Conv2D, use_bias=False):
             logits = (LinearWrap(image)
-                      .Conv2D('conv0', 96, 12, stride=4, padding='VALID')
+                      .Conv2D('conv0', 96, 12, strides=4, padding='VALID')
                       .apply(activate)
                       .Conv2D('conv1', 256, 5, padding='SAME', split=2)
                       .apply(fg)
@@ -140,13 +138,13 @@ class Model(ModelDesc):
                       .BatchNorm('bnfc0')
                       .apply(activate)
 
-                      .FullyConnected('fc1', 4096)
+                      .FullyConnected('fc1', 4096, use_bias=False)
                       .apply(fg)
                       .BatchNorm('bnfc1')
                       .apply(nonlin)
                       .FullyConnected('fct', 1000, use_bias=True)())
 
-        prob = tf.nn.softmax(logits, name='output')
+        tf.nn.softmax(logits, name='output')
 
         cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
@@ -160,72 +158,20 @@ class Model(ModelDesc):
         wd_cost = regularize_cost('fc.*/W', l2_regularizer(5e-6), name='regularize_cost')
 
         add_param_summary(('.*/W', ['histogram', 'rms']))
-        self.cost = tf.add_n([cost, wd_cost], name='cost')
-        add_moving_summary(cost, wd_cost, self.cost)
+        total_cost = tf.add_n([cost, wd_cost], name='cost')
+        add_moving_summary(cost, wd_cost, total_cost)
+        return total_cost
 
-    def _get_optimizer(self):
-        lr = get_scalar_var('learning_rate', 1e-4, summary=True)
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=1e-4, trainable=False)
         return tf.train.AdamOptimizer(lr, epsilon=1e-5)
 
 
 def get_data(dataset_name):
     isTrain = dataset_name == 'train'
-    ds = dataset.ILSVRC12(args.data, dataset_name, shuffle=isTrain)
-
-    meta = dataset.ILSVRCMeta()
-    pp_mean = meta.get_per_pixel_mean()
-    pp_mean_224 = pp_mean[16:-16, 16:-16, :]
-
-    if isTrain:
-        class Resize(imgaug.ImageAugmentor):
-            def __init__(self):
-                self._init(locals())
-
-            def _augment(self, img, _):
-                h, w = img.shape[:2]
-                size = 224
-                scale = self.rng.randint(size, 308) * 1.0 / min(h, w)
-                scaleX = scale * self.rng.uniform(0.85, 1.15)
-                scaleY = scale * self.rng.uniform(0.85, 1.15)
-                desSize = map(int, (max(size, min(w, scaleX * w)),
-                                    max(size, min(h, scaleY * h))))
-                dst = cv2.resize(img, tuple(desSize),
-                                 interpolation=cv2.INTER_CUBIC)
-                return dst
-
-        augmentors = [
-            Resize(),
-            imgaug.Rotation(max_deg=10),
-            imgaug.RandomApplyAug(imgaug.GaussianBlur(3), 0.5),
-            imgaug.Brightness(30, True),
-            imgaug.Gamma(),
-            imgaug.Contrast((0.8, 1.2), True),
-            imgaug.RandomCrop((224, 224)),
-            imgaug.RandomApplyAug(imgaug.JpegNoise(), 0.8),
-            imgaug.RandomApplyAug(imgaug.GaussianDeform(
-                [(0.2, 0.2), (0.2, 0.8), (0.8, 0.8), (0.8, 0.2)],
-                (224, 224), 0.2, 3), 0.1),
-            imgaug.Flip(horiz=True),
-            imgaug.MapImage(lambda x: x - pp_mean_224),
-        ]
-    else:
-        def resize_func(im):
-            h, w = im.shape[:2]
-            scale = 256.0 / min(h, w)
-            desSize = map(int, (max(224, min(w, scale * w)),
-                                max(224, min(h, scale * h))))
-            im = cv2.resize(im, tuple(desSize), interpolation=cv2.INTER_CUBIC)
-            return im
-        augmentors = [
-            imgaug.MapImage(resize_func),
-            imgaug.CenterCrop((224, 224)),
-            imgaug.MapImage(lambda x: x - pp_mean_224),
-        ]
-    ds = AugmentImageComponent(ds, augmentors, copy=False)
-    ds = BatchData(ds, BATCH_SIZE, remainder=not isTrain)
-    if isTrain:
-        ds = PrefetchDataZMQ(ds, min(12, multiprocessing.cpu_count()))
-    return ds
+    augmentors = fbresnet_augmentor(isTrain)
+    return get_imagenet_dataflow(
+        args.data, dataset_name, BATCH_SIZE, augmentors)
 
 
 def get_config():
@@ -282,7 +228,7 @@ def run_image(model, sess_init, inputs):
         assert img is not None
 
         img = transformers.augment(img)[np.newaxis, :, :, :]
-        outputs = predictor([img])[0]
+        outputs = predictor(img)[0]
         prob = outputs[0]
         ret = prob.argsort()[-10:][::-1]
 
@@ -294,7 +240,7 @@ def run_image(model, sess_init, inputs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='the physical ids of GPUs to use')
-    parser.add_argument('--load', help='load a checkpoint, or a npy (given as the pretrained model)')
+    parser.add_argument('--load', help='load a checkpoint, or a npz (given as the pretrained model)')
     parser.add_argument('--data', help='ILSVRC dataset dir')
     parser.add_argument('--dorefa',
                         help='number of bits for W,A,G, separated by comma', required=True)
@@ -307,18 +253,15 @@ if __name__ == '__main__':
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     if args.run:
-        assert args.load.endswith('.npy')
-        run_image(Model(), DictRestore(np.load(args.load, encoding='latin1').item()), args.run)
+        assert args.load.endswith('.npz')
+        run_image(Model(), DictRestore(dict(np.load(args.load))), args.run)
         sys.exit()
 
-    assert args.gpu is not None, "Need to specify a list of gpu for training!"
-    NR_GPU = len(args.gpu.split(','))
-    BATCH_SIZE = TOTAL_BATCH_SIZE // NR_GPU
+    nr_tower = max(get_nr_gpu(), 1)
+    BATCH_SIZE = TOTAL_BATCH_SIZE // nr_tower
     logger.info("Batch per tower: {}".format(BATCH_SIZE))
 
     config = get_config()
     if args.load:
         config.session_init = SaverRestore(args.load)
-    if args.gpu:
-        config.nr_tower = len(args.gpu.split(','))
-    SyncMultiGPUTrainer(config).train()
+    launch_train_with_config(config, SyncMultiGPUTrainer(nr_tower))
