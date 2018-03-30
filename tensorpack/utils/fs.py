@@ -75,12 +75,14 @@ global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
 TENSORPACK_DATASET = None
 DATASET_AUTO_DOWNLOAD=False
 
+
 def set_dataset_path(path, auto_download=False):
     global TENSORPACK_DATASET, DATASET_AUTO_DOWNLOAD
     assert os.path.isdir(path)
     TENSORPACK_DATASET = path
     DATASET_AUTO_DOWNLOAD=auto_download
     logger.info("TENSORPACK_DATASET is set to be {}".format(path))
+
 
 def get_dataset_path(*args):
     """

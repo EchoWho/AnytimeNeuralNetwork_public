@@ -121,7 +121,7 @@ if __name__ == '__main__':
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
+    logger.auto_set_dir(action='k')
 
     args.evaluate = filter(bool, args.evaluate.split(','))
     do_eval = len(args.evaluate) > 0
