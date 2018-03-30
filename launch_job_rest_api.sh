@@ -15,6 +15,13 @@
 # 3787..3889
 # Num gpus : 1
 
+# Exp 94 (DenseNet reproduction with dropout =0.9)
+# 3892..3900
+# Num gpus : 4
+
+# Exp 95 (Copy of 94 on 8 gpus)
+# 3903..3911
+# Num gpus : 8
 
 # FOR I IN {3531..3539}
 # do
@@ -47,7 +54,7 @@
 # done
 
 
-for i in {3569..3784} {3787..3889} # 1 GPU
+for i in {3892..3900} # 4 gpu ; {3903..3911} # 8 gpu ; 
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -55,7 +62,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="4"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -325,3 +332,11 @@ done
 # Exp 93 (baseline optimal on cifar 100 for n=9, n=17, n=25
 # 3787..3889
 # Num gpus : 1
+
+# Exp 94 (DenseNet reproduction with dropout =0.9)
+# 3892..3900
+# Num gpus : 4
+
+# Exp 95 (Copy of 94 on 8 gpus)
+# 3903..3911
+# Num gpus : 8
