@@ -355,12 +355,9 @@ class AnytimeNetwork(ModelDesc):
     
 
     def _get_inputs(self):
-        additional_input = []
-        if self.is_model_training() and self.alter_label:
-            additional_input = [InputDesc(tf.float32, [None, self.num_classes], 'alter_label')]
         return [InputDesc(self.input_type, 
                     [None, self.input_size, self.input_size, 3],'input'),
-                InputDesc(tf.int32, [None], 'label')] + additional_input
+                InputDesc(tf.int32, [None], 'label')]
 
 
     def compute_scope_basename(self, layer_idx):
@@ -495,15 +492,6 @@ class AnytimeNetwork(ModelDesc):
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         
-        if self.alter_label and self.is_model_training() and \
-                unit_idx < self.alter_label_activate_frac * self.total_units:
-            alabel = label_obj[1]
-            sq_loss = np.float32(self.num_classes) * \
-                tf.losses.mean_squared_error(labels=alabel, predictions=logits)
-            add_moving_summary(sq_loss, name='alter_sq_loss')
-            if self.alter_loss_w != 0.0:
-                 cost = cost * (1 - self.alter_loss_w) + sq_loss * self.alter_loss_w
-
         return logits, cost
 
 
