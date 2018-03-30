@@ -104,12 +104,6 @@ def set_logger_dir(dirname, action=None):
         # unload and close the old file handler, so that we may safely delete the logger directory
         _logger.removeHandler(_FILE_HANDLER)
         del _FILE_HANDLER
-    if dirname is None:
-        mod = sys.modules['__main__']
-        basename = os.path.basename(mod.__file__)
-        basename = basename[:basename.rfind('.')]
-        basename += get_time_str()
-        dirname = os.path.join(LOG_ROOT, basename)
     if os.path.isdir(dirname) and len(os.listdir(dirname)):
         if not action:
             _logger.warn("""\
@@ -139,7 +133,7 @@ Press any other key to exit. """)
     _set_file(os.path.join(dirname, 'log.log'))
 
 
-def auto_set_dir(action=None, name=None, append_time=True):
+def auto_set_dir(action=None, name=None):
     """
     Use :func:`logger.set_logger_dir` to set log directory to
     "./train_log/{scriptname}:{name}". "scriptname" is the name of the main python file currently running"""
@@ -148,8 +142,6 @@ def auto_set_dir(action=None, name=None, append_time=True):
     auto_dirname = os.path.join(LOG_ROOT, basename[:basename.rfind('.')])
     if name:
         auto_dirname += ':%s' % name
-    if append_time:
-        auto_dirname += ':' + _get_time_str()
     set_logger_dir(auto_dirname, action=action)
 
 
