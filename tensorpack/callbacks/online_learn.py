@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import scipy.linalg as linalg
 from .base import Callback
-from ..tfutils import get_op_tensor_name, get_op_or_tensor_by_name
+from ..tfutils.common import get_op_tensor_name, get_op_or_tensor_by_name
 from tensorpack.utils import logger
 
 __all__ = ['Exp3CPU', 'RWMCPU', 'FixedDistributionCPU', 'ThompsonSamplingCPU', 'AdaptiveLossWeight']

@@ -149,7 +149,7 @@ def auto_set_dir(action=None, name=None, append_time=True):
     if name:
         auto_dirname += ':%s' % name
     if append_time:
-        auto_dirname += ':' + get_time_str()
+        auto_dirname += ':' + _get_time_str()
     set_logger_dir(auto_dirname, action=action)
 
 
