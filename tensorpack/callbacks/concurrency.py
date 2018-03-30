@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: concurrency.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
+
 
 import multiprocessing as mp
 from .base import Callback
@@ -15,6 +15,8 @@ class StartProcOrThread(Callback):
     """
     Start some threads or processes before training.
     """
+
+    _chief_only = False
 
     def __init__(self, startable, stop_at_last=True):
         """

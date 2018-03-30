@@ -3,16 +3,16 @@
 # File: cifar10-resnet.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import numpy as np
 import argparse
 import os
 
+
 from tensorpack import *
-from tensorpack.tfutils.symbolic_functions import *
-from tensorpack.tfutils.summary import *
+from tensorpack.tfutils.summary import add_moving_summary, add_param_summary
+from tensorpack.utils.gpu import get_nr_gpu
+from tensorpack.dataflow import dataset
 
 import tensorflow as tf
-from tensorflow.contrib.layers import variance_scaling_initializer
 
 """
 CIFAR10 ResNet example. See:
@@ -40,12 +40,11 @@ class Model(ModelDesc):
         super(Model, self).__init__()
         self.n = n
 
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, 32, 32, 3], 'input'),
-                InputDesc(tf.int32, [None], 'label')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, [None, 32, 32, 3], 'input'),
+                tf.placeholder(tf.int32, [None], 'label')]
 
-    def _build_graph(self, inputs):
-        image, label = inputs
+    def build_graph(self, image, label):
         image = image / 128.0
         assert tf.test.is_gpu_available()
         image = tf.transpose(image, [0, 3, 1, 2])
@@ -61,9 +60,9 @@ class Model(ModelDesc):
                 out_channel = in_channel
                 stride1 = 1
 
-            with tf.variable_scope(name) as scope:
+            with tf.variable_scope(name):
                 b1 = l if first else BNReLU(l)
-                c1 = Conv2D('conv1', b1, out_channel, stride=stride1, nl=BNReLU)
+                c1 = Conv2D('conv1', b1, out_channel, strides=stride1, activation=BNReLU)
                 c2 = Conv2D('conv2', c1, out_channel)
                 if increase_dim:
                     l = AvgPooling('pool', l, 2)
@@ -72,10 +71,10 @@ class Model(ModelDesc):
                 l = c2 + l
                 return l
 
-        with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling], data_format='NCHW'), \
-                argscope(Conv2D, nl=tf.identity, use_bias=False, kernel_shape=3,
-                         W_init=variance_scaling_initializer(mode='FAN_OUT')):
-            l = Conv2D('conv0', image, 16, nl=BNReLU)
+        with argscope([Conv2D, AvgPooling, BatchNorm, GlobalAvgPooling], data_format='channels_first'), \
+                argscope(Conv2D, use_bias=False, kernel_size=3,
+                         kernel_initializer=tf.variance_scaling_initializer(scale=2.0, mode='fan_out')):
+            l = Conv2D('conv0', image, 16, activation=BNReLU)
             l = residual('res1.0', l, first=True)
             for k in range(1, self.n):
                 l = residual('res1.{}'.format(k), l)
@@ -93,13 +92,13 @@ class Model(ModelDesc):
             # 8,c=64
             l = GlobalAvgPooling('gap', l)
 
-        logits = FullyConnected('linear', l, out_dim=10, nl=tf.identity)
-        prob = tf.nn.softmax(logits, name='output')
+        logits = FullyConnected('linear', l, 10)
+        tf.nn.softmax(logits, name='output')
 
         cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
         cost = tf.reduce_mean(cost, name='cross_entropy_loss')
 
-        wrong = prediction_incorrect(logits, label)
+        wrong = tf.to_float(tf.logical_not(tf.nn.in_top_k(logits, label, 1)), name='wrong_vector')
         # monitor training error
         add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
 
@@ -110,10 +109,10 @@ class Model(ModelDesc):
         add_moving_summary(cost, wd_cost)
 
         add_param_summary(('.*/W', ['histogram']))   # monitor W
-        self.cost = tf.add_n([cost, wd_cost], name='cost')
+        return tf.add_n([cost, wd_cost], name='cost')
 
-    def _get_optimizer(self):
-        lr = get_scalar_var('learning_rate', 0.01, summary=True)
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=0.01, trainable=False)
         opt = tf.train.MomentumOptimizer(lr, 0.9)
         return opt
 
@@ -140,25 +139,6 @@ def get_data(train_or_test):
     return ds
 
 
-def get_config():
-    logger.auto_set_dir()
-    dataset_train = get_data('train')
-    dataset_test = get_data('test')
-
-    return TrainConfig(
-        dataflow=dataset_train,
-        callbacks=[
-            ModelSaver(),
-            InferenceRunner(dataset_test,
-                            [ScalarStats('cost'), ClassificationError()]),
-            ScheduledHyperParamSetter('learning_rate',
-                                      [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
-        ],
-        model=Model(n=NUM_UNITS),
-        max_epoch=400,
-    )
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='comma separated list of GPU(s) to use.')
@@ -172,9 +152,23 @@ if __name__ == '__main__':
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-    config = get_config()
-    if args.load:
-        config.session_init = SaverRestore(args.load)
-    if args.gpu:
-        config.nr_tower = len(args.gpu.split(','))
-    SyncMultiGPUTrainer(config).train()
+    logger.auto_set_dir()
+
+    dataset_train = get_data('train')
+    dataset_test = get_data('test')
+
+    config = TrainConfig(
+        model=Model(n=NUM_UNITS),
+        dataflow=dataset_train,
+        callbacks=[
+            ModelSaver(),
+            InferenceRunner(dataset_test,
+                            [ScalarStats('cost'), ClassificationError('wrong_vector')]),
+            ScheduledHyperParamSetter('learning_rate',
+                                      [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
+        ],
+        max_epoch=400,
+        session_init=SaverRestore(args.load) if args.load else None
+    )
+    nr_gpu = max(get_nr_gpu(), 1)
+    launch_train_with_config(config, SyncMultiGPUTrainerParameterServer(nr_gpu))

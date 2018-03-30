@@ -2,17 +2,18 @@
 # -*- coding: utf-8 -*-
 # File: create-lmdb.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
-import sys
 import os
 import scipy.io.wavfile as wavfile
 import string
 import numpy as np
 import argparse
 
-from tensorpack import *
+import bob.ap
+from tensorpack.dataflow import dftools, DataFlow, LMDBDataPoint
 from tensorpack.utils.argtools import memoized
 from tensorpack.utils.stats import OnlineMoments
-import bob.ap
+from tensorpack.utils import serialize, fs, logger
+from tensorpack.utils.utils import get_tqdm
 
 CHARSET = set(string.ascii_lowercase + ' ')
 PHONEME_LIST = [
@@ -33,6 +34,7 @@ def read_timit_txt(f):
     line = line.replace('.', '').lower()
     line = filter(lambda c: c in CHARSET, line)
     f.close()
+    ret = []
     for c in line:
         ret.append(WORD_DIC[c])
     return np.asarray(ret)
@@ -77,14 +79,13 @@ def get_feature(f):
 
 
 class RawTIMIT(DataFlow):
-
     def __init__(self, dirname, label='phoneme'):
         self.dirname = dirname
         assert os.path.isdir(dirname), dirname
         self.filelists = [k for k in fs.recursive_walk(self.dirname)
                           if k.endswith('.wav')]
         logger.info("Found {} wav files ...".format(len(self.filelists)))
-        assert len(self.filelists), self.filelists
+        assert len(self.filelists), "Found no '.wav' files!"
         assert label in ['phoneme', 'letter'], label
         self.label = label
 
@@ -103,6 +104,7 @@ class RawTIMIT(DataFlow):
 
 def compute_mean_std(db, fname):
     ds = LMDBDataPoint(db, shuffle=False)
+    ds.reset_state()
     o = OnlineMoments()
     with get_tqdm(total=ds.size()) as bar:
         for dp in ds.get_data():
