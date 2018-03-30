@@ -300,8 +300,7 @@ class Trainer(object):
     def train(self,
               callbacks, monitors,
               session_creator, session_init,
-              steps_per_epoch, starting_epoch=1, max_epoch=9999999,
-              do_continue=True):
+              steps_per_epoch, starting_epoch=1, max_epoch=9999999):
         """
         Implemented by three lines:
 
@@ -315,8 +314,6 @@ class Trainer(object):
         """
         self.setup_callbacks(callbacks, monitors)
         self.initialize(session_creator, session_init)
-        if do_continue:
-            starting_epoch = get_global_step_value() // steps_per_epoch + 1
         self.main_loop(steps_per_epoch, starting_epoch, max_epoch)
 
     def train_with_defaults(
