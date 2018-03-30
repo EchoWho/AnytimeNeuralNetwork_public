@@ -127,5 +127,4 @@ if __name__ == '__main__':
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
-    config.nr_tower = args.nr_gpu
-    SyncMultiGPUTrainer(config).train()
+    launch_train_with_config(config, SyncMultiGPUTrainerParameterServer(args.nr_gpu))
