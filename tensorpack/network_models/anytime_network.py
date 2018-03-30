@@ -2112,15 +2112,20 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 l_feats.append(l)
         return l_feats
 
-    def _compute_edge(self, l, ch_out, bnw, l_type='normal', name=""):
+    def _compute_edge(self, l, ch_out, bnw, l_type='normal', dyn_hw=None, name=""):
         if self.network_config.b_type == 'bottleneck':
             bnw_ch = int(bnw * ch_out)
             l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, activation=BNReLU)
-        if l_type == 'normal':
-            stride = 1
-        elif l_type == 'down':
-            stride = 2
-        l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride, activation=BNReLU)
+        if l_type == 'up':
+            assert dyn_hw is not None, dyn_hw
+            l = ResizeImages('bilin_resize', l, dyn_hw)
+            l = Conv2D('conv1x1_bilin'+name, l, ch_out, 1, 1, activation=BNReLU)
+        else:
+            if l_type == 'normal':
+                stride = 1
+            elif l_type == 'down':
+                stride = 2
+            l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride, activation=BNReLU)
         return l
 
     def _compute_block(self, bi, n_units, layer_idx, l_mf):
@@ -2140,7 +2145,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                     else:
                         l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
                         bnw_prev = self.bottleneck_factor[w-1]
-                        lp = self._compute_edge(l_mf[w-1], g/2, bnw_prev, 'down', name='e2')
+                        lp = self._compute_edge(l_mf[w-1], g - g/2, bnw_prev, 'down', name='e2')
                         l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
                     l_feats.append(l)
             #end for w
@@ -2186,6 +2191,43 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         ll_feats = [ [None if l_feats is None else l_feats[-1]] for l_feats in ll_feats ]
         return ll_feats
 
+
+class AnytimeC2FMultiScaleDenseNet(AnytimeMultiScaleDenseNet):
+    
+    def __init__(self, input_size, args):
+        super(AnytimeC2FMultiScaleDenseNet, self).__init__(input_size, args)
+
+    def _compute_block(self, bi, n_units, layer_idx, l_mf):
+        ll_feats = []
+        for k in range(n_units):
+            layer_idx += 1
+            scope_name = self.compute_scope_basename(layer_idx)
+            s_start = bi
+            ### TODO
+            l_feats = [None] * s_start
+            for w in range(s_start, self.num_scales):
+                with tf.variable_scope(scope_name+'.'+str(w)) as scope:
+                    g = self.growth_rate_factor[w] * self.growth_rate
+                    bnw = self.bottleneck_factor[w]
+                    has_prev_scale = w > s_start or (w > 0 and k==0)
+                    if not has_prev_scale:
+                        l = self._compute_edge(l_mf[w], g, bnw, 'normal')
+                    else:
+                        l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
+                        bnw_prev = self.bottleneck_factor[w-1]
+                        lp = self._compute_edge(l_mf[w-1], g - g/2, bnw_prev, 'down', name='e2')
+                        l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
+                    l_feats.append(l)
+            #end for w
+            new_l_mf = [None] * self.num_scales
+            for w in range(s_start, self.num_scales):
+                with tf.variable_scope(scope_name+'.'+str(w)+'.merge') as scope:
+                    new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], 
+                        self.ch_dim, name='merge_feats')
+            ll_feats.append(new_l_mf)
+            l_mf = new_l_mf
+        #end for k in units
+        return ll_feats
 
 
 #####################
