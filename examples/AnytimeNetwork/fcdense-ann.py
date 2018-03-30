@@ -234,7 +234,7 @@ if __name__ == '__main__':
         model_cls = AnytimeFCNCoarseToFine
 
     logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
+    logger.auto_set_dir(action='k')
     fs.set_dataset_path(args.data_dir)
 
     ## 

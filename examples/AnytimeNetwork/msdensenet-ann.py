@@ -128,7 +128,7 @@ if __name__ == '__main__':
     args.ds_name="imagenet"
 
     logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
+    logger.auto_set_dir(action='k')
     logger.info("Arguments: {}".format(args))
     logger.info("TF version: {}".format(tf.__version__))
 
