@@ -3,49 +3,38 @@
 # File: dump-model-params.py
 # Author: Yuxin Wu <ppwwyyxx@gmail.com>
 
-import numpy as np
 import argparse
 import tensorflow as tf
-import imp
 
-from tensorpack import TowerContext, logger, ModelFromMetaGraph
-from tensorpack.tfutils import sessinit, varmanip
+from tensorpack import logger
+from tensorpack.tfutils import varmanip, get_model_loader
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--config', help='config file')
-parser.add_argument('--meta', help='metagraph file')
-parser.add_argument(dest='model')
-parser.add_argument(dest='output')
-args = parser.parse_args()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Keep only TRAINABLE and MODEL variables in a checkpoint.')
+    parser.add_argument('--meta', help='metagraph file', required=True)
+    parser.add_argument(dest='input', help='input model file, has to be a TF checkpoint')
+    parser.add_argument(dest='output', help='output model file, can be npz or TF checkpoint')
+    args = parser.parse_args()
 
-assert args.config or args.meta, "Either config or metagraph must be present!"
-
-with tf.Graph().as_default() as G:
-    if args.config:
-        logger.warn("Using a config script is not reliable. Please use metagraph.")
-        MODEL = imp.load_source('config_script', args.config).Model
-        M = MODEL()
-        with TowerContext('', is_training=False):
-            M.build_graph(M.get_reused_placehdrs())
-    else:
-        M = ModelFromMetaGraph(args.meta)
+    tf.train.import_meta_graph(args.meta, clear_devices=True)
 
     # loading...
-    if args.model.endswith('.npy'):
-        init = sessinit.DictRestore(np.load(args.model).item())
-    else:
-        init = sessinit.SaverRestore(args.model)
+    init = get_model_loader(args.input)
     sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
     sess.run(tf.global_variables_initializer())
+    sess.run(tf.local_variables_initializer())
     init.init(sess)
 
     # dump ...
     with sess.as_default():
-        if args.output.endswith('npy'):
+        if args.output.endswith('npy') or args.output.endswith('npz'):
             varmanip.dump_session_params(args.output)
         else:
             var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
             var.extend(tf.get_collection(tf.GraphKeys.MODEL_VARIABLES))
+            gvars = set([k.name for k in tf.global_variables()])
+            var = [v for v in var if v.name in gvars]
             var_dict = {}
             for v in var:
                 name = varmanip.get_savename_from_varname(v.name)

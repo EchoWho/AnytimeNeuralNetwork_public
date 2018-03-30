@@ -7,16 +7,14 @@ import cv2
 import numpy as np
 import tensorflow as tf
 import glob
-import pickle
 import os
-import sys
 import argparse
 
+
 from tensorpack import *
-from tensorpack.utils.viz import *
+from tensorpack.utils.viz import stack_patches
 from tensorpack.tfutils.summary import add_moving_summary
 from tensorpack.tfutils.scope_utils import auto_reuse_variable_scope
-import tensorpack.tfutils.symbolic_functions as symbf
 from GAN import GANTrainer, GANModelDesc
 
 """
@@ -44,14 +42,31 @@ NF = 64  # number of filter
 
 def BNLReLU(x, name=None):
     x = BatchNorm('bn', x)
-    return LeakyReLU(x, name=name)
+    return tf.nn.leaky_relu(x, alpha=0.2, name=name)
+
+
+def visualize_tensors(name, imgs, scale_func=lambda x: (x + 1.) * 128., max_outputs=1):
+    """Generate tensor for TensorBoard (casting, clipping)
+
+    Args:
+        name: name for visualization operation
+        *imgs: multiple tensors as list
+        scale_func: scale input tensors to fit range [0, 255]
+
+    Example:
+        visualize_tensors('viz1', [img1])
+        visualize_tensors('viz2', [img1, img2, img3], max_outputs=max(30, BATCH))
+    """
+    xy = scale_func(tf.concat(imgs, axis=2))
+    xy = tf.cast(tf.clip_by_value(xy, 0, 255), tf.uint8, name='viz')
+    tf.summary.image(name, xy, max_outputs=30)
 
 
 class Model(GANModelDesc):
-    def _get_inputs(self):
+    def inputs(self):
         SHAPE = 256
-        return [InputDesc(tf.float32, (None, SHAPE, SHAPE, IN_CH), 'input'),
-                InputDesc(tf.float32, (None, SHAPE, SHAPE, OUT_CH), 'output')]
+        return [tf.placeholder(tf.float32, (None, SHAPE, SHAPE, IN_CH), 'input'),
+                tf.placeholder(tf.float32, (None, SHAPE, SHAPE, OUT_CH), 'output')]
 
     def generator(self, imgs):
         # imgs: input: 256x256xch
@@ -59,56 +74,53 @@ class Model(GANModelDesc):
         with argscope(BatchNorm, use_local_stat=True), \
                 argscope(Dropout, is_training=True):
             # always use local stat for BN, and apply dropout even in testing
-            with argscope(Conv2D, kernel_shape=4, stride=2, nl=BNLReLU):
-                e1 = Conv2D('conv1', imgs, NF, nl=LeakyReLU)
+            with argscope(Conv2D, kernel_size=4, strides=2, activation=BNLReLU):
+                e1 = Conv2D('conv1', imgs, NF, activation=tf.nn.leaky_relu)
                 e2 = Conv2D('conv2', e1, NF * 2)
                 e3 = Conv2D('conv3', e2, NF * 4)
                 e4 = Conv2D('conv4', e3, NF * 8)
                 e5 = Conv2D('conv5', e4, NF * 8)
                 e6 = Conv2D('conv6', e5, NF * 8)
                 e7 = Conv2D('conv7', e6, NF * 8)
-                e8 = Conv2D('conv8', e7, NF * 8, nl=BNReLU)  # 1x1
-            with argscope(Deconv2D, nl=BNReLU, kernel_shape=4, stride=2):
+                e8 = Conv2D('conv8', e7, NF * 8, activation=BNReLU)  # 1x1
+            with argscope(Conv2DTranspose, activation=BNReLU, kernel_size=4, strides=2):
                 return (LinearWrap(e8)
-                        .Deconv2D('deconv1', NF * 8)
+                        .Conv2DTranspose('deconv1', NF * 8)
                         .Dropout()
                         .ConcatWith(e7, 3)
-                        .Deconv2D('deconv2', NF * 8)
+                        .Conv2DTranspose('deconv2', NF * 8)
                         .Dropout()
                         .ConcatWith(e6, 3)
-                        .Deconv2D('deconv3', NF * 8)
+                        .Conv2DTranspose('deconv3', NF * 8)
                         .Dropout()
                         .ConcatWith(e5, 3)
-                        .Deconv2D('deconv4', NF * 8)
+                        .Conv2DTranspose('deconv4', NF * 8)
                         .ConcatWith(e4, 3)
-                        .Deconv2D('deconv5', NF * 4)
+                        .Conv2DTranspose('deconv5', NF * 4)
                         .ConcatWith(e3, 3)
-                        .Deconv2D('deconv6', NF * 2)
+                        .Conv2DTranspose('deconv6', NF * 2)
                         .ConcatWith(e2, 3)
-                        .Deconv2D('deconv7', NF * 1)
+                        .Conv2DTranspose('deconv7', NF * 1)
                         .ConcatWith(e1, 3)
-                        .Deconv2D('deconv8', OUT_CH, nl=tf.tanh)())
+                        .Conv2DTranspose('deconv8', OUT_CH, activation=tf.tanh)())
 
     @auto_reuse_variable_scope
     def discriminator(self, inputs, outputs):
         """ return a (b, 1) logits"""
         l = tf.concat([inputs, outputs], 3)
-        with argscope(Conv2D, kernel_shape=4, stride=2, nl=BNLReLU):
+        with argscope(Conv2D, kernel_size=4, strides=2, activation=BNLReLU):
             l = (LinearWrap(l)
-                 .Conv2D('conv0', NF, nl=LeakyReLU)
+                 .Conv2D('conv0', NF, activation=tf.nn.leaky_relu)
                  .Conv2D('conv1', NF * 2)
                  .Conv2D('conv2', NF * 4)
-                 .Conv2D('conv3', NF * 8, stride=1, padding='VALID')
-                 .Conv2D('convlast', 1, stride=1, padding='VALID', nl=tf.identity)())
+                 .Conv2D('conv3', NF * 8, strides=1, padding='VALID')
+                 .Conv2D('convlast', 1, strides=1, padding='VALID', activation=tf.identity)())
         return l
 
-    def _build_graph(self, inputs):
-        input, output = inputs
+    def build_graph(self, input, output):
         input, output = input / 128.0 - 1, output / 128.0 - 1
 
-        with argscope([Conv2D, Deconv2D],
-                      W_init=tf.truncated_normal_initializer(stddev=0.02)), \
-                argscope(LeakyReLU, alpha=0.2):
+        with argscope([Conv2D, Conv2DTranspose], kernel_initializer=tf.truncated_normal_initializer(stddev=0.02)):
             with tf.variable_scope('gen'):
                 fake_output = self.generator(input)
             with tf.variable_scope('discrim'):
@@ -126,14 +138,13 @@ class Model(GANModelDesc):
         if OUT_CH == 1:
             output = tf.image.grayscale_to_rgb(output)
             fake_output = tf.image.grayscale_to_rgb(fake_output)
-        viz = (tf.concat([input, output, fake_output], 2) + 1.0) * 128.0
-        viz = tf.cast(tf.clip_by_value(viz, 0, 255), tf.uint8, name='viz')
-        tf.summary.image('input,output,fake', viz, max_outputs=max(30, BATCH))
+
+        visualize_tensors('input,output,fake', [input, output, fake_output], max_outputs=max(30, BATCH))
 
         self.collect_variables()
 
-    def _get_optimizer(self):
-        lr = symbolic_functions.get_scalar_var('learning_rate', 2e-4, summary=True)
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=2e-4, trainable=False)
         return tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3)
 
 
@@ -166,21 +177,6 @@ def get_data():
     ds = BatchData(ds, BATCH)
     ds = PrefetchData(ds, 100, 1)
     return ds
-
-
-def get_config():
-    logger.auto_set_dir()
-    dataset = get_data()
-    return TrainConfig(
-        dataflow=dataset,
-        callbacks=[
-            PeriodicTrigger(ModelSaver(), every_k_epochs=3),
-            ScheduledHyperParamSetter('learning_rate', [(200, 1e-4)])
-        ],
-        model=Model(),
-        steps_per_epoch=dataset.size(),
-        max_epoch=300,
-    )
 
 
 def sample(datadir, model_path):
@@ -218,9 +214,19 @@ if __name__ == '__main__':
     BATCH = args.batch
 
     if args.sample:
+        assert args.load
         sample(args.data, args.load)
     else:
-        config = get_config()
-        if args.load:
-            config.session_init = SaverRestore(args.load)
-        GANTrainer(config).train()
+        logger.auto_set_dir()
+
+        data = QueueInput(get_data())
+
+        GANTrainer(data, Model()).train_with_defaults(
+            callbacks=[
+                PeriodicTrigger(ModelSaver(), every_k_epochs=3),
+                ScheduledHyperParamSetter('learning_rate', [(200, 1e-4)])
+            ],
+            steps_per_epoch=data.size(),
+            max_epoch=300,
+            session_init=SaverRestore(args.load) if args.load else None
+        )
