@@ -6,8 +6,7 @@ import tensorflow as tf
 from tensorpack import *
 from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
-from tensorpack.utils import logger
-from tensorpack.utils import utils
+from tensorpack.utils import logger, utils, fs
 
 from tensorpack.network_models import anytime_network
 from tensorpack.network_models.anytime_network import \
