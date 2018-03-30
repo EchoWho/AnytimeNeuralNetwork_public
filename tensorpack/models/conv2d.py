@@ -74,13 +74,14 @@ def Conv2D(
 
         # compute the flops of the conv 
         in_shape = inputs.get_shape().as_list()
+        channel_axis = 3 if data_format == 'channels_last' else 1
+        h_dim = 1 if data_format == 'channels_last' else 2
+        w_dim = h_dim + 1
         in_channel = in_shape[channel_axis]
         out_channel = filters
         kernel_shape = shape2d(kernel_size)
         stride = shape4d(strides, data_format=data_format)
         flops = 1.0 * in_channel * out_channel * kernel_shape[0] * kernel_shape[1]
-        h_dim = 1 if data_format == 'channels_last' else 2
-        w_dim = h_dim + 1
         if in_shape[h_dim] is not None:
             flops *= in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
         ret.info = VariableHolder(flops=flops)
