@@ -91,3 +91,4 @@ old_throwaway
 *.gz
 *.npy
 train_log
+scripts/*.sh
