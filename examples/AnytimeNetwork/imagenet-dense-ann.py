@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
     # directory setup
     logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
+    logger.auto_set_dir(action='k')
 
     config = get_config(model_cls, lr_schedule)
     if args.load and os.path.exists(args.load):
