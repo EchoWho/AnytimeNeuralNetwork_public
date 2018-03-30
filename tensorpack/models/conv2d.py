@@ -9,7 +9,7 @@ from ..tfutils.common import get_tf_version_number
 from ..utils.argtools import shape2d, shape4d, get_data_format
 from .tflayer import rename_get_variable, convert_to_tflayer_args
 
-__all__ = ['Conv2D', 'Deconv2D', 'Conv2DTranspose', 'GroupedConv2D']
+__all__ = ['Conv2D', 'Deconv2D', 'Conv2DTranspose', 'GroupedConv2D', 'ResizeImages']
 
 
 @layer_register(log_shape=True)
@@ -79,16 +79,17 @@ def Conv2D(
         kernel_shape = shape2d(kernel_size)
         stride = shape4d(strides, data_format=data_format)
         flops = 1.0 * in_channel * out_channel * kernel_shape[0] * kernel_shape[1]
-        h_dim = 1 if data_format == 'NHWC' else 2
+        h_dim = 1 if data_format == 'channels_last' else 2
         w_dim = h_dim + 1
         if in_shape[h_dim] is not None:
             flops *= in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
+        ret.info = VariableHolder(flops=flops)
 
     else:
         # group conv implementation
         data_format = get_data_format(data_format, tfmode=False)
         in_shape = inputs.get_shape().as_list()
-        channel_axis = 3 if data_format == 'NHWC' else 1
+        channel_axis = -1 if data_format == 'channels_last' else 1
         in_channel = in_shape[channel_axis]
         assert in_channel is not None, "[Conv2D] Input cannot have unknown channel!"
         assert in_channel % split == 0
@@ -150,7 +151,8 @@ def Conv2DTranspose(
         bias_initializer=tf.zeros_initializer(),
         kernel_regularizer=None,
         bias_regularizer=None,
-        activity_regularizer=None):
+        activity_regularizer=None,
+        dyn_hw=None):
     """
     A wrapper around `tf.layers.Conv2DTranspose`.
     Some differences to maintain backward-compatibility:
@@ -163,7 +165,6 @@ def Conv2DTranspose(
     * ``W``: weights
     * ``b``: bias
     """
-
     with rename_get_variable({'kernel': 'W', 'bias': 'b'}):
         layer = tf.layers.Conv2DTranspose(
             filters,
@@ -188,64 +189,35 @@ def Conv2DTranspose(
 
 Deconv2D = Conv2DTranspose
 
-#    in_shape = x.get_shape().as_list()
-#    channel_axis = 3 if data_format == 'NHWC' else 1
-#    in_channel = in_shape[channel_axis]
-#    assert in_channel is not None, "[Deconv2D] Input cannot have unknown channel!"
-#    kernel_shape = shape2d(kernel_shape)
-#    stride2d = shape2d(stride)
-#    stride4d = shape4d(stride, data_format=data_format)
-#    padding = padding.upper()
-#    in_shape_dyn = tf.shape(x)
-#
-#    if isinstance(out_shape, int) and dyn_hw is None:
-#        out_channel = out_shape
-#        if data_format == 'NHWC':
-#            shp3_0 = StaticDynamicShape(in_shape[1], in_shape_dyn[1]).apply(lambda x: stride2d[0] * x)
-#            shp3_1 = StaticDynamicShape(in_shape[2], in_shape_dyn[2]).apply(lambda x: stride2d[1] * x)
-#            shp3_dyn = [shp3_0.dynamic, shp3_1.dynamic, out_channel]
-#            shp3_static = [shp3_0.static, shp3_1.static, out_channel]
-#        else:
-#            shp3_0 = StaticDynamicShape(in_shape[2], in_shape_dyn[2]).apply(lambda x: stride2d[0] * x)
-#            shp3_1 = StaticDynamicShape(in_shape[3], in_shape_dyn[3]).apply(lambda x: stride2d[1] * x)
-#            shp3_dyn = [out_channel, shp3_0.dynamic, shp3_1.dynamic]
-#            shp3_static = [out_channel, shp3_0.static, shp3_1.static]
-#    elif isinstance(out_shape, int) and isinstance(dyn_hw, list):
-#        out_channel = out_shape
-#        if data_format == 'NHWC':
-#            shp3_dyn = dyn_hw + [out_channel]
-#            shp3_static = [None, None, out_channel]
-#        else:
-#            shp3_dyn = [out_channel] + dyn_hw
-#            shp3_static = [out_channel, None, None]
-#    else:
-#        for k in out_shape:
-#            if not isinstance(k, int):
-#                raise ValueError("[Deconv2D] out_shape {} is invalid!".format(k))
-#        out_channel = out_shape[channel_axis - 1]   # out_shape doesn't have batch
-#        shp3_static = shp3_dyn = out_shape
-#    filter_shape = kernel_shape + [out_channel, in_channel]
-#
-#    if b_init is None:
-#        b_init = tf.constant_initializer()
-#    W = tf.get_variable('W', filter_shape, initializer=W_init)
-#    #W_bias = get_deconv_filter(filter_shape)
-#    W_sum = W #+ W_bias
-#
-#    out_shape_dyn = tf.stack([tf.shape(x)[0]] + shp3_dyn)
-#    conv = tf.nn.conv2d_transpose(
-#        x, W_sum, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
-#    conv.set_shape(tf.TensorShape([None] + shp3_static))
-#    ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
-#
-#    ret.variables = VariableHolder(W=W)
-#    if use_bias:
-#        ret.variables.b = b
-#    return ret
-#====================
-#<<<<<<<<<<<<<<
 
+@layer_register(log_shape=True)
+def ResizeImages(
+    images, 
+    size, 
+    method=tf.image.ResizeMethod.BILINEAR, 
+    align_corners=False,
+    data_format='channels_last'):
+    """
+        Use tf.image.resize_images to resize feature map. 
+        We have to do some transposing first before using image resize if the 
+        data_format is 'channels_first', because resize_images only accept 
+        'channels_last'. 
 
+        images : tensor representing the feature map to resize
+        size : 2D int32 tensor of the new shape (h, w)
+        method : Resize method see tf.image.ResizeMethod 
+        align_corners : Preserving the corner pixels ?
+        data_format : current data_format of the inputs 'channels_first' or 'channels_last'
+    """
+    l = images
+    if data_format == 'channels_first':
+        l = tf.transpose(l, [0,2,3,1])
+    l = tf.image.resize_images(l, size, method, align_corners)
+    if data_format == 'channels_first':
+        l = tf.transpose(l, [0,3,1,2])
+    ret = tf.identity(l, name='output')
+    return ret
+ 
 
 @layer_register()
 def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
@@ -325,8 +297,6 @@ def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
     return ret
 
 
-
-
 def get_deconv_filter(f_shape):
     width = f_shape[0]
     heigh = f_shape[1]
@@ -346,3 +316,62 @@ def get_deconv_filter(f_shape):
     #return tf.get_variable(name="up_filter", initializer=init,
     #                       shape=weights.shape)
     return tf.constant(weights, dtype=tf.float32)
+
+#    in_shape = x.get_shape().as_list()
+#    channel_axis = 3 if data_format == 'NHWC' else 1
+#    in_channel = in_shape[channel_axis]
+#    assert in_channel is not None, "[Deconv2D] Input cannot have unknown channel!"
+#    kernel_shape = shape2d(kernel_shape)
+#    stride2d = shape2d(stride)
+#    stride4d = shape4d(stride, data_format=data_format)
+#    padding = padding.upper()
+#    in_shape_dyn = tf.shape(x)
+#
+#    if isinstance(out_shape, int) and dyn_hw is None:
+#        out_channel = out_shape
+#        if data_format == 'NHWC':
+#            shp3_0 = StaticDynamicShape(in_shape[1], in_shape_dyn[1]).apply(lambda x: stride2d[0] * x)
+#            shp3_1 = StaticDynamicShape(in_shape[2], in_shape_dyn[2]).apply(lambda x: stride2d[1] * x)
+#            shp3_dyn = [shp3_0.dynamic, shp3_1.dynamic, out_channel]
+#            shp3_static = [shp3_0.static, shp3_1.static, out_channel]
+#        else:
+#            shp3_0 = StaticDynamicShape(in_shape[2], in_shape_dyn[2]).apply(lambda x: stride2d[0] * x)
+#            shp3_1 = StaticDynamicShape(in_shape[3], in_shape_dyn[3]).apply(lambda x: stride2d[1] * x)
+#            shp3_dyn = [out_channel, shp3_0.dynamic, shp3_1.dynamic]
+#            shp3_static = [out_channel, shp3_0.static, shp3_1.static]
+#    elif isinstance(out_shape, int) and isinstance(dyn_hw, list):
+#        out_channel = out_shape
+#        if data_format == 'NHWC':
+#            shp3_dyn = dyn_hw + [out_channel]
+#            shp3_static = [None, None, out_channel]
+#        else:
+#            shp3_dyn = [out_channel] + dyn_hw
+#            shp3_static = [out_channel, None, None]
+#    else:
+#        for k in out_shape:
+#            if not isinstance(k, int):
+#                raise ValueError("[Deconv2D] out_shape {} is invalid!".format(k))
+#        out_channel = out_shape[channel_axis - 1]   # out_shape doesn't have batch
+#        shp3_static = shp3_dyn = out_shape
+#    filter_shape = kernel_shape + [out_channel, in_channel]
+#
+#    if b_init is None:
+#        b_init = tf.constant_initializer()
+#    W = tf.get_variable('W', filter_shape, initializer=W_init)
+#    #W_bias = get_deconv_filter(filter_shape)
+#    W_sum = W #+ W_bias
+#
+#    out_shape_dyn = tf.stack([tf.shape(x)[0]] + shp3_dyn)
+#    conv = tf.nn.conv2d_transpose(
+#        x, W_sum, out_shape_dyn, stride4d, padding=padding, data_format=data_format)
+#    conv.set_shape(tf.TensorShape([None] + shp3_static))
+#    ret = nl(tf.nn.bias_add(conv, b, data_format=data_format) if use_bias else conv, name='output')
+#
+#    ret.variables = VariableHolder(W=W)
+#    if use_bias:
+#        ret.variables.b = b
+#    return ret
+#====================
+#<<<<<<<<<<<<<<
+
+
