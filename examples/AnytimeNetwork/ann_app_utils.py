@@ -43,8 +43,8 @@ def grep_starting_epoch(load, steps_per_epoch):
             name, ext = os.path.splitext(fn)
             if name[:5] == 'model' and ext == '.index':
                 step = int(name[name.rfind('-')+1:])
-                if global_step > max_gs:
-                    max_step = step
+                max_step = max(max_step, step)
+                logger.info("{} is at step {}".format(fn, step)) 
         starting_epoch = 1 + max_step / steps_per_epoch
     return starting_epoch
 
@@ -225,7 +225,7 @@ def ilsvrc_train_config(args, model_cls, lr_schedule, max_epoch):
     return TrainConfig(
         dataflow=dataset_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_checkpoint_every_n_hours=100),
+            ModelSaver(checkpoint_dir=args.model_dir, max_to_keep=2, keep_checkpoint_every_n_hours=100),
             InferenceRunner(dataset_val, classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
             HumanHyperParamSetter('learning_rate'),
@@ -310,6 +310,10 @@ def cifar_svhn_train_or_test(args, model_cls):
 
     # svhn/cifar are small enough so that we restart from scratch if interrupted.
     steps_per_epoch = ds_train.size() // args.nr_gpu
+    starting_epoch = grep_starting_epoch(args.load, steps_per_epoch)
+    logger.info("The starting epoch is {}".format(starting_epoch))
+    args.init_lr = grep_init_lr(starting_epoch, lr_schedule)
+    logger.info("The starting learning rate is {}".format(args.init_lr))
 
     model = model_cls(INPUT_SIZE, args)
     classification_cbs = model.compute_classification_callbacks()
@@ -318,7 +322,7 @@ def cifar_svhn_train_or_test(args, model_cls):
     config = TrainConfig(
         dataflow=ds_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_checkpoint_every_n_hours=100),
+            ModelSaver(checkpoint_dir=args.model_dir, max_to_keep=2, keep_checkpoint_every_n_hours=100),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
@@ -328,6 +332,7 @@ def cifar_svhn_train_or_test(args, model_cls):
         monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
+        starting_epoch=starting_epoch
     )
     if args.load and os.path.exists(args.load):
         config.session_init = SaverRestore(args.load)
