@@ -115,8 +115,7 @@ def compute_cfg(options):
         b_type = 'bottleneck'
         return NetworkConfig(n_units_per_block, b_type, s_type)
  
-    elif hasattr(options, 'densenet_version') and options.densenet_version is not None:
-        assert options.fcdense_depth is not None
+    elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.densenet_version in ['atv1', 'loglog', 'atv2']:
             if options.fcdense_depth == 103:
                 n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
@@ -872,7 +871,8 @@ class AnytimeResNeXt(AnytimeResnet):
             l = tf.nn.relu(l)
             l = (LinearWrap(l)
                 .Conv2D('conv1x1_0', self.num_paths * ch_per_path, 1, activation=BNReLU)
-                .Conv2D('conv3x3_1', self.num_paths * ch_per_path, 3, activation=BNReLU, split=self.num_paths)
+                .Conv2D('conv3x3_1', self.num_paths * ch_per_path, 3, strides=stride, \
+                    activation=BNReLU, split=self.num_paths)
                 .Conv2D('conv1x1_2', ch_base*4, 1)())
             l = BatchNorm('bn_3', l)
 
