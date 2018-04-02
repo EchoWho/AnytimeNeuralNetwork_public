@@ -633,7 +633,6 @@ class AnytimeNetwork(ModelDesc):
         #end argscope
 
         # weight decay on all W on conv layers for regularization
-        #wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W|.*bn.*/gamma|.*bn.*/beta', tf.nn.l2_loss))
         wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss))
         wd_cost = tf.identity(wd_cost, name='wd_cost')
         total_cost = tf.identity(total_cost, name='sum_losses')
