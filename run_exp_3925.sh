@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---adaloss_gamma=0.07 --adaloss_update_per=1 --adaloss_momentum=0.9 --adaloss_final_extra=0.5 --sum_rand_ratio=0 --is_select_arr -f=5 --samloss=100  -d=101 -s=3 --batch_size=64 --nr_gpu=4 --resnet_version=resnext --opt_at=-1 -c=64 --num_classes=1000 
+--adaloss_gamma=0.07 --adaloss_update_per=1 --adaloss_momentum=0.9 --adaloss_final_extra=0.5 --sum_rand_ratio=0 --is_select_arr -f=5 --samloss=100  -d=101 -s=3 --batch_size=128 --nr_gpu=4 --resnet_version=resnext --opt_at=-1 -c=64 --num_classes=1000 
