@@ -67,4 +67,4 @@ python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-dense-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
---adaloss_gamma=0.07 --adaloss_update_per=1 --adaloss_momentum=0.9 --adaloss_final_extra=0.5 --sum_rand_ratio=0 --is_select_arr -f=5 --samloss=100  --densenet_depth=265 -s=24 --batch_size=64 --nr_gpu=4 --densenet_version=dense --min_predict_unit=10 --reduction_ratio=0.5 --dropout_kp=0.9 --opt_at=-1 -g=32 --num_classes=1000 
+--adaloss_gamma=0.07 --adaloss_update_per=1 --adaloss_momentum=0.9 --adaloss_final_extra=0.5 --sum_rand_ratio=0 --is_select_arr -f=5 --samloss=100  --densenet_depth=265 -s=24 --batch_size=128 --nr_gpu=4 --densenet_version=dense --min_predict_unit=10 --reduction_ratio=0.5 --dropout_kp=0.9 --opt_at=-1 -g=32 --num_classes=1000 
