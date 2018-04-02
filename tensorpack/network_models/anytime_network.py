@@ -633,8 +633,7 @@ class AnytimeNetwork(ModelDesc):
         #end argscope
 
         # weight decay on all W on conv layers for regularization
-        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W', tf.nn.l2_loss))
-        #wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/b', tf.nn.l2_loss))
+        wd_cost = tf.add(wd_cost, wd_w * regularize_cost('.*conv.*/W|.*bn.*/gamma|.*bn.*/beta', tf.nn.l2_loss))
         wd_cost = tf.identity(wd_cost, name='wd_cost')
         total_cost = tf.identity(total_cost, name='sum_losses')
         add_moving_summary(total_cost, wd_cost)
@@ -724,7 +723,6 @@ class AnytimeResnet(AnytimeNetwork):
         l_mid_feats = []
         with tf.variable_scope(name+'.0.mid') as scope:
             l = BatchNorm('bn0', l_feats[0])
-            # The first round doesn't use pre relu according to pyramidial deep net
             l = tf.nn.relu(l)
             l = Conv2D('conv1', l, out_channel, 3, strides=stride1)
             l = BatchNorm('bn1', l)
