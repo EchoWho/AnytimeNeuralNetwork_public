@@ -23,6 +23,14 @@
 # 3903..3911
 # Num gpus : 8
 
+# Exp 96 (ResNext with adaloss)
+# 3914..3925
+# Num gpus : 4
+
+# Exp 97 (Copy of 96 w/ 8 gpus)
+# 3928..3939
+# Num gpus : 8
+
 # FOR I IN {3531..3539}
 # do
 # 	USERNAME="dedey"
@@ -54,7 +62,7 @@
 # done
 
 
-for i in {3892..3900} # 4 gpu ; {3903..3911} # 8 gpu ; 
+for i in {3892..3900} {3914..3925} # 4 gpu ; {3903..3911} {3928..3939} # 8 gpu ; 
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -339,4 +347,12 @@ done
 
 # Exp 95 (Copy of 94 on 8 gpus)
 # 3903..3911
+# Num gpus : 8
+
+# Exp 96 (ResNext with adaloss)
+# 3914..3925
+# Num gpus : 4
+
+# Exp 97 (Copy of 96 w/ 8 gpus)
+# 3928..3939
 # Num gpus : 8
