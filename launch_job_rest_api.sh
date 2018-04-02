@@ -46,11 +46,11 @@
 # done
 
 
-for i in {3569..3784} {3787..3889} # 1 GPU
+for i in {3157..3204}
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
-	CLUSTER="cam"
+	CLUSTER="eu1"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
