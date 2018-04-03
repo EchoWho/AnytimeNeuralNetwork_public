@@ -16,15 +16,6 @@ from tensorflow.contrib.layers import xavier_initializer
 from collections import namedtuple
 import bisect
 
-"""
-Data format, and the resulting dimension for the channels.
-('NCHW',1) or ('NHWC', 3)
-"""
-#self.data_format='NCHW'
-#self.ch_dim=1 if self.data_format == 'NCHW' else 3
-#self.h_dim=1 + int(self.data_format == 'NCHW')
-#self.w_dim=2 + int(self.data_format == 'NCHW')
-
 # Best choice for samloss for AANN if running anytime networks.
 BEST_AANN_METHOD=6
 # method id for not using AANN
@@ -124,8 +115,7 @@ def compute_cfg(options):
         b_type = 'bottleneck'
         return NetworkConfig(n_units_per_block, b_type, s_type)
  
-    elif hasattr(options, 'densenet_version') and options.densenet_version is not None:
-        assert options.fcdense_depth is not None
+    elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.densenet_version in ['atv1', 'loglog', 'atv2']:
             if options.fcdense_depth == 103:
                 n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
@@ -157,7 +147,7 @@ def compute_cfg(options):
 def compute_total_units(options, config=None):
     if config is None:
         config = compute_cfg(options)
-    return sum(config.n_units_per_block) * options.width
+    return sum(config.n_units_per_block)
 
 def parser_add_common_arguments(parser):
     """
@@ -174,10 +164,10 @@ def parser_add_common_arguments(parser):
                         +' Only used if num_units is set',
                         type=int, default=3)
     parser.add_argument('-w', '--width',
-                        help='width of anytime network. usually set to 1 for memory issues',
-                        type=int, default=1)
+                        help='(Legacy) the width of the anytime layer grid. Set to 1',
+                        type=int, default=1, choices=[1])
     parser.add_argument('-c', '--init_channel',
-                        help='channel at beginning of each width of the network',
+                        help='number of channels at the start of the network',
                         type=int, default=16)
     parser.add_argument('-s', '--stack', 
                         help='number of units per stack, '
@@ -227,11 +217,11 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--adaloss_gamma', help='Gamma for adaloss',
                         type=np.float32, default=0.07)
     parser.add_argument('--adaloss_momentum', help='Adaloss momentum',
-                        type=np.float32, default=0.99)
+                        type=np.float32, default=0.9)
     parser.add_argument('--adaloss_update_per', help='Adaloss update weights every number of iter',
-                        type=int, default=100)
+                        type=int, default=1)
     parser.add_argument('--adaloss_final_extra', help='Adaloss up-weights the final loss',
-                        type=np.float32, default=0.0)
+                        type=np.float32, default=0.5)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
                         type=np.float32, default=2.0)
     parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
@@ -271,8 +261,8 @@ def parser_add_common_arguments(parser):
                         type=float, default=1e-4)
     parser.add_argument('--w_init', help='method used for initializing W',
                         type=str, default='var_scale', choices=['var_scale', 'xavier'])
-    parser.add_argument('--data_format', help='data format NCHW or NHWC',
-                        type=str, default='NCHW', choices=['NCHW', 'NHWC'])
+    parser.add_argument('--data_format', help='data format',
+                        type=str, default='channels_first', choices=['channels_first', 'channels_last'])
     parser.add_argument('--use_bias', help='Whether convolutions should use bias',
                         default=False, action='store_true')
 
@@ -305,8 +295,8 @@ class AnytimeNetwork(ModelDesc):
         self.options = args
         
         self.data_format = args.data_format
-        self.ch_dim = 1 if self.data_format == 'NCHW' else 3
-        self.h_dim = 1 + int(self.data_format == 'NCHW')
+        self.ch_dim = 1 if self.data_format == 'channels_first' else 3
+        self.h_dim = 1 + int(self.data_format == 'channels_first')
         self.w_dim = self.h_dim + 1
 
         self.input_size = input_size
@@ -364,12 +354,9 @@ class AnytimeNetwork(ModelDesc):
     
 
     def _get_inputs(self):
-        additional_input = []
-        if self.is_model_training() and self.alter_label:
-            additional_input = [InputDesc(tf.float32, [None, self.num_classes], 'alter_label')]
         return [InputDesc(self.input_type, 
                     [None, self.input_size, self.input_size, 3],'input'),
-                InputDesc(tf.int32, [None], 'label')] + additional_input
+                InputDesc(tf.int32, [None], 'label')]
 
 
     def compute_scope_basename(self, layer_idx):
@@ -403,18 +390,17 @@ class AnytimeNetwork(ModelDesc):
         for n_units in self.network_config.n_units_per_block:
             for k in range(n_units):
                 layer_idx += 1
-                for wi in range(self.width):
-                    unit_idx += 1
-                    weight = self.weights[unit_idx]
-                    if weight > 0:
-                        scope_name = self.compute_scope_basename(layer_idx)
-                        scope_name += '.'+str(wi)+'.pred/' 
-                        vcs.append(ClassificationError(\
-                            wrong_tensor_name=scope_name+'wrong-top1:0', 
-                            summary_name=scope_name+'val_err'))
-                        vcs.append(ClassificationError(\
-                            wrong_tensor_name=scope_name+'wrong-top5:0', 
-                            summary_name=scope_name+'val-err5'))
+                unit_idx += 1
+                weight = self.weights[unit_idx]
+                if weight > 0:
+                    scope_name = self.compute_scope_basename(layer_idx)
+                    scope_name += '.0.pred/' 
+                    vcs.append(ClassificationError(\
+                        wrong_tensor_name=scope_name+'wrong-top1:0', 
+                        summary_name=scope_name+'val_err'))
+                    vcs.append(ClassificationError(\
+                        wrong_tensor_name=scope_name+'wrong-top5:0', 
+                        summary_name=scope_name+'val-err5'))
         return vcs
 
     def compute_loss_select_callbacks(self):
@@ -467,16 +453,15 @@ class AnytimeNetwork(ModelDesc):
 
     def _compute_init_l_feats(self, image):
         l_feats = []
-        for w in range(self.width):
-            with tf.variable_scope('init_conv'+str(w)) as scope:
-                if self.network_config.s_type == 'basic':
-                    l = Conv2D('conv0', image, self.init_channel, 3) #, nl=BNReLU) 
-                else:
-                    assert self.network_config.s_type == 'imagenet'
-                    l = (LinearWrap(image)
-                        .Conv2D('conv0', self.init_channel, 7, stride=2, nl=BNReLU)
-                        .MaxPooling('pool0', shape=3, stride=2, padding='SAME')())
-                l_feats.append(l)
+        with tf.variable_scope('init_conv0') as scope:
+            if self.network_config.s_type == 'basic':
+                l = Conv2D('conv0', image, self.init_channel, 3)
+            else:
+                assert self.network_config.s_type == 'imagenet'
+                l = (LinearWrap(image)
+                    .Conv2D('conv0', self.init_channel, 7, strides=2, activation=BNReLU)
+                    .MaxPooling('pool0', 3, strides=2, padding='same')())
+            l_feats.append(l)
         return l_feats
     
     def _compute_ll_feats(self, image):
@@ -489,7 +474,7 @@ class AnytimeNetwork(ModelDesc):
             unit_idx : the feature computation unit index.
         """
         l = GlobalAvgPooling('gap', l)
-        logits = FullyConnected('linear', l, self.num_classes, nl=tf.identity)
+        logits = FullyConnected('linear', l, self.num_classes, activation=tf.identity)
         if self.options.high_temperature > 1.0:
             logits /= self.options.high_temperature
             
@@ -506,15 +491,6 @@ class AnytimeNetwork(ModelDesc):
         wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
         add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
         
-        if self.alter_label and self.is_model_training() and \
-                unit_idx < self.alter_label_activate_frac * self.total_units:
-            alabel = label_obj[1]
-            sq_loss = np.float32(self.num_classes) * \
-                tf.losses.mean_squared_error(labels=alabel, predictions=logits)
-            add_moving_summary(sq_loss, name='alter_sq_loss')
-            if self.alter_loss_w != 0.0:
-                 cost = cost * (1 - self.alter_loss_w) + sq_loss * self.alter_loss_w
-
         return logits, cost
 
 
@@ -534,10 +510,10 @@ class AnytimeNetwork(ModelDesc):
         logger.info("sampling loss with method {}".format(self.options.ls_method))
         select_idx = self._get_select_idx()
         
-        with argscope([Conv2D, Deconv2D, GroupedConv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling], 
+        with argscope([Conv2D, Deconv2D, GroupedConv2D, AvgPooling, MaxPooling, BatchNorm, GlobalAvgPooling, ResizeImages], 
                       data_format=self.data_format), \
-            argscope([Conv2D, Deconv2D, GroupedConv2D], nl=tf.identity, use_bias=self.options.use_bias), \
-            argscope([Conv2D, GroupedConv2D], W_init=self.w_init), \
+            argscope([Conv2D, Deconv2D, GroupedConv2D], activation=tf.identity, use_bias=self.options.use_bias), \
+            argscope([Conv2D, GroupedConv2D]), \
             argscope([BatchNorm], decay=self.options.batch_norm_decay):
 
             image, label = self._parse_inputs(inputs)
@@ -550,7 +526,7 @@ class AnytimeNetwork(ModelDesc):
                     image = image - tf.constant(self.options.mean, dtype=tf.float32) 
                 if self.options.std is not None:
                     image = image / tf.constant(self.options.std, dtype=tf.float32)
-            if self.data_format == 'NCHW':
+            if self.data_format == 'channels_first':
                 image = tf.transpose(image, [0,3,1,2])
 
             self.dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
@@ -576,92 +552,83 @@ class AnytimeNetwork(ModelDesc):
             online_learn_rewards = []
             for layer_idx, l_feats in enumerate(ll_feats):
                 scope_name = self.compute_scope_basename(layer_idx)
-                for w in range(self.width):
-                    unit_idx += 1
-                    cost_weight = self.weights[unit_idx]
-                    if cost_weight == 0:
-                        continue
-                    ## cost_weight is implied to be >0
-                    anytime_idx += 1
-                    with tf.variable_scope(scope_name+'.'+str(w)+'.pred') as scope:
-                        ## compute logit using features from layer layer_idx
-                        l = tf.nn.relu(l_feats[w])
-                        if w == 0:
-                            merged_feats = l
+                unit_idx += 1
+                cost_weight = self.weights[unit_idx]
+                if cost_weight == 0:
+                    continue
+                ## cost_weight is implied to be >0
+                anytime_idx += 1
+                with tf.variable_scope(scope_name+'.0.pred') as scope:
+                    ## compute logit using features from layer layer_idx
+                    l = tf.nn.relu(l_feats[0])
+                    ch_in = l.get_shape().as_list()[self.ch_dim]
+                    if self.options.prediction_feature == '1x1':
+                        ch_out = int(self.options.prediction_feature_ch_out_rate * ch_in)
+                        l = Conv2D('conv1x1', l, ch_out, 1)
+                        l = BNReLU('bnrelu1x1', l)
+                    elif self.options.prediction_feature == 'msdense':
+                        if self.network_config.s_type == 'basic':
+                            ch_inter = 128
                         else:
-                            merged_feats = tf.concat([merged_feats, l], self.ch_dim, name='concat')
-                        l = merged_feats
-                        ch_in = l.get_shape().as_list()[self.ch_dim]
-                        if self.options.prediction_feature == '1x1':
-                            ch_out = int(self.options.prediction_feature_ch_out_rate * ch_in)
-                            l = Conv2D('conv1x1', l, ch_out, 1)
-                            l = BNReLU('bnrelu1x1', l)
-                        elif self.options.prediction_feature == 'msdense':
-                            if self.network_config.s_type == 'basic':
-                                ch_inter = 128
-                            else:
-                                ch_inter = ch_in
-                            l = Conv2D('conv1x1_0', l, ch_inter, 3, stride=2)
-                            l = BNReLU('bnrelu1x1_0', l)
-                            l = Conv2D('conv1x1_1', l, ch_inter, 3, stride=2)
-                            l = BNReLU('bnrelu1x1_1', l)
-                        elif self.options.prediction_feature == 'bn':
-                            l = BatchNorm('bn', l)
-                        
-                        logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
-                    #end with scope
-                    anytime_cost_i = tf.identity(cost, 
-                            name='anytime_cost_{:02d}'.format(anytime_idx))
+                            ch_inter = ch_in
+                        l = Conv2D('conv1x1_0', l, ch_inter, 3, strides=2)
+                        l = BNReLU('bnrelu1x1_0', l)
+                        l = Conv2D('conv1x1_1', l, ch_inter, 3, strides=2)
+                        l = BNReLU('bnrelu1x1_1', l)
+                    elif self.options.prediction_feature == 'bn':
+                        l = BatchNorm('bn', l)
+                    
+                    logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
+                #end with scope
+                anytime_cost_i = tf.identity(cost, 
+                        name='anytime_cost_{:02d}'.format(anytime_idx))
 
-                    #end scope of layer.w.pred
+                ## Compute the contribution of the cost to total cost
+                # Additional weight for unit_idx. 
+                add_weight = 0
+                if select_idx is not None and not self.options.is_select_arr:
+                    add_weight = tf.cond(tf.equal(anytime_idx, 
+                                                  select_idx),
+                        lambda: tf.constant(self.weights_sum, 
+                                            dtype=tf.float32),
+                        lambda: tf.constant(0, dtype=tf.float32))
 
-                    ## Compute the contribution of the cost to total cost
-                    # Additional weight for unit_idx. 
-                    add_weight = 0
-                    if select_idx is not None and not self.options.is_select_arr:
-                        add_weight = tf.cond(tf.equal(anytime_idx, 
-                                                      select_idx),
-                            lambda: tf.constant(self.weights_sum, 
-                                                dtype=tf.float32),
-                            lambda: tf.constant(0, dtype=tf.float32))
+                elif select_idx is not None:
+                    # implied is_select_arr == True
+                    add_weight = select_idx[anytime_idx]
 
-                    elif select_idx is not None:
-                        # implied is_select_arr == True
-                        add_weight = select_idx[anytime_idx]
+                if self.options.sum_rand_ratio > 0:
+                    total_cost += (cost_weight + add_weight / \
+                        self.options.sum_rand_ratio) * cost
+                else:
+                    total_cost += add_weight * cost
 
-                    if self.options.sum_rand_ratio > 0:
-                        total_cost += (cost_weight + add_weight / \
-                            self.options.sum_rand_ratio) * cost
-                    else:
-                        total_cost += add_weight * cost
+                ## Regularize weights from FC layers.
+                wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W)
+                wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.b)
 
-                    ## Regularize weights from FC layers.
-                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W)
-                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.b)
+                ## Compute reward for loss selecters. 
 
-                    ## Compute reward for loss selecters. 
+                # Compute gradients of the loss as the rewards
+                #gs = tf.gradients(c, tf.trainable_variables()) 
+                #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
 
-                    # Compute gradients of the loss as the rewards
-                    #gs = tf.gradients(c, tf.trainable_variables()) 
-                    #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
-
-                    # Compute relative loss improvement as rewards
-                    # note the rewards are outside varscopes.
-                    if self.options.require_rewards:
-                        if not last_cost is None:
-                            reward = 1.0 - cost / last_cost
-                            max_reward = tf.maximum(reward, max_reward)
-                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                                name='reward_{:02d}'.format(anytime_idx-1)))
-                        if anytime_idx == self.ls_K - 1:
-                            reward = max_reward * self.options.last_reward_rate
-                            online_learn_rewards.append(tf.multiply(reward, 1.0, 
-                                name='reward_{:02d}'.format(anytime_idx)))
-                            #cost = tf.Print(cost, online_learn_rewards)
-                        last_cost = cost
-                    #end if compute_rewards
-                    #end (implied) if cost_weight > 0
-                #endfor each width
+                # Compute relative loss improvement as rewards
+                # note the rewards are outside varscopes.
+                if self.options.require_rewards:
+                    if not last_cost is None:
+                        reward = 1.0 - cost / last_cost
+                        max_reward = tf.maximum(reward, max_reward)
+                        online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                            name='reward_{:02d}'.format(anytime_idx-1)))
+                    if anytime_idx == self.ls_K - 1:
+                        reward = max_reward * self.options.last_reward_rate
+                        online_learn_rewards.append(tf.multiply(reward, 1.0, 
+                            name='reward_{:02d}'.format(anytime_idx)))
+                        #cost = tf.Print(cost, online_learn_rewards)
+                    last_cost = cost
+                #end if compute_rewards
+                #end (implied) if cost_weight > 0
             #endfor each layer
         #end argscope
 
@@ -754,39 +721,28 @@ class AnytimeResnet(AnytimeNetwork):
             stride1 = 1
 
         l_mid_feats = []
-        for w in range(self.width):
-            with tf.variable_scope(name+'.'+str(w)+'.mid') as scope:
-                l = BatchNorm('bn0', l_feats[w])
-                # The first round doesn't use pre relu according to pyramidial deep net
-                l = tf.nn.relu(l)
-                if w == 0:
-                    merged_feats = l
-                else:
-                    merged_feats = tf.concat([merged_feats, l], self.ch_dim, name='concat_mf')
-                l = Conv2D('conv1', merged_feats, out_channel, 3, stride=stride1)
-                l = BatchNorm('bn1', l)
-                l = tf.nn.relu(l)
-                l_mid_feats.append(l)
+        with tf.variable_scope(name+'.0.mid') as scope:
+            l = BatchNorm('bn0', l_feats[0])
+            l = tf.nn.relu(l)
+            l = Conv2D('conv1', l, out_channel, 3, strides=stride1)
+            l = BatchNorm('bn1', l)
+            l = tf.nn.relu(l)
+            l_mid_feats.append(l)
 
         l_end_feats = []
-        for w in range(self.width):
-            with tf.variable_scope(name+'.'+str(w)+'.end') as scope:
-                l = l_mid_feats[w]
-                if w == 0:
-                    merged_feats = l
-                else: 
-                    merged_feats = tf.concat([merged_feats, l], self.ch_dim, name='concat_ef')
-                ef = Conv2D('conv2', merged_feats, out_channel, 3)
-                # The second conv need to be BN before addition.
-                ef = BatchNorm('bn2', ef)
-                l = l_feats[w]
-                if increase_dim:
-                    l = AvgPooling('pool', l, shape=2, stride=2)
-                    pad_paddings = [[0,0], [0,0], [0,0], [0,0]]
-                    pad_paddings[self.ch_dim] = [ in_channel//2, in_channel//2 ]
-                    l = tf.pad(l, pad_paddings)
-                ef += l
-                l_end_feats.append(ef)
+        with tf.variable_scope(name+'.0.end') as scope:
+            l = l_mid_feats[0]
+            ef = Conv2D('conv2', l, out_channel, 3)
+            # The second conv need to be BN before addition.
+            ef = BatchNorm('bn2', ef)
+            l = l_feats[0]
+            if increase_dim:
+                l = AvgPooling('pool', l, 2)
+                pad_paddings = [[0,0], [0,0], [0,0], [0,0]]
+                pad_paddings[self.ch_dim] = [ in_channel//2, in_channel//2 ]
+                l = tf.pad(l, pad_paddings)
+            ef += l
+            l_end_feats.append(ef)
         return l_end_feats
 
     def residual_bottleneck(self, name, l_feats, ch_in_to_ch_base=4):
@@ -821,30 +777,22 @@ class AnytimeResnet(AnytimeNetwork):
             stride = 2
 
         l_new_feats = [] 
-        for w in range(self.width): 
-            with tf.variable_scope('{}.{}.0'.format(name, w)) as scope:
-                l = BatchNorm('bn0', l_feats[w])
-                # according to pyramidal net, do not use relu here
-                l = tf.nn.relu(l)
-                if w == 0:
-                    merged_feats = l
-                else:
-                    merged_feats = tf.concat([merged_feats, l], self.ch_dim, name='concat') 
-                l = (LinearWrap(merged_feats)
-                    .Conv2D('conv1x1_0', ch_base, 1, nl=BNReLU)
-                    .Conv2D('conv3x3_1', ch_base, 3, stride=stride, nl=BNReLU)
-                    .Conv2D('conv1x1_2', ch_base*4, 1)())
-                l = BatchNorm('bn_3', l)
+        with tf.variable_scope('{}.0.0'.format(name)) as scope:
+            l = BatchNorm('bn0', l_feats[0])
+            # according to pyramidal net, do not use relu here
+            l = tf.nn.relu(l)
+            l = (LinearWrap(l)
+                .Conv2D('conv1x1_0', ch_base, 1, activation=BNReLU)
+                .Conv2D('conv3x3_1', ch_base, 3, strides=stride, activation=BNReLU)
+                .Conv2D('conv1x1_2', ch_base*4, 1)())
+            l = BatchNorm('bn_3', l)
 
-                shortcut = l_feats[w]
-                if ch_in_to_ch_base < 4:
-                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, \
-                                      1, stride=stride)
-                    shortcut = BatchNorm('bn_short', shortcut)
-                l = l + shortcut
-                l_new_feats.append(l)
-            # end var scope
-        #end for
+            shortcut = l_feats[0]
+            if ch_in_to_ch_base < 4:
+                shortcut = Conv2D('conv_short', shortcut, ch_base*4, 1, strides=stride)
+                shortcut = BatchNorm('bn_short', shortcut)
+            l = l + shortcut
+            l_new_feats.append(l)
         return l_new_feats
 
     def _compute_ll_feats(self, image):
@@ -916,29 +864,22 @@ class AnytimeResNeXt(AnytimeResnet):
             stride = 2
         
         l_new_feats = []
-        for w in range(self.width):
-            with tf.variable_scope('{}.{}.0'.format(name, w)) as scope:
-                l = BatchNorm('bn0', l_feats[w])
-                l = tf.nn.relu(l)
-                if w == 0:
-                    merged_feats = l
-                else:
-                    merged_feats = tf.concat([merged_feats, l], self.ch_dim, name='concat')
+        with tf.variable_scope('{}.0.0'.format(name)) as scope:
+            l = BatchNorm('bn0', l_feats[0])
+            l = tf.nn.relu(l)
+            l = (LinearWrap(l)
+                .Conv2D('conv1x1_0', self.num_paths * ch_per_path, 1, activation=BNReLU)
+                .Conv2D('conv3x3_1', self.num_paths * ch_per_path, 3, strides=stride, \
+                    activation=BNReLU, split=self.num_paths)
+                .Conv2D('conv1x1_2', ch_base*4, 1)())
+            l = BatchNorm('bn_3', l)
 
-                l = (LinearWrap(merged_feats)
-                    .Conv2D('conv1x1_0', self.num_paths * ch_per_path, 1, nl=BNReLU)
-                    .GroupedConv2D('conv3x3_1', self.num_paths, ch_per_path, 3, sum_paths=False, stride=stride, nl=BNReLU) 
-                    .Conv2D('conv1x1_2', ch_base*4, 1)())
-                l = BatchNorm('bn_3', l)
-
-                shortcut = l_feats[w]
-                if ch_in_to_ch_base < 4:
-                    shortcut = Conv2D('conv_short', shortcut, ch_base*4, 1, stride=stride)
-                    shortcut = BatchNorm('bn_short', shortcut)
-                l = l + shortcut
-                l_new_feats.append(l)
-            #end var_scope
-        #end for
+            shortcut = l_feats[0]
+            if ch_in_to_ch_base < 4:
+                shortcut = Conv2D('conv_short', shortcut, ch_base*4, 1, strides=stride)
+                shortcut = BatchNorm('bn_short', shortcut)
+            l = l + shortcut
+            l_new_feats.append(l)
         return l_new_feats
 
 
@@ -1010,9 +951,6 @@ class DenseNet(AnytimeNetwork):
                     + "2*growth_rate by default. " \
                     + "I'm setting this automatically!")
         
-        # width > 1 is not implemented for densenet
-        assert self.width == 1,self.width
-
 
     def compute_block(self, pmls, layer_idx, n_units, growth):
         pml = pmls[-1]
@@ -1023,7 +961,7 @@ class DenseNet(AnytimeNetwork):
                 pml = BNReLU('trans_bnrelu', pml)
                 pml = Conv2D('conv1x1', pml, ch_out, 1)
                 pml = Dropout('dropout', pml, keep_prob=self.dropout_kp)
-                pml = AvgPooling('pool', pml, 2, padding='SAME')
+                pml = AvgPooling('pool', pml, 2, padding='same')
 
         for k in range(n_units):
             layer_idx +=1
@@ -1083,9 +1021,6 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
                     + "2*growth_rate by default. " \
                     + "I'm setting this automatically!")
         
-        # width > 1 is not implemented for densenet
-        assert self.width == 1,self.width
-
         if self.options.func_type == FUNC_TYPE_ANN \
             and self.options.ls_method != BEST_AANN_METHOD:
             logger.warn("Densenet prefers using AANN instead of other methods."\
@@ -1331,7 +1266,7 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
                 layer_growth = self._compute_layer_growth(unit_idx, growth)
                 if self.network_config.b_type == 'bottleneck':
                     bottleneck_width = int(self.options.bottleneck_width * layer_growth)
-                    l = Conv2D('conv1x1', l, bottleneck_width, 1, nl=BNReLU)
+                    l = Conv2D('conv1x1', l, bottleneck_width, 1, activation=BNReLU)
                     l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     l = Conv2D('conv3x3', l, layer_growth, 3)
                 else:
@@ -1364,7 +1299,7 @@ class AnytimeLogDenseNetV1(AnytimeNetwork):
                 pl = BNReLU('bnrelu_transit', pl)
                 l = Conv2D('conv', pl, ch_out, 1)
                 l = Dropout('dropout', l, keep_prob=self.dropout_kp)
-                l = AvgPooling('pool', l, 2, padding='SAME')
+                l = AvgPooling('pool', l, 2, padding='same')
                 new_pls.append(l)
         return new_pls
 
@@ -1422,7 +1357,7 @@ class AnytimeLogDenseNetV2(AnytimeLogDenseNetV1):
                 l = BNReLU('bnrelu_merged', ml) 
                 if self.network_config.b_type == 'bottleneck':
                     bnw = int(self.bottleneck_width * growth)
-                    l = Conv2D('conv1x1', l, bnw, 1, nl=BNReLU)
+                    l = Conv2D('conv1x1', l, bnw, 1, activation=BNReLU)
                     l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                     l = Conv2D('conv3x3', l, growth, 3)
                 else:
@@ -1449,13 +1384,13 @@ class AnytimeLogDenseNetV2(AnytimeLogDenseNetV1):
             l = BNReLU('pre_bnrelu', l)
             l = Conv2D('conv1x1_new', l, min(ch_out, ch_new), 1)
             l = Dropout('dropout_new', l, keep_prob=self.dropout_kp)
-            l = AvgPooling('pool_new', l, 2, padding='SAME')
+            l = AvgPooling('pool_new', l, 2, padding='same')
 
             ch_old = bcml.get_shape().as_list()[self.ch_dim]
             bcml = BNReLU('pre_bnrelu_old', bcml)
             bcml = Conv2D('conv1x1_old', bcml, ch_old, 1)
             bcml = Dropout('dropout_old', bcml, keep_prob=self.dropout_kp)
-            bcml = AvgPooling('pool_old', bcml, 2, padding='SAME') 
+            bcml = AvgPooling('pool_old', bcml, 2, padding='same') 
             
             bcml = tf.concat([bcml, l], self.ch_dim, name='concat_all')
         return bcml
@@ -1627,21 +1562,20 @@ class AnytimeFCN(AnytimeNetwork):
         for n_units in self.network_config.n_units_per_block:
             for k in range(n_units):
                 layer_idx += 1
-                for wi in range(self.width):
-                    unit_idx += 1
-                    weight = self.weights[unit_idx]
-                    if weight > 0:
-                        scope_name = self.compute_scope_basename(layer_idx)
-                        scope_name += '.'+str(wi)+'.pred/' 
-                        vcs.append(MeanIoUFromConfusionMatrix(\
-                            cm_name=scope_name+'confusion_matrix/SparseTensorDenseAdd:0', 
-                            scope_name_prefix=scope_name+'val_'))
-                        vcs.append(WeightedTensorStats(\
-                            names=[scope_name+'sum_abs_diff:0', 
-                                scope_name+'prob_sqr_err:0',
-                                scope_name+'cross_entropy_loss:0'],
-                            weight_name='dynamic_batch_size:0',
-                            prefix='val_'))
+                unit_idx += 1
+                weight = self.weights[unit_idx]
+                if weight > 0:
+                    scope_name = self.compute_scope_basename(layer_idx)
+                    scope_name += '.0.pred/' 
+                    vcs.append(MeanIoUFromConfusionMatrix(\
+                        cm_name=scope_name+'confusion_matrix/SparseTensorDenseAdd:0', 
+                        scope_name_prefix=scope_name+'val_'))
+                    vcs.append(WeightedTensorStats(\
+                        names=[scope_name+'sum_abs_diff:0', 
+                            scope_name+'prob_sqr_err:0',
+                            scope_name+'cross_entropy_loss:0'],
+                        weight_name='dynamic_batch_size:0',
+                        prefix='val_'))
         return vcs
         
 
@@ -1659,18 +1593,16 @@ class AnytimeFCN(AnytimeNetwork):
 
     def _parse_inputs(self, inputs):
         # NOTE
-        # label_img is always NHWC or NHW
+        # label_img is always NHWC/NHW/channel_last
         # If label_img is NHWC, the distribution doesn't include void. 
         # Furthermore, label_img is 0-vec for void labels
         image, label_img = inputs
         if not self.options.is_label_one_hot: 
             # From now on label_img is tf.float one hot, void has 0-vector.
             # because we assume void >=num_classes
-            # Note axis=-1 b/c label is NHWC always
             label_img = tf.one_hot(label_img, self.num_classes, axis=-1)
 
         def nonvoid_mask(prob_img, name=None):
-            # note axis=-1 b/c label img is always NHWC
             mask = tf.cast(tf.greater(tf.reduce_sum(prob_img, axis=-1), 
                                       self.options.eval_threshold), 
                            dtype=tf.float32)
@@ -1690,12 +1622,11 @@ class AnytimeFCN(AnytimeNetwork):
             l_mask.append(nonvoid_mask(label_img, 'eval_mask_{}'.format(pi)))
             l_label.append(flatten_label(label_img, 'label_{}'.format(pi)))
             img_shape = tf.shape(label_img)
-            # Note that input is always NHWC. 
             l_dyn_hw.append([img_shape[1], img_shape[2]])
             if pi == self.n_pools:
                 break
             label_img = AvgPooling('label_img_{}'.format(pi+1), label_img, 2, \
-                                   padding='SAME', data_format='NHWC')
+                                   padding='same', data_format='channels_last')
         return image, [l_label, l_mask, l_dyn_hw]
 
     
@@ -1716,13 +1647,13 @@ class AnytimeFCN(AnytimeNetwork):
         # Assume all previous layers have gone through BNReLU, so conv directly
         l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
-        if self.data_format == 'NCHW':
+        if self.data_format == 'channels_first':
             l = tf.transpose(l, [0,2,3,1]) 
         logits = tf.reshape(l, [-1, self.num_classes], name='logits')
         logits.variables = logit_vars
 
         # compute  block idx
-        layer_idx = unit_idx // self.width
+        layer_idx = unit_idx
         # first idx that is > layer_idx
         bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
         label_img_idx = self.bi_to_scale_idx(bi)
@@ -1838,8 +1769,6 @@ class FCDensenet(AnytimeFCN):
         # other format is not supported yet
         assert self.n_pools * 2 + 1 == self.n_blocks
 
-        # FC-dense doesn't support width > 1 yet
-        assert self.width == 1
         # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
         assert self.network_config.s_type == 'basic'
 
@@ -1850,9 +1779,9 @@ class FCDensenet(AnytimeFCN):
         with tf.variable_scope('TU_{}'.format(bi)) as scope:
             stack = tf.concat(l_layers, self.ch_dim, name='concat_recent')
             ch_out = stack.get_shape().as_list()[self.ch_dim]
-            dyn_h = tf.shape(skip_stack)[self.h_dim]
-            dyn_w = tf.shape(skip_stack)[self.w_dim]
-            stack = Deconv2D('deconv', stack, ch_out, 3, 2, dyn_hw=[dyn_h, dyn_w])
+            dyn_hw = [tf.shape(skip_stack)[self.h_dim], tf.shape(skip_stack)[self.w_dim]]
+            stack = Deconv2D('deconv', stack, ch_out, 3, strides=2)
+            stack = ResizeImages('resize', stack, [dyn_h, dyn_w])
             stack = tf.concat([skip_stack, stack], self.ch_dim, name='concat_skip')
         return stack
 
@@ -1862,7 +1791,7 @@ class FCDensenet(AnytimeFCN):
             ch_in = stack.get_shape().as_list()[self.ch_dim]
             stack = Conv2D('conv1x1', stack, ch_in, 1, use_bias=True)
             stack = Dropout('dropout', stack, keep_prob=self.dropout_kp)
-            stack = MaxPooling('pool', stack, 2, padding='SAME')
+            stack = MaxPooling('pool', stack, 2, padding='same')
         return stack
 
     def _dense_block(self, stack, n_units, init_uidx):
@@ -1933,8 +1862,6 @@ def AnytimeFCDenseNet(T_class):
 
             # other format is not supported yet
             assert self.n_pools * 2 + 1 == self.n_blocks
-            # FC-dense doesn't support width > 1 yet
-            assert self.width == 1
             # FC-dense doesn't like the starting pooling of imagenet initial conv/pool
             assert self.network_config.s_type == 'basic'
 
@@ -1974,7 +1901,7 @@ def AnytimeFCDenseNet(T_class):
                         layer_growth = self._compute_layer_growth(unit_idx, growth)
                         if self.network_config.b_type == 'bottleneck':
                             bottleneck_width = int(self.options.bottleneck_width * layer_growth)
-                            l = Conv2D('conv1x1'+name_appendix, l, bottleneck_width, 1, nl=BNReLU)
+                            l = Conv2D('conv1x1'+name_appendix, l, bottleneck_width, 1, activation=BNReLU)
                         else:
                             l = Conv2D('conv3x3'+name_appendix, l, layer_growth, 3)
                         l = Dropout('dropout', l, keep_prob=self.dropout_kp)
@@ -2020,12 +1947,12 @@ def AnytimeFCDenseNet(T_class):
                 with tf.variable_scope('transit_{:02d}_{:02d}'.format(trans_idx, pli)):
                     ch_in = pl.get_shape().as_list()[self.ch_dim]
                     ch_out = int(ch_in * self.reduction_ratio)
-                    dyn_h = tf.shape(skip_pls[0])[self.h_dim]
-                    dyn_w = tf.shape(skip_pls[0])[self.w_dim]
-                    #kernel_shape=3, stride=2
+                    shapes = tf.shape(skip_pls[0])
+                    dyn_hw = [shapes[self.h_dim], shapes[self.w_dim]]
                     pl = BNReLU('pre_bnrelu', pl) 
-                    new_pls.append(Deconv2D('deconv', pl, ch_out, 3, 2,
-                        dyn_hw=[dyn_h, dyn_w]))
+                    pl = Deconv2D('deconv', pl, ch_out, 3, strides=2)
+                    pl = ResizeImages('resize', pl, dyn_hw)
+                    new_pls.append(pl)
             return new_pls
 
 
@@ -2065,7 +1992,6 @@ class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDenseNetV2):
     def __init__(self, args):
         super(AnytimeFCDenseNetV2, self).__init__(args)
         assert self.n_pools * 2 == self.n_blocks - 1
-        assert self.width == 1
         assert self.network_config.s_type == 'basic'
 
     def update_compressed_feature_up(self, layer_idx, ch_out, pls, bcml, sml):
@@ -2078,14 +2004,15 @@ class AnytimeFCDenseNetV2(AnytimeFCN, AnytimeLogDenseNetV2):
         """
         with tf.variable_scope('transition_after_{}'.format(layer_idx)) as scope: 
             l = tf.concat(pls, self.ch_dim, name='concat_new')
-            dyn_h = tf.shape(sml)[self.h_dim]
-            dyn_w = tf.shape(sml)[self.w_dim]
+            shapes = tf.shape(sml)
+            dyn_hw = [shapes[self.h_dim], shapes[self.w_dim]]
             l = BNReLU('pre_bnrelu', l)
-            l = Deconv2D('deconv_new', l, ch_out, 3, 2, 
-                dyn_hw=[dyn_h,dyn_w])
+            l = Deconv2D('deconv_new', l, ch_out, 3, strides=2) 
+            l = ResizeImages('resize_new', l, dyn_hw)
+
             bcml = BNReLU('pre_bnrelu_bcml', bcml)
-            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, 2, 
-                dyn_hw=[dyn_h,dyn_w])
+            bcml = Deconv2D('deconv_old', bcml, ch_out, 3, strides=2)
+            bcml = ResizeImages('resize_old', bcml, dyn_hw)
             bcml = tf.concat([sml, l, bcml], self.ch_dim, name='concat_all')
         return bcml
 
@@ -2156,26 +2083,31 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 ch_out = self.init_channel * self.growth_rate_factor[w]
                 if w == 0:
                     if self.network_config.s_type == 'basic':
-                        l = Conv2D('conv3x3', image, ch_out, 3, nl=BNReLU) #, nl=BNReLU) 
+                        l = Conv2D('conv3x3', image, ch_out, 3, activation=BNReLU)
                     else:
                         assert self.network_config.s_type == 'imagenet'
                         l = (LinearWrap(image)
-                            .Conv2D('conv7x7', ch_out, 7, stride=2, nl=BNReLU)
-                            .MaxPooling('pool0', shape=3, stride=2, padding='SAME')())
+                            .Conv2D('conv7x7', ch_out, 7, strides=2, activation=BNReLU)
+                            .MaxPooling('pool0', 3, strides=2, padding='same')())
                 else:
-                    l = Conv2D('conv3x3', l, ch_out, 3, stride=2, nl=BNReLU) 
+                    l = Conv2D('conv3x3', l, ch_out, 3, strides=2, activation=BNReLU) 
                 l_feats.append(l)
         return l_feats
 
-    def _compute_edge(self, l, ch_out, bnw, l_type='normal', name=""):
+    def _compute_edge(self, l, ch_out, bnw, l_type='normal', dyn_hw=None, name=""):
         if self.network_config.b_type == 'bottleneck':
             bnw_ch = int(bnw * ch_out)
-            l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, nl=BNReLU)
-        if l_type == 'normal':
-            stride = 1
-        elif l_type == 'down':
-            stride = 2
-        l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride=stride, nl=BNReLU)
+            l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, activation=BNReLU)
+        if l_type == 'up':
+            assert dyn_hw is not None, dyn_hw
+            l = ResizeImages('bilin_resize', l, dyn_hw)
+            l = Conv2D('conv1x1_bilin'+name, l, ch_out, 1, activation=BNReLU)
+        else:
+            if l_type == 'normal':
+                stride = 1
+            elif l_type == 'down':
+                stride = 2
+            l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=stride, activation=BNReLU)
         return l
 
     def _compute_block(self, bi, n_units, layer_idx, l_mf):
@@ -2195,7 +2127,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                     else:
                         l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
                         bnw_prev = self.bottleneck_factor[w-1]
-                        lp = self._compute_edge(l_mf[w-1], g/2, bnw_prev, 'down', name='e2')
+                        lp = self._compute_edge(l_mf[w-1], g - g/2, bnw_prev, 'down', name='e2')
                         l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
                     l_feats.append(l)
             #end for w
@@ -2220,7 +2152,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
             with tf.variable_scope('transat_{:02d}_{:02d}'.format(layer_idx+1, w)):
                 ch_in = l.get_shape().as_list()[self.ch_dim]
                 ch_out = int(ch_in * rr)
-                l = Conv2D('conv1x1', l, ch_out, 1, nl=BNReLU)
+                l = Conv2D('conv1x1', l, ch_out, 1, activation=BNReLU)
                 l_feats.append(l)
         return l_feats
         
@@ -2241,6 +2173,43 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         ll_feats = [ [None if l_feats is None else l_feats[-1]] for l_feats in ll_feats ]
         return ll_feats
 
+
+class AnytimeC2FMultiScaleDenseNet(AnytimeMultiScaleDenseNet):
+    
+    def __init__(self, input_size, args):
+        super(AnytimeC2FMultiScaleDenseNet, self).__init__(input_size, args)
+
+    def _compute_block(self, bi, n_units, layer_idx, l_mf):
+        ll_feats = []
+        for k in range(n_units):
+            layer_idx += 1
+            scope_name = self.compute_scope_basename(layer_idx)
+            s_start = bi
+            ### TODO
+            l_feats = [None] * s_start
+            for w in range(s_start, self.num_scales):
+                with tf.variable_scope(scope_name+'.'+str(w)) as scope:
+                    g = self.growth_rate_factor[w] * self.growth_rate
+                    bnw = self.bottleneck_factor[w]
+                    has_prev_scale = w > s_start or (w > 0 and k==0)
+                    if not has_prev_scale:
+                        l = self._compute_edge(l_mf[w], g, bnw, 'normal')
+                    else:
+                        l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
+                        bnw_prev = self.bottleneck_factor[w-1]
+                        lp = self._compute_edge(l_mf[w-1], g - g/2, bnw_prev, 'down', name='e2')
+                        l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
+                    l_feats.append(l)
+            #end for w
+            new_l_mf = [None] * self.num_scales
+            for w in range(s_start, self.num_scales):
+                with tf.variable_scope(scope_name+'.'+str(w)+'.merge') as scope:
+                    new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], 
+                        self.ch_dim, name='merge_feats')
+            ll_feats.append(new_l_mf)
+            l_mf = new_l_mf
+        #end for k in units
+        return ll_feats
 
 
 #####################
@@ -2270,20 +2239,15 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
             name=""):
         if self.network_config.b_type == 'bottleneck':
             bnw_ch = int(bnw * ch_out)
-            l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, nl=BNReLU)
+            l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, activation=BNReLU)
         if l_type == 'normal':
-            l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride=1, nl=BNReLU)
+            l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=1, activation=BNReLU)
         elif l_type == 'down':
-            l = Conv2D('conv3x3_'+name, l, ch_out, 3, stride=2, nl=BNReLU)
+            l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=2, activation=BNReLU)
         elif l_type == 'up':
             assert dyn_hw is not None
-            # Use Deconv to upsample
-            #l = Deconv2D('deconv3x3_'+name, l, ch_out, 3, stride=2, 
-            #    dyn_hw=dyn_hw, nl=BNReLU)
-            
-            # Use bilinear upsampling
-            l = tf.image.resize_bilinear(images=l, size=dyn_hw, name='bilin')
-            l = Conv2D('conv1x1_bilin'+name, l, ch_out, 1, stride=1, nl=BNReLU)
+            l = ResizeImages('resize', l, dyn_hw) 
+            l = Conv2D('conv1x1_bilin'+name, l, ch_out, 1, activation=BNReLU)
         return l
 
     def _compute_block(self, bi, n_units, layer_idx, l_mf):
@@ -2353,7 +2317,7 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
             with tf.variable_scope('transat_{:02d}_{:02d}'.format(layer_idx, w)):
                 ch_in = l.get_shape().as_list()[self.ch_dim]
                 ch_out = int(ch_in * rr)
-                l = Conv2D('conv1x1', l, ch_out, 1, nl=BNReLU)
+                l = Conv2D('conv1x1', l, ch_out, 1, activation=BNReLU)
                 if self.dropout_kp < 1:
                     l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l_feats[w] = l
@@ -2370,11 +2334,11 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         l = image
         for i in range(self.n_pools + 1):
             ch_out = self.growth_rate * 2 * self.growth_rate_factor[i]
-            l = Conv2D('conv0_scale_{}'.format(i), l, ch_out, 3, nl=BNReLU)
+            l = Conv2D('conv0_scale_{}'.format(i), l, ch_out, 3, activation=BNReLU)
             l_init_feats.append(l) 
             if i == self.n_pools:
                 break
-            l = AvgPooling('img_{}'.format(i+1), l, 2, padding='SAME')
+            l = AvgPooling('img_{}'.format(i+1), l, 2, padding='same')
         return l_init_feats
 
 
@@ -2413,7 +2377,7 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                     self.ch_dim, name='force_merge_{}'.format(li))
             # also add 1x1 conv to ensure predictors have some freedom 
             ch_out = min(l.get_shape().as_list()[self.ch_dim], 128)
-            l = Conv2D('pred_feat_{}_1x1'.format(li), l, ch_out, 1, nl=BNReLU) 
+            l = Conv2D('pred_feat_{}_1x1'.format(li), l, ch_out, 1, activation=BNReLU) 
             ll_feats_ret[li] = [l]
 
         return ll_feats_ret

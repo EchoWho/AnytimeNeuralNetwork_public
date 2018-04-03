@@ -3,15 +3,13 @@
 # File: CycleGAN.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import os, sys
+import os
 import argparse
 import glob
-from six.moves import map, zip, range
-import numpy as np
+from six.moves import range
+
 
 from tensorpack import *
-from tensorpack.utils.viz import *
-import tensorpack.tfutils.symbolic_functions as symbf
 from tensorpack.tfutils.summary import add_moving_summary
 from tensorpack.tfutils.scope_utils import auto_reuse_variable_scope
 import tensorflow as tf
@@ -20,7 +18,10 @@ from GAN import GANTrainer, GANModelDesc
 """
 1. Download the dataset following the original project: https://github.com/junyanz/CycleGAN#train
 2. ./CycleGAN.py --data /path/to/datasets/horse2zebra
-Training and testing visuliazations will be in tensorboard.
+Training and testing visualizations will be in tensorboard.
+
+This implementation doesn't use fake sample buffer.
+It's not hard to add but I didn't observe any difference with it.
 """
 
 SHAPE = 256
@@ -36,13 +37,13 @@ def INReLU(x, name=None):
 
 def INLReLU(x, name=None):
     x = InstanceNorm('inorm', x)
-    return LeakyReLU(x, name=name)
+    return tf.nn.leaky_relu(x, alpha=0.2, name=name)
 
 
 class Model(GANModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, (None, SHAPE, SHAPE, 3), 'inputA'),
-                InputDesc(tf.float32, (None, SHAPE, SHAPE, 3), 'inputB')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, (None, SHAPE, SHAPE, 3), 'inputA'),
+                tf.placeholder(tf.float32, (None, SHAPE, SHAPE, 3), 'inputB')]
 
     @staticmethod
     def build_res_block(x, name, chan, first=False):
@@ -50,58 +51,58 @@ class Model(GANModelDesc):
             input = x
             return (LinearWrap(x)
                     .tf.pad([[0, 0], [0, 0], [1, 1], [1, 1]], mode='SYMMETRIC')
-                    .Conv2D('conv0', chan, padding='VALID')
+                    .Conv2D('conv0', chan, 3, padding='VALID')
                     .tf.pad([[0, 0], [0, 0], [1, 1], [1, 1]], mode='SYMMETRIC')
-                    .Conv2D('conv1', chan, padding='VALID', nl=tf.identity)
+                    .Conv2D('conv1', chan, 3, padding='VALID', activation=tf.identity)
                     .InstanceNorm('inorm')()) + input
 
     @auto_reuse_variable_scope
     def generator(self, img):
         assert img is not None
-        with argscope([Conv2D, Deconv2D], nl=INReLU, kernel_shape=3):
+        with argscope([Conv2D, Conv2DTranspose], activation=INReLU):
             l = (LinearWrap(img)
                  .tf.pad([[0, 0], [0, 0], [3, 3], [3, 3]], mode='SYMMETRIC')
-                 .Conv2D('conv0', NF, kernel_shape=7, padding='VALID')
-                 .Conv2D('conv1', NF * 2, stride=2)
-                 .Conv2D('conv2', NF * 4, stride=2)())
+                 .Conv2D('conv0', NF, 7, padding='VALID')
+                 .Conv2D('conv1', NF * 2, 3, strides=2)
+                 .Conv2D('conv2', NF * 4, 3, strides=2)())
             for k in range(9):
                 l = Model.build_res_block(l, 'res{}'.format(k), NF * 4, first=(k == 0))
             l = (LinearWrap(l)
-                 .Deconv2D('deconv0', NF * 2, stride=2)
-                 .Deconv2D('deconv1', NF * 1, stride=2)
+                 .Conv2DTranspose('deconv0', NF * 2, 3, strides=2)
+                 .Conv2DTranspose('deconv1', NF * 1, 3, strides=2)
                  .tf.pad([[0, 0], [0, 0], [3, 3], [3, 3]], mode='SYMMETRIC')
-                 .Conv2D('convlast', 3, kernel_shape=7, padding='VALID', nl=tf.tanh, use_bias=True)())
+                 .Conv2D('convlast', 3, 7, padding='VALID', activation=tf.tanh, use_bias=True)())
         return l
 
     @auto_reuse_variable_scope
     def discriminator(self, img):
-        with argscope(Conv2D, nl=INLReLU, kernel_shape=4, stride=2):
+        with argscope(Conv2D, activation=INLReLU, kernel_size=4, strides=2):
             l = (LinearWrap(img)
-                 .Conv2D('conv0', NF, nl=LeakyReLU)
+                 .Conv2D('conv0', NF, activation=tf.nn.leaky_relu)
                  .Conv2D('conv1', NF * 2)
                  .Conv2D('conv2', NF * 4)
-                 .Conv2D('conv3', NF * 8, stride=1)
-                 .Conv2D('conv4', 1, stride=1, nl=tf.identity, use_bias=True)())
+                 .Conv2D('conv3', NF * 8, strides=1)
+                 .Conv2D('conv4', 1, strides=1, activation=tf.identity, use_bias=True)())
         return l
 
-    def _build_graph(self, inputs):
-        A, B = inputs
-        A = tf.transpose(A / 128.0 - 1.0, [0, 3, 1, 2])
-        B = tf.transpose(B / 128.0 - 1.0, [0, 3, 1, 2])
+    def build_graph(self, A, B):
+        with tf.name_scope('preprocess'):
+            A = tf.transpose(A / 128.0 - 1.0, [0, 3, 1, 2])
+            B = tf.transpose(B / 128.0 - 1.0, [0, 3, 1, 2])
 
         def viz3(name, a, b, c):
-            im = tf.concat([a, b, c], axis=3)
-            im = tf.transpose(im, [0, 2, 3, 1])
-            im = (im + 1.0) * 128
-            im = tf.clip_by_value(im, 0, 255)
-            im = tf.cast(im, tf.uint8, name='viz_' + name)
+            with tf.name_scope(name):
+                im = tf.concat([a, b, c], axis=3)
+                im = tf.transpose(im, [0, 2, 3, 1])
+                im = (im + 1.0) * 128
+                im = tf.clip_by_value(im, 0, 255)
+                im = tf.cast(im, tf.uint8, name='viz')
             tf.summary.image(name, im, max_outputs=50)
 
         # use the initializers from torch
-        with argscope([Conv2D, Deconv2D], use_bias=False,
-                      W_init=tf.random_normal_initializer(stddev=0.02)), \
-                argscope([Conv2D, Deconv2D, InstanceNorm], data_format='NCHW'), \
-                argscope(LeakyReLU, alpha=0.2):
+        with argscope([Conv2D, Conv2DTranspose], use_bias=False,
+                      kernel_initializer=tf.random_normal_initializer(stddev=0.02)), \
+                argscope([Conv2D, Conv2DTranspose, InstanceNorm], data_format='channels_first'):
             with tf.variable_scope('gen'):
                 with tf.variable_scope('B'):
                     AB = self.generator(A)
@@ -124,35 +125,35 @@ class Model(GANModelDesc):
                     B_dis_fake = self.discriminator(AB)
 
         def LSGAN_losses(real, fake):
-            with tf.name_scope('LSGAN_losses'):
-                d_real = tf.reduce_mean(tf.squared_difference(real, 0.9), name='d_real')
-                d_fake = tf.reduce_mean(tf.square(fake), name='d_fake')
-                d_loss = tf.multiply(d_real + d_fake, 0.5, name='d_loss')
+            d_real = tf.reduce_mean(tf.squared_difference(real, 1), name='d_real')
+            d_fake = tf.reduce_mean(tf.square(fake), name='d_fake')
+            d_loss = tf.multiply(d_real + d_fake, 0.5, name='d_loss')
 
-                g_loss = tf.reduce_mean(tf.squared_difference(fake, 0.9), name='g_loss')
-                add_moving_summary(g_loss, d_loss)
-                return g_loss, d_loss
+            g_loss = tf.reduce_mean(tf.squared_difference(fake, 1), name='g_loss')
+            add_moving_summary(g_loss, d_loss)
+            return g_loss, d_loss
 
-        with tf.name_scope('LossA'):
-            # reconstruction loss
-            recon_loss_A = tf.reduce_mean(tf.abs(A - ABA), name='recon_loss')
-            # gan loss
-            G_loss_A, D_loss_A = LSGAN_losses(A_dis_real, A_dis_fake)
+        with tf.name_scope('losses'):
+            with tf.name_scope('LossA'):
+                # reconstruction loss
+                recon_loss_A = tf.reduce_mean(tf.abs(A - ABA), name='recon_loss')
+                # gan loss
+                G_loss_A, D_loss_A = LSGAN_losses(A_dis_real, A_dis_fake)
 
-        with tf.name_scope('LossB'):
-            recon_loss_B = tf.reduce_mean(tf.abs(B - BAB), name='recon_loss')
-            G_loss_B, D_loss_B = LSGAN_losses(B_dis_real, B_dis_fake)
+            with tf.name_scope('LossB'):
+                recon_loss_B = tf.reduce_mean(tf.abs(B - BAB), name='recon_loss')
+                G_loss_B, D_loss_B = LSGAN_losses(B_dis_real, B_dis_fake)
 
-        LAMBDA = 10.0
-        self.g_loss = tf.add((G_loss_A + G_loss_B),
-                             (recon_loss_A + recon_loss_B) * LAMBDA, name='G_loss_total')
-        self.d_loss = tf.add(D_loss_A, D_loss_B, name='D_loss_total')
+            LAMBDA = 10.0
+            self.g_loss = tf.add((G_loss_A + G_loss_B),
+                                 (recon_loss_A + recon_loss_B) * LAMBDA, name='G_loss_total')
+            self.d_loss = tf.add(D_loss_A, D_loss_B, name='D_loss_total')
         self.collect_variables('gen', 'discrim')
 
         add_moving_summary(recon_loss_A, recon_loss_B, self.g_loss, self.d_loss)
 
-    def _get_optimizer(self):
-        lr = symbolic_functions.get_scalar_var('learning_rate', 2e-4, summary=True)
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=2e-4, trainable=False)
         return tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3)
 
 
@@ -161,6 +162,7 @@ def get_data(datadir, isTrain=True):
         augs = [
             imgaug.Resize(int(SHAPE * 1.12)),
             imgaug.RandomCrop(SHAPE),
+            imgaug.Flip(horiz=True),
         ]
     else:
         augs = [imgaug.Resize(SHAPE)]
@@ -182,11 +184,12 @@ def get_data(datadir, isTrain=True):
 class VisualizeTestSet(Callback):
     def _setup_graph(self):
         self.pred = self.trainer.get_predictor(
-            ['inputA', 'inputB'], ['viz_A_recon', 'viz_B_recon'])
+            ['inputA', 'inputB'], ['A_recon/viz', 'B_recon/viz'])
 
     def _before_train(self):
         global args
         self.val_ds = get_data(args.data, isTrain=False)
+        self.val_ds.reset_state()
 
     def _trigger(self):
         idx = 0
@@ -207,12 +210,11 @@ if __name__ == '__main__':
 
     logger.auto_set_dir()
 
-    data = get_data(args.data)
-    data = PrintData(data)
+    df = get_data(args.data)
+    df = PrintData(df)
+    data = StagingInput(QueueInput(df))
 
-    config = TrainConfig(
-        model=Model(),
-        dataflow=data,
+    GANTrainer(data, Model()).train_with_defaults(
         callbacks=[
             ModelSaver(),
             ScheduledHyperParamSetter(
@@ -221,7 +223,6 @@ if __name__ == '__main__':
             PeriodicTrigger(VisualizeTestSet(), every_k_epochs=3),
         ],
         max_epoch=195,
+        steps_per_epoch=data.size(),
         session_init=SaverRestore(args.load) if args.load else None
     )
-
-    GANTrainer(config).train()

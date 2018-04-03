@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 # File: svhn.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
+
 
 import os
 import numpy as np
@@ -42,7 +42,8 @@ class SVHNDigit(RNGDataFlow):
             if not DATASET_AUTO_DOWNLOAD:
                 raise Exception("SVHN data doesn't exist")
             url = SVHN_URL + os.path.basename(filename)
-            logger.info("File {} not found! Downloading from {}.".format(filename, url))
+            logger.info("File {} not found!".format(filename))
+            logger.info("Downloading from {} ...".format(url))
             download(url, os.path.dirname(filename))
         logger.info("Loading {} ...".format(filename))
         data = scipy.io.loadmat(filename)
