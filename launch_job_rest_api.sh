@@ -15,46 +15,31 @@
 # 3787..3889
 # Num gpus : 1
 
-# FOR I IN {3531..3539}
-# do
-# 	USERNAME="dedey"
-# 	PASSWORD="DigDug2god?"
-# 	CLUSTER="cam"
-# 	JOBSCRIPT="run_exp_$i.sh"
-# 	SPECIAL_NAME="_ann"
-# 	VC="msrlabs"
-# 	NUM_GPUS="4"
+# Exp 94 (DenseNet reproduction with dropout =0.9)
+# 3892..3900
+# Num gpus : 4
 
-# 	CMD="https://philly/api/submit?"
-# 	CMD+="buildId=0000&"
-# 	CMD+="customDockerName=custom-tf-1-1-0-python-2-7&"
-# 	CMD+="toolType=cust&"
-# 	CMD+="clusterId=$CLUSTER&"
-# 	CMD+="vcId=$VC&"
-# 	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork_master%2F$JOBSCRIPT&"
-# 	CMD+="minGPUs=$NUM_GPUS&"
-# 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
-# 	CMD+="isdebug=false&"
-# 	CMD+="iscrossrack=false&"
-# 	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
-# 	CMD+="oneProcessPerContainer=true&"
-# 	CMD+="userName=$USERNAME"
+# Exp 95 (Copy of 94 on 8 gpus)
+# 3903..3911
+# Num gpus : 8
 
-# 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
+# Exp 96 (ResNext with adaloss)
+# 3914..3925
+# Num gpus : 4
 
-# 	echo "$CMD"
-# done
+# Exp 97 (Copy of 96 w/ 8 gpus)
+# 3928..3939
+# Num gpus : 8
 
-
-for i in {3157..3204}
+for i in {3892..3900} {3914..3925} # 4 gpu ; {3903..3911} {3928..3939} # 8 gpu ; 
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
-	CLUSTER="eu1"
+	CLUSTER="cam"
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="1"
+	NUM_GPUS="4"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
@@ -324,3 +309,19 @@ done
 # Exp 93 (baseline optimal on cifar 100 for n=9, n=17, n=25
 # 3787..3889
 # Num gpus : 1
+
+# Exp 94 (DenseNet reproduction with dropout =0.9)
+# 3892..3900
+# Num gpus : 4
+
+# Exp 95 (Copy of 94 on 8 gpus)
+# 3903..3911
+# Num gpus : 8
+
+# Exp 96 (ResNext with adaloss)
+# 3914..3925
+# Num gpus : 4
+
+# Exp 97 (Copy of 96 w/ 8 gpus)
+# 3928..3939
+# Num gpus : 8

@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # File: raw.py
-# Author: Yuxin Wu <ppwwyyxxc@gmail.com>
+
 
 import numpy as np
 import copy
 import six
 from six.moves import range
 from .base import DataFlow, RNGDataFlow
+from ..utils.develop import log_deprecated
 
-__all__ = ['FakeData', 'DataFromQueue', 'DataFromList']
+__all__ = ['FakeData', 'DataFromQueue', 'DataFromList', 'DataFromGenerator', 'DataFromIterable']
 
 
 class FakeData(RNGDataFlow):
@@ -69,12 +70,12 @@ class DataFromQueue(DataFlow):
 
 
 class DataFromList(RNGDataFlow):
-    """ Produce data from a list"""
+    """ Wrap a list of datapoints to a DataFlow"""
 
     def __init__(self, lst, shuffle=True):
         """
         Args:
-            lst (list): input list.
+            lst (list): input list. Each element is a datapoint.
             shuffle (bool): shuffle data.
         """
         super(DataFromList, self).__init__()
@@ -97,18 +98,40 @@ class DataFromList(RNGDataFlow):
 
 class DataFromGenerator(DataFlow):
     """
-    Wrap a generator to a DataFlow
+    Wrap a generator to a DataFlow.
     """
     def __init__(self, gen, size=None):
-        self._gen = gen
-        self._size = size
-
-    def size(self):
-        if self._size:
-            return self._size
-        return super(DataFromGenerator, self).size()
+        """
+        Args:
+            gen: iterable, or a callable that returns an iterable
+            size: deprecated
+        """
+        if not callable(gen):
+            self._gen = lambda: gen
+        else:
+            self._gen = gen
+        if size is not None:
+            log_deprecated("DataFromGenerator(size=)", "It doesn't make much sense.", "2018-03-31")
 
     def get_data(self):
         # yield from
-        for dp in self._gen:
+        for dp in self._gen():
+            yield dp
+
+
+class DataFromIterable(DataFlow):
+    """ Wrap an iterable of datapoitns to a DataFlow"""
+    def __init__(self, iterable):
+        """
+        Args:
+            iterable: an iterable object with length
+        """
+        self._itr = self.iterable
+        self._len = len(iterable)
+
+    def size(self):
+        return self._len
+
+    def get_data(self):
+        for dp in self._itr:
             yield dp

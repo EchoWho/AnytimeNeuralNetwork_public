@@ -3,22 +3,18 @@
 # File: train-timit.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import numpy as np
 import os
-import sys
 import argparse
-from collections import Counter
-import operator
-import six
-from six.moves import map, range
+from six.moves import range
+
 
 from tensorpack import *
 from tensorpack.tfutils.gradproc import SummaryGradient, GlobalNormClip
-from tensorpack.utils.globvars import globalns as param
-import tensorpack.tfutils.symbolic_functions as symbf
+from tensorpack.utils import serialize
 import tensorflow as tf
 
 from timitdata import TIMITBatch
+rnn = tf.contrib.rnn
 
 
 BATCH = 64
@@ -29,20 +25,18 @@ FEATUREDIM = 39     # MFCC feature dimension
 
 
 class Model(ModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, None, FEATUREDIM], 'feat'),   # bxmaxseqx39
-                InputDesc(tf.int64, None, 'labelidx'),  # label is b x maxlen, sparse
-                InputDesc(tf.int32, None, 'labelvalue'),
-                InputDesc(tf.int64, None, 'labelshape'),
-                InputDesc(tf.int32, [None], 'seqlen'),   # b
+    def inputs(self):
+        return [tf.placeholder(tf.float32, [None, None, FEATUREDIM], 'feat'),   # bxmaxseqx39
+                tf.placeholder(tf.int64, [None, None], 'labelidx'),  # label is b x maxlen, sparse
+                tf.placeholder(tf.int32, [None], 'labelvalue'),
+                tf.placeholder(tf.int64, [None], 'labelshape'),
+                tf.placeholder(tf.int32, [None], 'seqlen'),   # b
                 ]
 
-    def _build_graph(self, inputs):
-        feat, labelidx, labelvalue, labelshape, seqlen = inputs
+    def build_graph(self, feat, labelidx, labelvalue, labelshape, seqlen):
         label = tf.SparseTensor(labelidx, labelvalue, labelshape)
 
-        cell = tf.contrib.rnn.BasicLSTMCell(num_units=HIDDEN)
-        cell = tf.contrib.rnn.MultiRNNCell([cell] * NLAYER)
+        cell = rnn.MultiRNNCell([rnn.LSTMBlockCell(num_units=HIDDEN) for _ in range(NLAYER)])
 
         initial = cell.zero_state(tf.shape(feat)[0], tf.float32)
 
@@ -52,13 +46,13 @@ class Model(ModelDesc):
 
         # o: b x t x HIDDEN
         output = tf.reshape(outputs, [-1, HIDDEN])  # (Bxt) x rnnsize
-        logits = FullyConnected('fc', output, NR_CLASS, nl=tf.identity,
-                                W_init=tf.truncated_normal_initializer(stddev=0.01))
+        logits = FullyConnected('fc', output, NR_CLASS, activation=tf.identity,
+                                kernel_initializer=tf.truncated_normal_initializer(stddev=0.01))
         logits = tf.reshape(logits, (BATCH, -1, NR_CLASS))
 
         loss = tf.nn.ctc_loss(label, logits, seqlen, time_major=False)
 
-        self.cost = tf.reduce_mean(loss, name='cost')
+        cost = tf.reduce_mean(loss, name='cost')
 
         logits = tf.transpose(logits, [1, 0, 2])
 
@@ -73,10 +67,11 @@ class Model(ModelDesc):
         err = tf.edit_distance(predictions, label, normalize=True)
         err.set_shape([None])
         err = tf.reduce_mean(err, name='error')
-        summary.add_moving_summary(err, self.cost)
+        summary.add_moving_summary(err, cost)
+        return cost
 
-    def _get_optimizer(self):
-        lr = symbolic_functions.get_scalar_var('learning_rate', 5e-3, summary=True)
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=5e-3, trainable=False)
         opt = tf.train.AdamOptimizer(lr, epsilon=1e-3)
         return optimizer.apply_grad_processors(
             opt, [GlobalNormClip(5), SummaryGradient()])
@@ -84,7 +79,7 @@ class Model(ModelDesc):
 
 def get_data(path, isTrain, stat_file):
     ds = LMDBDataPoint(path, shuffle=isTrain)
-    mean, std = serialize.loads(open(stat_file).read())
+    mean, std = serialize.loads(open(stat_file, 'rb').read())
     ds = MapDataComponent(ds, lambda x: (x - mean) / std)
     ds = TIMITBatch(ds, BATCH)
     if isTrain:
@@ -94,7 +89,7 @@ def get_data(path, isTrain, stat_file):
 
 def get_config(ds_train, ds_test):
     return TrainConfig(
-        dataflow=ds_train,
+        data=QueueInput(ds_train),
         callbacks=[
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'error',
@@ -128,4 +123,4 @@ if __name__ == '__main__':
     config = get_config(ds_train, ds_test)
     if args.load:
         config.session_init = SaverRestore(args.load)
-    QueueInputTrainer(config).train()
+    launch_train_with_config(config, SimpleTrainer())

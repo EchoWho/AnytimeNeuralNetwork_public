@@ -6,38 +6,63 @@
 import cv2
 import tensorflow as tf
 import argparse
-import numpy as np
 from six.moves import zip
 import os
-import sys
+
 
 from tensorpack import *
-from tensorpack.tfutils.symbolic_functions import *
-from tensorpack.tfutils.summary import *
+from tensorpack.dataflow import dataset
+from tensorpack.utils.gpu import get_nr_gpu
+from tensorpack.tfutils import optimizer, gradproc
+from tensorpack.tfutils.summary import add_moving_summary, add_param_summary
+
+
+def class_balanced_sigmoid_cross_entropy(logits, label, name='cross_entropy_loss'):
+    """
+    The class-balanced cross entropy loss,
+    as in `Holistically-Nested Edge Detection
+    <http://arxiv.org/abs/1504.06375>`_.
+
+    Args:
+        logits: of shape (b, ...).
+        label: of the same shape. the ground truth in {0,1}.
+    Returns:
+        class-balanced cross entropy loss.
+    """
+    with tf.name_scope('class_balanced_sigmoid_cross_entropy'):
+        y = tf.cast(label, tf.float32)
+
+        count_neg = tf.reduce_sum(1. - y)
+        count_pos = tf.reduce_sum(y)
+        beta = count_neg / (count_neg + count_pos)
+
+        pos_weight = beta / (1 - beta)
+        cost = tf.nn.weighted_cross_entropy_with_logits(logits=logits, targets=y, pos_weight=pos_weight)
+        cost = tf.reduce_mean(cost * (1 - beta))
+        zero = tf.equal(count_pos, 0.0)
+    return tf.where(zero, 0.0, cost, name=name)
 
 
 class Model(ModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, None, None, 3], 'image'),
-                InputDesc(tf.int32, [None, None, None], 'edgemap')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, [None, None, None, 3], 'image'),
+                tf.placeholder(tf.int32, [None, None, None], 'edgemap')]
 
-    def _build_graph(self, inputs):
-        image, edgemap = inputs
+    def build_graph(self, image, edgemap):
         image = image - tf.constant([104, 116, 122], dtype='float32')
         edgemap = tf.expand_dims(edgemap, 3, name='edgemap4d')
 
         def branch(name, l, up):
-            with tf.variable_scope(name) as scope:
-                l = Conv2D('convfc', l, 1, kernel_shape=1, nl=tf.identity,
+            with tf.variable_scope(name):
+                l = Conv2D('convfc', l, 1, kernel_size=1, activation=tf.identity,
                            use_bias=True,
-                           W_init=tf.constant_initializer(),
-                           b_init=tf.constant_initializer())
+                           kernel_initializer=tf.constant_initializer())
                 while up != 1:
                     l = BilinearUpSample('upsample{}'.format(up), l, 2)
                     up = up / 2
                 return l
 
-        with argscope(Conv2D, kernel_shape=3, nl=tf.nn.relu):
+        with argscope(Conv2D, kernel_size=3, activation=tf.nn.relu):
             l = Conv2D('conv1_1', image, 64)
             l = Conv2D('conv1_2', l, 64)
             b1 = branch('branch1', l, 1)
@@ -66,9 +91,9 @@ class Model(ModelDesc):
             b5 = branch('branch5', l, 16)
 
         final_map = Conv2D('convfcweight',
-                           tf.concat([b1, b2, b3, b4, b5], 3), 1, 1,
-                           W_init=tf.constant_initializer(0.2),
-                           use_bias=False, nl=tf.identity)
+                           tf.concat([b1, b2, b3, b4, b5], 3), 1, kernel_size=1,
+                           kernel_initializer=tf.constant_initializer(0.2),
+                           use_bias=False, activation=tf.identity)
         costs = []
         for idx, b in enumerate([b1, b2, b3, b4, b5, final_map]):
             output = tf.nn.sigmoid(b, name='output{}'.format(idx + 1))
@@ -89,11 +114,12 @@ class Model(ModelDesc):
             costs.append(wd_cost)
 
             add_param_summary(('.*/W', ['histogram']))   # monitor W
-            self.cost = tf.add_n(costs, name='cost')
-            add_moving_summary(costs + [wrong, self.cost])
+            total_cost = tf.add_n(costs, name='cost')
+            add_moving_summary(costs + [wrong, total_cost])
+            return total_cost
 
-    def _get_optimizer(self):
-        lr = get_scalar_var('learning_rate', 3e-5, summary=True)
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=3e-5, trainable=False)
         opt = tf.train.AdamOptimizer(lr, epsilon=1e-3)
         return optimizer.apply_grad_processors(
             opt, [gradproc.ScaleGradient(
@@ -195,8 +221,10 @@ def run(model_path, image_path, output):
     predictor = OfflinePredictor(pred_config)
     im = cv2.imread(image_path)
     assert im is not None
-    im = cv2.resize(im, (im.shape[1] // 16 * 16, im.shape[0] // 16 * 16))
-    outputs = predictor([[im.astype('float32')]])
+    im = cv2.resize(
+        im, (im.shape[1] // 16 * 16, im.shape[0] // 16 * 16)
+    )[None, :, :, :].astype('float32')
+    outputs = predictor(im)
     if output is None:
         for k in range(6):
             pred = outputs[k][0]
@@ -226,6 +254,6 @@ if __name__ == '__main__':
         config = get_config()
         if args.load:
             config.session_init = get_model_loader(args.load)
-        if args.gpu:
-            config.nr_tower = len(args.gpu.split(','))
-        SyncMultiGPUTrainer(config).train()
+        launch_train_with_config(
+            config,
+            SyncMultiGPUTrainer(max(get_nr_gpu(), 1)))

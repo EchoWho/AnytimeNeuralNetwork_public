@@ -3,14 +3,13 @@
 # File: DiscoGAN-CelebA.py
 # Author: Yuxin Wu <ppwwyyxxc@gmail.com>
 
-import os, sys
+import os
 import argparse
 from six.moves import map, zip
 import numpy as np
 
+
 from tensorpack import *
-from tensorpack.utils.viz import *
-import tensorpack.tfutils.symbolic_functions as symbf
 from tensorpack.tfutils.summary import add_moving_summary
 from tensorpack.tfutils.scope_utils import auto_reuse_variable_scope
 import tensorflow as tf
@@ -22,13 +21,6 @@ from GAN import SeparateGANTrainer, GANModelDesc
 3. Start training gender transfer:
     ./DiscoGAN-CelebA.py --data /path/to/img_align_celeba --style-A Male
 4. Visualize the gender conversion images in tensorboard.
-
-With TF1.0.1, cuda 8.0, cudnn 5.1.10,
-the training on 64x64 images of batch 64 runs 5.4 it/s on Tesla M40.
-This is 2.4x as fast as the original PyTorch implementation.
-
-The cause is probably that in the torch implementation,
-a backward() computes gradients for ALL parameters, which is not necessary in GAN.
 """
 
 SHAPE = 64
@@ -38,40 +30,40 @@ NF = 64  # channel size
 
 def BNLReLU(x, name=None):
     x = BatchNorm('bn', x)
-    return LeakyReLU(x, name=name)
+    return tf.nn.leaky_relu(x, alpha=0.2, name=name)
 
 
 class Model(GANModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, (None, SHAPE, SHAPE, 3), 'inputA'),
-                InputDesc(tf.float32, (None, SHAPE, SHAPE, 3), 'inputB')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, (None, SHAPE, SHAPE, 3), 'inputA'),
+                tf.placeholder(tf.float32, (None, SHAPE, SHAPE, 3), 'inputB')]
 
     @auto_reuse_variable_scope
     def generator(self, img):
         assert img is not None
-        with argscope([Conv2D, Deconv2D],
-                      nl=BNLReLU, kernel_shape=4, stride=2), \
-                argscope(Deconv2D, nl=BNReLU):
+        with argscope([Conv2D, Conv2DTranspose],
+                      activation=BNLReLU, kernel_size=4, strides=2), \
+                argscope(Conv2DTranspose, activation=BNReLU):
             l = (LinearWrap(img)
-                 .Conv2D('conv0', NF, nl=LeakyReLU)
+                 .Conv2D('conv0', NF, activation=tf.nn.leaky_relu)
                  .Conv2D('conv1', NF * 2)
                  .Conv2D('conv2', NF * 4)
                  .Conv2D('conv3', NF * 8)
-                 .Deconv2D('deconv0', NF * 4)
-                 .Deconv2D('deconv1', NF * 2)
-                 .Deconv2D('deconv2', NF * 1)
-                 .Deconv2D('deconv3', 3, nl=tf.identity)
+                 .Conv2DTranspose('deconv0', NF * 4)
+                 .Conv2DTranspose('deconv1', NF * 2)
+                 .Conv2DTranspose('deconv2', NF * 1)
+                 .Conv2DTranspose('deconv3', 3, activation=tf.identity)
                  .tf.sigmoid()())
         return l
 
     @auto_reuse_variable_scope
     def discriminator(self, img):
-        with argscope(Conv2D, nl=BNLReLU, kernel_shape=4, stride=2):
-            l = Conv2D('conv0', img, NF, nl=LeakyReLU)
+        with argscope(Conv2D, activation=BNLReLU, kernel_size=4, strides=2):
+            l = Conv2D('conv0', img, NF, activation=tf.nn.leaky_relu)
             relu1 = Conv2D('conv1', l, NF * 2)
             relu2 = Conv2D('conv2', relu1, NF * 4)
             relu3 = Conv2D('conv3', relu2, NF * 8)
-            logits = FullyConnected('fc', relu3, 1, nl=tf.identity)
+            logits = FullyConnected('fc', relu3, 1, activation=tf.identity)
         return logits, [relu1, relu2, relu3]
 
     def get_feature_match_loss(self, feats_real, feats_fake):
@@ -86,18 +78,16 @@ class Model(GANModelDesc):
         add_moving_summary(ret)
         return ret
 
-    def _build_graph(self, inputs):
-        A, B = inputs
+    def build_graph(self, A, B):
         A = tf.transpose(A / 255.0, [0, 3, 1, 2])
         B = tf.transpose(B / 255.0, [0, 3, 1, 2])
 
-        # use the initializers from torch
-        with argscope([Conv2D, Deconv2D, FullyConnected],
-                      W_init=tf.contrib.layers.variance_scaling_initializer(factor=0.333, uniform=True),
+        # use the torch initializers
+        with argscope([Conv2D, Conv2DTranspose, FullyConnected],
+                      kernel_initializer=tf.variance_scaling_initializer(scale=0.333, distribution='uniform'),
                       use_bias=False), \
                 argscope(BatchNorm, gamma_init=tf.random_uniform_initializer()), \
-                argscope([Conv2D, Deconv2D, BatchNorm], data_format='NCHW'), \
-                argscope(LeakyReLU, alpha=0.2):
+                argscope([Conv2D, Conv2DTranspose, BatchNorm], data_format='NCHW'):
             with tf.variable_scope('gen'):
                 with tf.variable_scope('B'):
                     AB = self.generator(A)
@@ -140,7 +130,7 @@ class Model(GANModelDesc):
 
         global_step = get_global_step_var()
         rate = tf.train.piecewise_constant(global_step, [np.int64(10000)], [0.01, 0.5])
-        rate = tf.identity(rate, name='rate')   # mitigate a TF bug
+        rate = tf.identity(rate, name='rate')   # TF issue#8594
         g_loss = tf.add_n([
             ((G_loss_A + G_loss_B) * 0.1 +
              (fm_loss_A + fm_loss_B) * 0.9) * (1 - rate),
@@ -157,9 +147,8 @@ class Model(GANModelDesc):
 
         add_moving_summary(recon_loss_A, recon_loss_B, rate, g_loss, d_loss, wd_g, wd_d)
 
-    def _get_optimizer(self):
-        lr = symbolic_functions.get_scalar_var('learning_rate', 2e-4, summary=True)
-        return tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3)
+    def optimizer(self):
+        return tf.train.AdamOptimizer(2e-4, beta1=0.5, epsilon=1e-3)
 
 
 def get_celebA_data(datadir, styleA, styleB=None):
@@ -197,7 +186,7 @@ def get_celebA_data(datadir, styleA, styleB=None):
         imgaug.Resize(64)]
     df = AugmentImageComponents(df, augs, (0, 1))
     df = BatchData(df, BATCH)
-    df = PrefetchDataZMQ(df, 1)
+    df = PrefetchDataZMQ(df, 3)
     return df
 
 
@@ -207,7 +196,7 @@ if __name__ == '__main__':
         '--data', required=True,
         help='the img_align_celeba directory. should also contain list_attr_celeba.txt')
     parser.add_argument('--style-A', help='style of A', default='Male')
-    parser.add_argument('--style-B', help='style of B')
+    parser.add_argument('--style-B', help='style of B, default to "not A"')
     parser.add_argument('--load', help='load model')
     args = parser.parse_args()
 
@@ -216,14 +205,11 @@ if __name__ == '__main__':
 
     data = get_celebA_data(args.data, args.style_A, args.style_B)
 
-    config = TrainConfig(
-        model=Model(),
-        dataflow=data,
+    # train 1 D after 2 G
+    SeparateGANTrainer(
+        QueueInput(data), Model(), d_period=3).train_with_defaults(
         callbacks=[ModelSaver()],
         steps_per_epoch=300,
         max_epoch=250,
         session_init=SaverRestore(args.load) if args.load else None
     )
-
-    # train 1 D after 2 G
-    SeparateGANTrainer(config, d_period=3).train()
