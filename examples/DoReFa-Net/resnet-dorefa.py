@@ -7,13 +7,12 @@ import tensorflow as tf
 import argparse
 import numpy as np
 import os
-import sys
 
 from tensorpack import *
-from tensorpack.tfutils.symbolic_functions import *
-from tensorpack.tfutils.summary import *
-from tensorpack.utils.stats import RatioCounter
+from tensorpack.dataflow import dataset
 from tensorpack.tfutils.varreplace import remap_variables
+
+from imagenet_utils import ImageNetModel, eval_on_ILSVRC12, fbresnet_augmentor
 from dorefa import get_dorefa
 
 """
@@ -21,10 +20,10 @@ This script loads the pre-trained ResNet-18 model with (W,A,G) = (1,4,32)
 It has 59.2% top-1 and 81.5% top-5 validation error on ILSVRC12 validation set.
 
 To run on images:
-    ./resnet-dorefa.py --load pretrained.npy --run a.jpg b.jpg
+    ./resnet-dorefa.py --load ResNet-18-14f.npz --run a.jpg b.jpg
 
 To eval on ILSVRC validation set:
-    ./resnet-dorefa.py --load pretrained.npy --eval --data /path/to/ILSVRC
+    ./resnet-dorefa.py --load ResNet-18-14f.npz --eval --data /path/to/ILSVRC
 """
 
 BITW = 1
@@ -33,16 +32,14 @@ BITG = 32
 
 
 class Model(ModelDesc):
-    def _get_inputs(self):
-        return [InputDesc(tf.float32, [None, 224, 224, 3], 'input'),
-                InputDesc(tf.int32, [None], 'label')]
+    def inputs(self):
+        return [tf.placeholder(tf.float32, [None, 224, 224, 3], 'input'),
+                tf.placeholder(tf.int32, [None], 'label')]
 
-    def _build_graph(self, inputs):
-        image, label = inputs
+    def build_graph(self, image, label):
         image = image / 256.0
 
         fw, fa, fg = get_dorefa(BITW, BITA, BITG)
-        old_get_variable = tf.get_variable
 
         def new_get_variable(v):
             name = v.op.name
@@ -109,16 +106,12 @@ class Model(ModelDesc):
                       .GlobalAvgPooling('gap')
                       .tf.multiply(49)  # this is due to a bug in our model design
                       .FullyConnected('fct', 1000)())
-        prob = tf.nn.softmax(logits, name='output')
-        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
-        wrong = prediction_incorrect(logits, label, 5, name='wrong-top5')
+        tf.nn.softmax(logits, name='output')
+        ImageNetModel.compute_loss_and_error(logits, label)
 
 
 def get_inference_augmentor():
-    return imgaug.AugmentorList([
-        imgaug.ResizeShortestEdge(256),
-        imgaug.CenterCrop(224),
-    ])
+    return fbresnet_augmentor(False)
 
 
 def run_image(model, sess_init, inputs):
@@ -139,7 +132,7 @@ def run_image(model, sess_init, inputs):
         assert img is not None
 
         img = transformers.augment(img)[np.newaxis, :, :, :]
-        o = predict_func([img])
+        o = predict_func(img)
         prob = o[0][0]
         ret = prob.argsort()[-10:][::-1]
 
@@ -148,30 +141,10 @@ def run_image(model, sess_init, inputs):
         print(list(zip(names, prob[ret])))
 
 
-def eval_on_ILSVRC12(model_path, data_dir):
-    ds = dataset.ILSVRC12(data_dir, 'val', shuffle=False)
-    ds = AugmentImageComponent(ds, get_inference_augmentor())
-    ds = BatchData(ds, 192, remainder=True)
-    pred_config = PredictConfig(
-        model=Model(),
-        session_init=get_model_loader(model_path),
-        input_names=['input', 'label'],
-        output_names=['wrong-top1', 'wrong-top5']
-    )
-    pred = SimpleDatasetPredictor(pred_config, ds)
-    acc1, acc5 = RatioCounter(), RatioCounter()
-    for o in pred.get_result():
-        batch_size = o[0].shape[0]
-        acc1.feed(o[0].sum(), batch_size)
-        acc5.feed(o[1].sum(), batch_size)
-    print("Top1 Error: {}".format(acc1.ratio))
-    print("Top5 Error: {}".format(acc5.ratio))
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='the physical ids of GPUs to use')
-    parser.add_argument('--load', help='load a npy pretrained model')
+    parser.add_argument('--load', help='load a npz pretrained model')
     parser.add_argument('--data', help='ILSVRC dataset dir')
     parser.add_argument('--dorefa',
                         help='number of bits for W,A,G, separated by comma. Defaults to \'1,4,32\'',
@@ -187,8 +160,10 @@ if __name__ == '__main__':
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     if args.eval:
-        eval_on_ILSVRC12(args.load, args.data)
+        ds = dataset.ILSVRC12(args.data, 'val', shuffle=False)
+        ds = AugmentImageComponent(ds, get_inference_augmentor())
+        ds = BatchData(ds, 192, remainder=True)
+        eval_on_ILSVRC12(Model(), get_model_loader(args.load), ds)
     elif args.run:
-        assert args.load.endswith('.npy')
-        run_image(Model(), DictRestore(
-            np.load(args.load, encoding='latin1').item()), args.run)
+        assert args.load.endswith('.npz')
+        run_image(Model(), DictRestore(dict(np.load(args.load))), args.run)

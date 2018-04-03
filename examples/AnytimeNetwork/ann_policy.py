@@ -163,7 +163,6 @@ def get_config(args):
     return TrainConfig(
         dataflow=ds_train,
         callbacks=[
-            #ModelSaver(checkpoint_dir=args.model_dir, keep_recent=3, keep_freq=10000),
             InferenceRunner(ds_val,
                             [ScalarStats('cost'), 
                              ClassificationError(),

@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 # File: stats.py
-# Author: Yuxin Wu <ppwwyyxx@gmail.com>
+
 import numpy as np
 
 __all__ = ['StatCounter', 'BinaryStatistics', 'RatioCounter', 'Accuracy',
@@ -41,6 +41,11 @@ class StatCounter(object):
     def max(self):
         assert len(self._values)
         return max(self._values)
+
+    @property
+    def min(self):
+        assert len(self._values)
+        return min(self._values)
 
 
 class RatioCounter(object):
