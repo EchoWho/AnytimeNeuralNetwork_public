@@ -31,7 +31,7 @@
 # 3928..3939
 # Num gpus : 8
 
-for i in {3892..3900} {3914..3925} # 4 gpu ; {3903..3911} {3928..3939} # 8 gpu ; 
+for i in {3903..3911} {3928..3939} ; # 8 gpu {3892..3900} {3914..3925} # 4 gpu
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -39,7 +39,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
