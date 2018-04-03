@@ -183,7 +183,7 @@ def get_config(ds_trian, ds_val, model_cls):
     return TrainConfig(
         dataflow=ds_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_freq=12),
+            ModelSaver(checkpoint_dir=args.model_dir, keep_checkpoint_every_n_hours=12),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
@@ -234,7 +234,7 @@ if __name__ == '__main__':
         model_cls = AnytimeFCNCoarseToFine
 
     logger.set_log_root(log_root=args.log_dir)
-    logger.auto_set_dir()
+    logger.auto_set_dir(action='k')
     fs.set_dataset_path(args.data_dir)
 
     ## 
@@ -325,17 +325,8 @@ if __name__ == '__main__':
     logger.info("TF version: {}".format(tf.__version__))
     config = get_config(ds_train, ds_val, model_cls)
     if args.load and os.path.exists(args.load):
-        def var_filter_rmsprop(name):
-            lastname = name[-9:-1]
-            if lastname == 'RMSProp:' or lastname == 'SProp_1:':
-                return False
-            return True
-        var_filter = lambda x : True
-        if args.operation == 'finetune':
-            var_filter = var_filter_rmsprop
-        config.session_init = SaverRestore(args.load, var_filter=var_filter)
-    config.nr_tower = args.nr_gpu
-    SyncMultiGPUTrainer(config).train()
+        config.session_init = SaverRestore(args.load)
+    launch_train_with_config(config, SyncMultiGPUTrainerParameterServer(args.nr_gpu))
 
     ## Since the current operation is done, we write the next operation to the operation.txt
     if args.is_philly:
