@@ -5,10 +5,11 @@ DATA_DIR=${GLOBAL_DATA_DIR}
 LOG_DIR=${GLOBAL_LOG_DIR}/test_imagenet_resnet/$TIME
 MODEL_DIR=${GLOBAL_MODEL_DIR}/test_imagenet_resnet/$TIME
 CONFIG_DIR=.
+ANN_APP_DIR=anytime_models/examples
 
 mkdir -p $MODEL_DIR
 
-python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-ann.py \
+python $CONFIG_DIR/${ANN_APP_DIR}/imagenet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 -d=50 -c=64 --resnet_version=resnet \

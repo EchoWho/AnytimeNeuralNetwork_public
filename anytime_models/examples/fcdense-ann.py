@@ -11,8 +11,8 @@ from tensorpack.utils import utils
 from tensorpack.utils import fs
 from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
-from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import \
+import anytime_models.models.anytime_network as anytime_network
+from anytime_models.models.anytime_network import \
     AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet, AnytimeFCDenseNetV2,\
     AnytimeFCNCoarseToFine
 import get_augmented_data

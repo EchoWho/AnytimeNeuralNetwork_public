@@ -5,10 +5,11 @@ DATA_DIR=${GLOBAL_DATA_DIR}
 LOG_DIR=${GLOBAL_LOG_DIR}/test_cifar_resnet/$TIME
 MODEL_DIR=${GLOBAL_MODEL_DIR}/test_cifar_resnet/$TIME
 CONFIG_DIR=.
+ANN_APP_DIR=anytime_models/examples
 
 mkdir -p $MODEL_DIR
 
-python ${CONFIG_DIR}/examples/AnytimeNetwork/resnet-ann.py \
+python ${CONFIG_DIR}/${ANN_APP_DIR}/resnet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 -n=25 -c=32 -s=3 \
