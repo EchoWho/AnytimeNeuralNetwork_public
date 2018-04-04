@@ -196,7 +196,7 @@ def ilsvrc_train_config(args, model_cls, lr_schedule, max_epoch):
         Get a TrainConfig for training on ilsvrc.
 
         args : input argument from parser i.e. options
-        model_cls : name of the class of the network, e.g., AnytimeResnet
+        model_cls : name of the class of the network, e.g., AnytimeResNet
         lr_schedule : [(epoch, lr_val),...]
         max_epoch : maximum epochs to run
 
