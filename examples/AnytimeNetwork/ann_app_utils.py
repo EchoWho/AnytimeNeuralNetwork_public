@@ -272,7 +272,7 @@ def cifar_svhn_train_or_test(args, model_cls):
             do_multiprocess=False, do_validation=args.do_validation)
 
         lr_schedule = \
-            [(1, 0.1), (82, 0.01), (123, 0.001), (250, 0.0002)]
+            [(1, 0.1), (140, 0.01), (210, 0.001), (250, 0.0002)]
         max_epoch = 300
 
         if do_eval:
