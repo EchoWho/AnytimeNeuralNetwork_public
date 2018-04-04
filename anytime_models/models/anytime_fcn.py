@@ -627,17 +627,6 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                     if self.dropout_kp < 1:
                         l_feats[w] = Dropout('dropout', l_feats[w], keep_prob=self.dropout_kp)
                     
-                    #has_prev_scale = w < self.num_scales - 1 and l_mf[w+1] is not None
-                    #if not has_prev_scale:
-                    #    l = self._compute_edge(l_mf[w], g, bnw, 'normal')
-                    #else:
-                    #    l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
-                    #    dyn_h = tf.shape(l)[self.h_dim]
-                    #    dyn_w = tf.shape(l)[self.w_dim] 
-                    #    lp = self._compute_edge(l_mf[w+1], g/2, bnw, 'up', 
-                    #        dyn_h=dyn_h, dyn_w=dyn_w, name='e2')
-                    #    l = tf.concat([l, lp], self.ch_dim, name='concat_ms')
-                    #l_feats[w] = l
             #end for w
             new_l_mf = [None] * self.num_scales
             for w in range(s_start, s_end):

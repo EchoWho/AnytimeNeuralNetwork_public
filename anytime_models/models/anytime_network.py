@@ -115,7 +115,7 @@ def compute_cfg(options):
         return NetworkConfig(n_units_per_block, b_type, s_type)
  
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
-        if options.densenet_version in ['atv1', 'loglog', 'atv2']:
+        if options.densenet_version in ['atv1', 'loglog', 'atv2', 'dense']:
             if options.fcdense_depth == 103:
                 n_units_per_block = [ 4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4 ]
             else:

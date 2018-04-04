@@ -233,6 +233,8 @@ if __name__ == '__main__':
         model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
     elif args.densenet_version == 'c2f':
         model_cls = AnytimeFCNCoarseToFine
+    elif args.densenet_version == 'dense':
+        model_cls = FCDensenet 
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir(action='k')
