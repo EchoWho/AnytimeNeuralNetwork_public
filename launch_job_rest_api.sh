@@ -31,38 +31,7 @@
 # 3928..3939
 # Num gpus : 8
 
-# FOR I IN {3531..3539}
-# do
-# 	USERNAME="dedey"
-# 	PASSWORD="DigDug2god?"
-# 	CLUSTER="cam"
-# 	JOBSCRIPT="run_exp_$i.sh"
-# 	SPECIAL_NAME="_ann"
-# 	VC="msrlabs"
-# 	NUM_GPUS="4"
-
-# 	CMD="https://philly/api/submit?"
-# 	CMD+="buildId=0000&"
-# 	CMD+="customDockerName=custom-tf-1-1-0-python-2-7&"
-# 	CMD+="toolType=cust&"
-# 	CMD+="clusterId=$CLUSTER&"
-# 	CMD+="vcId=$VC&"
-# 	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork_master%2F$JOBSCRIPT&"
-# 	CMD+="minGPUs=$NUM_GPUS&"
-# 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
-# 	CMD+="isdebug=false&"
-# 	CMD+="iscrossrack=false&"
-# 	CMD+="inputDir=%2Fhdfs%2F$VC%2F$USERNAME%2Fann_data_dir%2F&"
-# 	CMD+="oneProcessPerContainer=true&"
-# 	CMD+="userName=$USERNAME"
-
-# 	curl -k --ntlm --user "$USERNAME:$PASSWORD" "$CMD"
-
-# 	echo "$CMD"
-# done
-
-
-for i in {3892..3900} {3914..3925} # 4 gpu ; {3903..3911} {3928..3939} # 8 gpu ; 
+for i in {3903..3911} {3928..3939} ; # 8 gpu {3892..3900} {3914..3925} # 4 gpu
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -70,7 +39,7 @@ do
 	JOBSCRIPT="run_exp_$i.sh"
 	SPECIAL_NAME="_ann"
 	VC="msrlabs"
-	NUM_GPUS="4"
+	NUM_GPUS="8"
 
 	CMD="https://philly/api/submit?"
 	CMD+="buildId=0000&"
