@@ -5,10 +5,11 @@ DATA_DIR=${GLOBAL_DATA_DIR}
 LOG_DIR=${GLOBAL_LOG_DIR}/test_cifar_densenet/$TIME
 MODEL_DIR=${GLOBAL_MODEL_DIR}/test_cifar_densenet/$TIME
 CONFIG_DIR=.
+ANN_APP_DIR=anytime_models/examples
 
 mkdir -p $MODEL_DIR
 
-python ${CONFIG_DIR}/examples/AnytimeNetwork/densenet-ann.py \
+python ${CONFIG_DIR}/${ANN_APP_DIR}/densenet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 -n=16 -g=16 -s=3 --densenet_version=dense \

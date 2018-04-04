@@ -8,13 +8,12 @@ from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.tfutils.tower import get_current_tower_context
 from tensorpack.utils import anytime_loss, logger, utils, fs
-from tensorpack.callbacks import Exp3CPU, RWMCPU, \
-        FixedDistributionCPU, ThompsonSamplingCPU, AdaptiveLossWeight
 
-from tensorflow.contrib.layers import variance_scaling_initializer
-from tensorflow.contrib.layers import xavier_initializer
 from collections import namedtuple
 import bisect
+
+from online_learn import Exp3CPU, RWMCPU, \
+        FixedDistributionCPU, ThompsonSamplingCPU, AdaptiveLossWeight
 
 # Best choice for samloss for AANN if running anytime networks.
 BEST_AANN_METHOD=6
@@ -339,11 +338,6 @@ class AnytimeNetwork(ModelDesc):
                 +" Setting samloss to be {}".format(NO_AANN_METHOD))
             self.options.ls_method = NO_AANN_METHOD
             self.options.samloss = NO_AANN_METHOD
-
-        if self.options.w_init == 'xavier':
-            self.w_init = xavier_initializer()
-        elif self.options.w_init == 'var_scale':
-            self.w_init = variance_scaling_initializer(mode='FAN_AVG')
 
         self.input_type = tf.float32 if self.options.input_type == 'float32' else tf.uint8
         if self.options.do_mean_std_gpu_process:
