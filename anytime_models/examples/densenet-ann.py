@@ -8,9 +8,9 @@ from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 from tensorpack.utils import logger, utils, fs
 
-from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import \
-AnytimeLogDenseNetV1, AnytimeLogDenseNetV2, DenseNet, AnytimeLogLogDenseNet
+import anytime_models.models.anytime_network as anytime_network
+from anytime_models.models.anytime_network import \
+    AnytimeLogDenseNetV1, AnytimeLogDenseNetV2, DenseNet, AnytimeLogLogDenseNet
 
 import ann_app_utils
 
