@@ -362,6 +362,9 @@ class AnytimeNetwork(ModelDesc):
     def compute_scope_basename(self, layer_idx):
         return "layer{:03d}".format(layer_idx)
 
+    def prediction_scope(self, scope_base):
+        return scope_base + '.0.pred'
+
 
     ## Given the index (0based) of a block, return its scale. 
     # This is overloaded by FCDenseNets. 
@@ -394,7 +397,7 @@ class AnytimeNetwork(ModelDesc):
                 weight = self.weights[unit_idx]
                 if weight > 0:
                     scope_name = self.compute_scope_basename(layer_idx)
-                    scope_name += '.0.pred/' 
+                    scope_name = self.prediction_scope(scope_name) + '/'
                     vcs.append(ClassificationError(\
                         wrong_tensor_name=scope_name+'wrong-top1:0', 
                         summary_name=scope_name+'val_err'))
@@ -552,13 +555,14 @@ class AnytimeNetwork(ModelDesc):
             online_learn_rewards = []
             for layer_idx, l_feats in enumerate(ll_feats):
                 scope_name = self.compute_scope_basename(layer_idx)
+                pred_scope = self.prediction_scope(scope_name)
                 unit_idx += 1
                 cost_weight = self.weights[unit_idx]
                 if cost_weight == 0:
                     continue
                 ## cost_weight is implied to be >0
                 anytime_idx += 1
-                with tf.variable_scope(scope_name+'.0.pred') as scope:
+                with tf.variable_scope(pred_scope) as scope:
                     ## compute logit using features from layer layer_idx
                     l = tf.nn.relu(l_feats[0])
                     ch_in = l.get_shape().as_list()[self.ch_dim]
@@ -1566,7 +1570,7 @@ class AnytimeFCN(AnytimeNetwork):
                 weight = self.weights[unit_idx]
                 if weight > 0:
                     scope_name = self.compute_scope_basename(layer_idx)
-                    scope_name += '.0.pred/' 
+                    scope_name = self.prediction_scope(scope_name) + '/' 
                     vcs.append(MeanIoUFromConfusionMatrix(\
                         cm_name=scope_name+'confusion_matrix/SparseTensorDenseAdd:0', 
                         scope_name_prefix=scope_name+'val_'))
