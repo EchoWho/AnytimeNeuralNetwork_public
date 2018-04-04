@@ -3,8 +3,8 @@
 
 import argparse
 
-from tensorpack.network_models import anytime_network
-from tensorpack.network_models.anytime_network import AnytimeMultiScaleDenseNet
+import anytime_models.models.anytime_network as anytime_network
+from anytime_models.models.anytime_network import AnytimeMultiScaleDenseNet
 
 import ann_app_utils
 
