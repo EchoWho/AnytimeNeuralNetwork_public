@@ -13,8 +13,9 @@ from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 import anytime_models.models.anytime_network as anytime_network
 from anytime_models.models.anytime_network import \
-    AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet, AnytimeFCDenseNetV2,\
-    AnytimeFCNCoarseToFine
+    AnytimeDensenet, AnytimeLogLogDenseNet
+from anytime_models.models.anytime_fcn import \
+    AnytimeFCNCoarseToFine, AnytimeFCDenseNet, AnytimeFCDenseNetV2
 import get_augmented_data
 
 
