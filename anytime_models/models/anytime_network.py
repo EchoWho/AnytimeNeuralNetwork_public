@@ -132,10 +132,12 @@ def compute_cfg(options):
                 n_units_per_block = [9, 7, 5, 3]
             elif options.fcdense_depth == 33:
                 n_units_per_block = [8, 8, 8, 8]
+            elif options.fcdense_depth == 38:
+                n_units_per_block = [10, 9, 10, 9]
             else:
                 raise ValueError('FCN coarse2fine depth {} is undefined'.format(options.c2f_depth))
             b_type = 'bottleneck'
-            s_type = 'basic'
+            s_type = 'imagenet'
             return NetworkConfig(n_units_per_block, b_type, s_type)
 
     elif options.num_units is not None: 
@@ -1628,42 +1630,4 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 layer_idx += 1
 
         ll_feats = [ [None if l_feats is None else l_feats[-1]] for l_feats in ll_feats ]
-        return ll_feats
-
-
-class AnytimeC2FMultiScaleDenseNet(AnytimeMultiScaleDenseNet):
-    
-    def __init__(self, input_size, args):
-        super(AnytimeC2FMultiScaleDenseNet, self).__init__(input_size, args)
-
-    def _compute_block(self, bi, n_units, layer_idx, l_mf):
-        ll_feats = []
-        for k in range(n_units):
-            layer_idx += 1
-            scope_name = self.compute_scope_basename(layer_idx)
-            s_start = bi
-            ### TODO
-            l_feats = [None] * s_start
-            for w in range(s_start, self.num_scales):
-                with tf.variable_scope(scope_name+'.'+str(w)) as scope:
-                    g = self.growth_rate_factor[w] * self.growth_rate
-                    bnw = self.bottleneck_factor[w]
-                    has_prev_scale = w > s_start or (w > 0 and k==0)
-                    if not has_prev_scale:
-                        l = self._compute_edge(l_mf[w], g, bnw, 'normal')
-                    else:
-                        l = self._compute_edge(l_mf[w], g/2, bnw, 'normal', name='e1')
-                        bnw_prev = self.bottleneck_factor[w-1]
-                        lp = self._compute_edge(l_mf[w-1], g - g/2, bnw_prev, 'down', name='e2')
-                        l = tf.concat([l, lp], self.ch_dim, name='concat_ms') 
-                    l_feats.append(l)
-            #end for w
-            new_l_mf = [None] * self.num_scales
-            for w in range(s_start, self.num_scales):
-                with tf.variable_scope(scope_name+'.'+str(w)+'.merge') as scope:
-                    new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], 
-                        self.ch_dim, name='merge_feats')
-            ll_feats.append(new_l_mf)
-            l_mf = new_l_mf
-        #end for k in units
         return ll_feats
