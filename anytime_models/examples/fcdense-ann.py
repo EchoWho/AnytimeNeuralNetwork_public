@@ -13,9 +13,10 @@ from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 import anytime_models.models.anytime_network as anytime_network
 from anytime_models.models.anytime_network import \
-    AnytimeDensenet, AnytimeLogLogDenseNet
+    AnytimeLogDenseNetV1, AnytimeLogLogDenseNet
 from anytime_models.models.anytime_fcn import \
-    AnytimeFCNCoarseToFine, AnytimeFCDenseNet, AnytimeFCDenseNetV2
+    AnytimeFCNCoarseToFine, AnytimeFCDenseNet, AnytimeFCDenseNetV2, \
+    parser_add_fcdense_arguments
 import get_augmented_data
 
 
@@ -49,12 +50,12 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
             xy_augmentors = [
                 #imgaug.RotationAndCropValid(7),
                 #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-                imgaug.RandomCrop((side, side)),
+#                imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
         else:
             xy_augmentors = [
-                imgaug.RandomCrop((side, side)),
+#                imgaug.RandomCrop((side, side)),
             ]
     elif args.operation == 'finetune':
         if isTrain:
@@ -222,13 +223,13 @@ if __name__ == '__main__':
                         default='train', choices=['train', 'finetune', 'evaluate'])
     parser.add_argument('--display_period', help='Display at eval every # of image; 0 means no display',
                         default=0, type=int)
-    anytime_network.parser_add_fcdense_arguments(parser)
+    parser_add_fcdense_arguments(parser)
     args = parser.parse_args()
     model_cls = None
     if args.densenet_version == 'atv2':
         model_cls = AnytimeFCDenseNetV2
     elif args.densenet_version == 'atv1':
-        model_cls = AnytimeFCDenseNet(AnytimeDensenet)
+        model_cls = AnytimeFCDenseNet(AnytimeLogDenseNetV1)
     elif args.densenet_version == 'loglog':
         model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
     elif args.densenet_version == 'c2f':
