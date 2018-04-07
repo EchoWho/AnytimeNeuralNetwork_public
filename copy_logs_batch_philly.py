@@ -68,7 +68,7 @@ def main():
     # From cam
     json_data = collect_info(cluster='cam', status='Pass')
     copy_passed_logs_from_json(json_data=json_data)
-    pdb.set_trace()
+
     json_data = collect_info(cluster='cam', status='Failed')
     copy_passed_logs_from_json(json_data=json_data)
 
