@@ -36,7 +36,44 @@ def parser_add_fcn_arguments(parser):
     parser.add_argument('--n_pools',
         help='number of pooling blocks on the cfg.n_units_per_block',
         type=int, default=None)
+    parser.add_argument('--do_scale_feat_to_label',
+        help='Whether scale the feature map to the resolution of input image for evaluation',
+        default=False, action='store_true')
     return parser
+
+
+def atrous_pool_features(l, ch_out, atrous_rates, data_format='channels_first', scope_name='atrous_pool_feat'):
+    input_shape = tf.shape(l)
+    ch_dim = 1 if data_format=='channels_first' else 3
+    h_dim = ch_dim % 3 + 1
+    w_dim = h_dim + 1
+    dyn_hw = [input_shape[h_dim], input_shape[w_dim]]
+
+    ch_per_group = ch_out // (2 + len(atrous_rates))
+    
+    with tf.variable_scope(scope_name) as scope:
+        image_feat = GlobalAvgPooling('gap', l)
+        image_feat_shape = [-1, 1, 1, 1]
+        image_feat_shape[ch_dim] = l.get_shape().as_list()[ch_dim]
+        image_feat = tf.reshape(image_feat, image_feat_shape) 
+        image_feat = Conv2D('gap_conv1x1', image_feat, ch_per_group, 1, activation=BNReLU)
+        image_feat = ResizeImages('image_feat_resize', image_feat, dyn_hw)
+
+        ch_out_1x1 = ch_out - ch_per_group * (1 + len(atrous_rates))
+        l_1x1 = Conv2D('conv1x1', l, ch_out_1x1, 1, activation=BNReLU)
+
+        feats = [l_1x1, image_feat]
+        
+        for ar_i, rate in enumerate(atrous_rates):
+            l_atrous = Conv2D('atrous_conv3x3_{}'.format(ar_i), l, ch_per_group, \
+                3, dilation_rate=rate, activation=BNReLU)
+            feats.append(l_atrous)
+
+        l = tf.concat(feats, ch_dim, name='concat_feats')
+        l = Conv2D('conv1x1_merge', l, ch_out, 1, activation=BNReLU)
+    return l
+
+
 
 
 class AnytimeFCN(AnytimeNetwork):
@@ -61,10 +98,16 @@ class AnytimeFCN(AnytimeNetwork):
             self.class_weight = np.ones(self.num_classes, dtype=np.float32) 
         logger.info('Class weights: {}'.format(self.class_weight))
 
-        self.n_pools = args.n_pools
         self.is_label_one_hot = args.is_label_one_hot
         self.eval_threshold = args.eval_threshold
-                
+        self.do_scale_feat_to_label = args.do_scale_feat_to_label
+        self.n_pools = args.n_pools if not self.do_scale_feat_to_label else 0
+        self.is_atrous = args.is_atrous
+        self.output_stride = args.output_stride
+        # base_o_s / o_s * base_rate ; base_o_s == 16 
+        self.atrous_rates = [6,12,18]
+        self.atrous_rates_base_output_stride = 16
+
 
     def compute_classification_callbacks(self):
         vcs = []
@@ -92,22 +135,23 @@ class AnytimeFCN(AnytimeNetwork):
         
 
     def _get_inputs(self):
-        HW = None
+        #HW = [None, None]
+        HW = [360, 480]
         if self.options.is_label_one_hot:
             # the label one-hot is in fact a distribution of labels. 
             # Void labeled pixels have 0-vector distribution.
             label_desc = InputDesc(tf.float32, 
-                [None, HW, HW, self.num_classes], 'label')
+                [None, HW[0], HW[1], self.num_classes], 'label')
         else:
-            label_desc = InputDesc(tf.int32, [None, HW, HW], 'label')
-        return [InputDesc(self.input_type, [None, HW, HW, 3], 'input'), label_desc]
+            label_desc = InputDesc(tf.int32, [None, HW[0], HW[1]], 'label')
+        return [InputDesc(self.input_type, [None, HW[0], HW[1], 3], 'input'), label_desc]
 
-
+   
     def _parse_inputs(self, inputs):
         # NOTE
         # label_img is always NHWC/NHW/channel_last
-        # If label_img is NHWC, the distribution doesn't include void. 
-        # Furthermore, label_img is 0-vec for void labels
+        # If label_img is not one-hot, the distribution doesn't include void. 
+        # label_img is 0-vec for void labels
         image, label_img = inputs
         if not self.options.is_label_one_hot: 
             # From now on label_img is tf.float one hot, void has 0-vector.
@@ -130,7 +174,8 @@ class AnytimeFCN(AnytimeNetwork):
         l_label = []
         l_dyn_hw = []
         label_img = tf.identity(label_img, name='label_img_0')
-        for pi in range(self.n_pools+1):
+        n_label_scales = self.n_pools + 1 if not self.do_scale_feat_to_label else 1
+        for pi in range(n_label_scales):
             l_mask.append(nonvoid_mask(label_img, 'eval_mask_{}'.format(pi)))
             l_label.append(flatten_label(label_img, 'label_{}'.format(pi)))
             img_shape = tf.shape(label_img)
@@ -153,33 +198,37 @@ class AnytimeFCN(AnytimeNetwork):
         else:
             return 2*self.n_pools - bi
 
-
     def _compute_prediction_and_loss(self, l, label_inputs, unit_idx):
         l_label, l_eval_mask, l_dyn_hw = label_inputs
+
+        ## Ground truth
+        # compute block idx
+        layer_idx = unit_idx
+        # first idx that is > layer_idx
+        bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
+        label_img_idx = self.bi_to_scale_idx(bi) if not self.do_scale_feat_to_label else 0
+        label = l_label[label_img_idx] # note this is a probability of label distri
+        eval_mask = l_eval_mask[label_img_idx]
+        dyn_hw = l_dyn_hw[label_img_idx]
+        n_non_void_samples = tf.reduce_sum(eval_mask)
+        n_non_void_samples += tf.cast(tf.less_equal(n_non_void_samples, 1e-12), tf.float32)
+
+        ## Compute flattened logits
         # Assume all previous layers have gone through BNReLU, so conv directly
+        ch_in = l.get_shape().as_list()[self.ch_dim]
+        l = Conv2D('pred_conv3x3_1', l, ch_in, 3, dilation_rate=1, activation=BNReLU)
+        l = Conv2D('pred_conv3x3_2', l, ch_in, 3, dilation_rate=2, activation=BNReLU) 
         l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
         if self.data_format == 'channels_first':
             l = tf.transpose(l, [0,2,3,1]) 
+        if self.do_scale_feat_to_label:
+            # at this stage, the logits are already channels_last
+            l = ResizeImages('resize_logits', l, dyn_hw, data_format='channels_last')  
         logits = tf.reshape(l, [-1, self.num_classes], name='logits')
         logits.variables = logit_vars
-
-        # compute  block idx
-        layer_idx = unit_idx
-        # first idx that is > layer_idx
-        bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
-        label_img_idx = self.bi_to_scale_idx(bi)
-
-        label = l_label[label_img_idx] # note this is a probability of label distri
-        eval_mask = l_eval_mask[label_img_idx]
-        dyn_hw = l_dyn_hw[label_img_idx]
-
-        n_non_void_samples = tf.reduce_sum(eval_mask)
-        n_non_void_samples += tf.cast(tf.less_equal(n_non_void_samples, 1e-12), tf.float32)
             
-        ## Local cost/loss for training
-
-        # Square error between distributions. 
+        ## Square error between distributions. 
         # Implement our own here b/c class weighting.
         prob = tf.nn.softmax(logits, name='pred_prob')
         prob_img_shape = tf.stack([-1,  dyn_hw[0], dyn_hw[1], self.num_classes])
@@ -191,6 +240,7 @@ class AnytimeFCN(AnytimeNetwork):
             name='prob_sqr_err')
         add_moving_summary(sqr_err)
 
+        ## Weighted cross entropy
         # Have to implement our own weighted softmax cross entroy
         # because TF doesn't provide one 
         # Because logits and cost are returned in the end of this func, 
@@ -206,24 +256,23 @@ class AnytimeFCN(AnytimeNetwork):
                                   name='cross_entropy_loss')
         add_moving_summary(cross_entropy)
 
-        # Unweighted total abs diff
+        ## Unweighted total abs diff
         sum_abs_diff = sum_absolute_difference(prob, label)
         sum_abs_diff *= eval_mask 
         sum_abs_diff = tf.divide(tf.reduce_sum(sum_abs_diff), 
                                  n_non_void_samples, name='sum_abs_diff')
         add_moving_summary(sum_abs_diff)
         
-        # confusion matrix for iou and pixel level accuracy
+        ## confusion matrix for iou and pixel level accuracy
         int_pred = tf.argmax(logits, 1, name='int_pred')
         int_label = tf.argmax(label, 1, name='int_label')
         cm = tf.confusion_matrix(labels=int_label, predictions=int_pred,\
             num_classes=self.num_classes, name='confusion_matrix', weights=eval_mask)
 
-        # pixel level accuracy
+        ## pixel level accuracy
         accu = tf.divide(tf.cast(tf.reduce_sum(tf.diag_part(cm)), dtype=tf.float32), \
                          n_non_void_samples, name='accuracy')
         add_moving_summary(accu)
-
         return logits, cross_entropy
 
     
@@ -257,7 +306,11 @@ def parser_add_fcdense_arguments(parser):
     depth_group.add_argument('--fcdense_depth',
                             help='depth of the network in number of conv',
                             type=int)
-
+    parser.add_argument('--is_atrous', help='whether use atrous conv or using deconv for fine resolution',
+        default=False, action='store_true')
+    parser.add_argument('--output_stride', help='Under is_atrous, ' \
+        +' the ratio between input img to final feature resolution',
+        type=int, default=16, choices=[8,16,32])
     return parser, depth_group
 
 
@@ -562,33 +615,38 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         self.growth_rate = self.options.growth_rate
         self.growth_rate_factor = [1,2,4,4]
         self.bottleneck_factor = [1,2,4,4]
+        self.output_strides = [4, 8, 16, 32]
+        if not self.is_atrous:
+            self.output_stride = 32
+        self.output_stride_ratio = [ (o_stride // self.output_stride) for o_stride in self.output_strides ]
+
         self.init_channel = self.growth_rate * 2
         self.reduction_ratio = self.options.reduction_ratio
         self.num_scales = len(self.network_config.n_units_per_block)
-        self.n_pools = self.num_scales - 1
+        self.n_pools = self.num_scales - 1 if not self.do_scale_feat_to_label else 0
         self.dropout_kp = args.dropout_kp
 
     def bi_to_scale_idx(self, bi):
-        """
-            Note that scale_idx 0 is the finest resolution. 
-        """
-        si = self.num_scales - bi - 1
-        return si
+        return 0
 
-    def _compute_edge(self, l, ch_out, bnw, 
+    def _compute_edge(self, l, ch_out, bnw, osr, 
             l_type='normal', dyn_hw=None, 
             name=""):
         if self.network_config.b_type == 'bottleneck':
             bnw_ch = int(bnw * ch_out)
             l = Conv2D('conv1x1_'+name, l, bnw_ch, 1, activation=BNReLU)
+        dilation_rate = 1
+        stride = 1
         if l_type == 'normal':
-            l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=1, activation=BNReLU)
+            dilation_rate = max(1, osr)
         elif l_type == 'down':
-            l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=2, activation=BNReLU)
+            stride = 1 if osr > 1 else 2 
+            dilation_rate = max(1, osr//2)
         elif l_type == 'up':
             assert dyn_hw is not None
             l = ResizeImages('resize', l, dyn_hw) 
-            l = Conv2D('conv1x1_bilin'+name, l, ch_out, 1, activation=BNReLU)
+        l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=stride, \
+            dilation_rate=dilation_rate, activation=BNReLU)
         return l
 
     def _compute_block(self, bi, n_units, layer_idx, l_mf):
@@ -596,13 +654,14 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         for k in range(n_units):
             layer_idx += 1
             scope_name = self.compute_scope_basename(layer_idx)
-            s_start = 0
-            s_end = self.num_scales 
+            s_start = self.bi_to_scale_idx(bi)
+            s_end = min(self.num_scales, - layer_idx + self.total_units)
             l_feats = [None] * self.num_scales
             for w in range(s_start, s_end):
                 with tf.variable_scope(scope_name+'.'+str(w)) as scope:
                     g = self.growth_rate_factor[w] * self.growth_rate
                     bnw = self.bottleneck_factor[w] 
+                    osr = self.output_stride_ratio[w]
                     has_prev_scale = w > 0 and l_mf[w-1] is not None
                     has_next_scale = w < self.num_scales - 1 and l_mf[w+1] is not None
                     dyn_hw = [tf.shape(l_mf[w])[self.h_dim], tf.shape(l_mf[w])[self.w_dim]]
@@ -610,28 +669,34 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                     edges = []
                     if has_prev_scale and has_next_scale:
                         # both paths exist, 1/3 from each direction
-                        edges.append(self._compute_edge(l_mf[w], g - g//3 * 2, bnw, 'normal', name='en'))
-                        edges.append(self._compute_edge(l_mf[w-1], g//3, bnw, 'down', name='ed'))
-                        edges.append(self._compute_edge(l_mf[w+1], g//3, bnw, 'up',
+                        edges.append(self._compute_edge(l_mf[w], g - g//3 * 2, bnw, osr, 'normal', name='en'))
+                        edges.append(self._compute_edge(l_mf[w-1], g//3, bnw, osr, 'down', name='ed'))
+                        edges.append(self._compute_edge(l_mf[w+1], g//3, bnw, osr, 'up',
                             dyn_hw=dyn_hw, name='eu'))
 
                     elif has_prev_scale:
-                        edges.append(self._compute_edge(l_mf[w], g - g//2, bnw, 'normal', name='en'))
-                        edges.append(self._compute_edge(l_mf[w-1], g//2, bnw, 'down', name='ed'))
+                        edges.append(self._compute_edge(l_mf[w], g - g//2, bnw, osr, 'normal', name='en'))
+                        edges.append(self._compute_edge(l_mf[w-1], g//2, bnw, osr, 'down', name='ed'))
 
                     elif has_next_scale:
-                        edges.append(self._compute_edge(l_mf[w], g - g//2, bnw, 'normal', name='en'))
-                        edges.append(self._compute_edge(l_mf[w+1], g//2, bnw, 'up',
+                        edges.append(self._compute_edge(l_mf[w], g - g//2, bnw, osr, 'normal', name='en'))
+                        edges.append(self._compute_edge(l_mf[w+1], g//2, bnw, osr, 'up',
                             dyn_hw=dyn_hw, name='eu'))
                     l_feats[w] = tf.concat(edges, self.ch_dim, name='concat_edges')
-                    if self.dropout_kp < 1:
-                        l_feats[w] = Dropout('dropout', l_feats[w], keep_prob=self.dropout_kp)
-                    
+                    l_feats[w] = Dropout('dropout', l_feats[w], keep_prob=self.dropout_kp)
+
             #end for w
             new_l_mf = [None] * self.num_scales
             for w in range(s_start, s_end):
                 with tf.variable_scope(scope_name+'.'+str(w) + '.merge') as scope:
                     new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], self.ch_dim, name='merge_feats')
+                    if w == self.num_scales - 1 and self.weights[layer_idx + w] > 0:
+                        output_stride_w = min(self.output_stride, self.output_strides[w])
+                        atrous_rates = np.asarray(self.atrous_rates) * \
+                            (self.atrous_rates_base_output_stride // output_stride_w)
+                        ch_out = new_l_mf[w].get_shape().as_list()[self.ch_dim]
+                        new_l_mf[w] = atrous_pool_features(new_l_mf[w], ch_out, atrous_rates, 
+                            data_format=self.data_format)
             ll_feats.append(new_l_mf)
             l_mf = new_l_mf
         return ll_feats
@@ -648,66 +713,72 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 ch_in = l.get_shape().as_list()[self.ch_dim]
                 ch_out = int(ch_in * rr)
                 l = Conv2D('conv1x1', l, ch_out, 1, activation=BNReLU)
-                if self.dropout_kp < 1:
-                    l = Dropout('dropout', l, keep_prob=self.dropout_kp)
+                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l_feats[w] = l
         return l_feats
 
 
     def _compute_init_l_feats(self, image):
-        """
-            Compute the initial features based on the input image. 
-            The images are first downsampled for the coarse resolution, before using 
-            convolutions.
-        """
-        l_init_feats = []
-        l = image
-        for i in range(self.n_pools + 1):
-            ch_out = self.growth_rate * 2 * self.growth_rate_factor[i]
-            l = Conv2D('conv0_scale_{}'.format(i), l, ch_out, 3, activation=BNReLU)
-            l_init_feats.append(l) 
-            if i == self.n_pools:
-                break
-            l = AvgPooling('img_{}'.format(i+1), l, 2, padding='same')
-        return l_init_feats
+        l_feats = []
+        for w in range(self.num_scales):
+            scope_name = self.compute_scope_basename(0)
+            with tf.variable_scope(scope_name+'.'+str(w)) as scope:
+                ch_out = self.init_channel * self.growth_rate_factor[w]
+                if w == 0:
+                    if self.network_config.s_type == 'basic':
+                        l = Conv2D('conv3x3', image, ch_out, 3, activation=BNReLU)
+                    else:
+                        assert self.network_config.s_type == 'imagenet'
+                        l = (LinearWrap(image)
+                            .Conv2D('conv7x7', ch_out, 7, strides=2, activation=BNReLU)
+                            .MaxPooling('pool0', 3, strides=2, padding='same')())
+                else:
+                    osr = self.output_stride_ratio[w]
+                    stride = 1 if osr > 1 else 2
+                    dilation_rate = max(1, osr//2)
+                    l = Conv2D('conv3x3', l, ch_out, 3, strides=stride, \
+                        dilation_rate=dilation_rate, activation=BNReLU) 
+                l_feats.append(l)
+        return l_feats
 
 
     def _compute_ll_feats(self, image):
         l_mf = self._compute_init_l_feats(image)
         ll_feats = [ l_mf ]
-        layer_idx = -1
+        layer_idx = 0
         for bi, n_units in enumerate(self.network_config.n_units_per_block):
-            ll_block_feats = self._compute_block(bi, n_units, layer_idx, l_mf)
-            layer_idx += n_units
+            ll_block_feats = self._compute_block(bi, n_units - 1, layer_idx, l_mf)
+            layer_idx += n_units - 1
             ll_feats.extend(ll_block_feats)
             l_mf = ll_block_feats[-1]
             if bi < self.n_blocks - 1 and self.reduction_ratio < 1:
                 l_mf = self._compute_transition(l_mf, layer_idx)
+                ll_feats.append(l_mf)
+                layer_idx += 1
 
-        
-        def li_to_scale_idx(layer_idx):
-            # first idx that is > layer_idx
-            bi = bisect.bisect_right(self.cumsum_blocks, layer_idx)
-            scale_idx = self.bi_to_scale_idx(bi)
-            return scale_idx
-        ll_feats = ll_feats[1:]
         # force merge with the last of the first block.
-        l_feats_block0 = ll_feats[self.network_config.n_units_per_block[0]-1]
+        n_first_block_layers = self.network_config.n_units_per_block[0]
+        fine_feat = ll_feats[n_first_block_layers - 1][0]
+        ch_fine_feat = fine_feat.get_shape().as_list()[self.ch_dim]
+        fine_feat = Conv2D('fine_feat_conv1x1', fine_feat, ch_fine_feat, 1, activation=BNReLU)
         ll_feats_ret = [None] * self.total_units
         for li, l_feats in enumerate(ll_feats):
             if self.weights[li] == 0:
                 continue
-            # Merge with the final feature of the first block.
-            # si == self.n_pools equals it already, so no merge there.
-            si = li_to_scale_idx(li)
-            if si == self.n_pools:
-                l = l_feats[si]
+
+            #bi = bisect.bisect_right(self.cumsum_blocks, li)
+            #si = self.bi_to_scale_idx(bi)
+            if li < n_first_block_layers:
+                l = fine_feat
             else:
-                l = tf.concat([ l_feats[si], l_feats_block0[si] ], 
-                    self.ch_dim, name='force_merge_{}'.format(li))
-            # also add 1x1 conv to ensure predictors have some freedom 
-            ch_out = min(l.get_shape().as_list()[self.ch_dim], 128)
-            l = Conv2D('pred_feat_{}_1x1'.format(li), l, ch_out, 1, activation=BNReLU) 
+                l = l_feats[0]
+                ch_out = l.get_shape().as_list()[self.ch_dim]
+                l = Conv2D('pred_feat_conv1x1_{}'.format(li), l, ch_out, 1, activation=BNReLU)
+                l = tf.concat([l, fine_feat],
+                    self.ch_dim, name='merged_pred_feat'.format(li))
+
             ll_feats_ret[li] = [l]
 
         return ll_feats_ret
+
+

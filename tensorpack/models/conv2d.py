@@ -197,7 +197,7 @@ def ResizeImages(
     images, 
     size, 
     method=tf.image.ResizeMethod.BILINEAR, 
-    align_corners=False,
+    align_corners=True,
     data_format='channels_last'):
     """
         Use tf.image.resize_images to resize feature map. 
