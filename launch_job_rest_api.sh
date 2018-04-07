@@ -31,7 +31,7 @@
 # 3928..3939
 # Num gpus : 8
 
-for i in {3892..3900} {3914..3925}; # 4 gpu {3903..3911} {3928..3939} # 8 gpu 
+for i in {3892..3893}; # 4 gpu {3903..3911} {3928..3939} # 8 gpu 
 do
 	USERNAME="dedey"
 	PASSWORD="Urdu2god?"
@@ -41,9 +41,10 @@ do
 	VC="msrlabs"
 	NUM_GPUS="4"
 
-	CMD="https://philly/api/submit?"
+	CMD="https://philly/api/v2/submit?"
 	CMD+="buildId=0000&"
-	CMD+="customDockerName=custom-tf-1-1-0-python-2-7&"
+	#CMD+="customDockerName=custom-tf-1-1-0-python-2-7&"
+	CMD+="customDockerName=custom-tensorflow-tf16-py27&"
 	CMD+="toolType=cust&"
 	CMD+="clusterId=$CLUSTER&"
 	CMD+="vcId=$VC&"
