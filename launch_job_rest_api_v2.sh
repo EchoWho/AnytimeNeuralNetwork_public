@@ -52,7 +52,7 @@ do
             "UserName": "'${USERNAME}'",
             "BuildId": 0,
             "ToolType": null,
-            "ConfigFile": "'${USERNAME}'/AnytimeNeuralNetwork_master/'${JOBSCRIPT}'",
+            "ConfigFile": "'${USERNAME}'/AnytimeNeuralNetwork_master/cust_exps/'${JOBSCRIPT}'",
             "Inputs": [{
                 "Name": "dataDir",
                 "Path": "/hdfs/'${VC}'/dedey/ann_data_dir"
