@@ -18,6 +18,7 @@ from anytime_models.models.anytime_fcn import \
     AnytimeFCNCoarseToFine, AnytimeFCDenseNet, AnytimeFCDenseNetV2, \
     parser_add_fcdense_arguments
 import get_augmented_data
+import ann_app_utils
 
 
 """
@@ -176,7 +177,13 @@ def evaluate(subset, get_data, model_cls, meta_info):
 
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
-    steps_per_epoch = ds_train.size() // args.nr_gpu
+    steps_per_epoch = ds_train.size() // args.nr_gpu    
+    starting_epoch = ann_app_utils.grep_starting_epoch(args.load, steps_per_epoch)
+    logger.info("The starting epoch is {}".format(starting_epoch))
+    args.init_lr = ann_app_utils.grep_init_lr(starting_epoch, lr_schedule)
+    logger.info("The starting learning rate is {}".format(args.init_lr))
+
+
 
     model=model_cls(args)
     classification_cbs = model.compute_classification_callbacks()
@@ -185,7 +192,7 @@ def get_config(ds_trian, ds_val, model_cls):
     return TrainConfig(
         dataflow=ds_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_checkpoint_every_n_hours=12),
+            ModelSaver(checkpoint_dir=args.model_dir, max_to_keep=2, keep_checkpoint_every_n_hours=12),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
@@ -195,6 +202,7 @@ def get_config(ds_trian, ds_val, model_cls):
         monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
+        starting_epoch=starting_epoch,
     )
 
 

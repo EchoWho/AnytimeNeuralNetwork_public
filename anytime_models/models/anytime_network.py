@@ -1534,6 +1534,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         self.reduction_ratio = self.options.reduction_ratio
         self.dropout_kp = args.dropout_kp
 
+
     def _compute_init_l_feats(self, image):
         l_feats = []
         for w in range(self.num_scales):
@@ -1560,13 +1561,13 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         if l_type == 'up':
             assert dyn_hw is not None, dyn_hw
             l = ResizeImages('bilin_resize', l, dyn_hw)
-            l = Conv2D('conv1x1_bilin'+name, l, ch_out, 1, activation=BNReLU)
+            stride = 1
         else:
             if l_type == 'normal':
                 stride = 1
             elif l_type == 'down':
                 stride = 2
-            l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=stride, activation=BNReLU)
+        l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=stride, activation=BNReLU)
         return l
 
     def _compute_block(self, bi, n_units, layer_idx, l_mf):
@@ -1600,6 +1601,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
         #end for k in units
         return ll_feats
 
+
     def _compute_transition(self, ll_merged_feats, layer_idx):
         rr = self.reduction_ratio
         l_feats = []
@@ -1615,6 +1617,7 @@ class AnytimeMultiScaleDenseNet(AnytimeNetwork):
                 l_feats.append(l)
         return l_feats
         
+
     def _compute_ll_feats(self, image):
         l_mf = self._compute_init_l_feats(image)
         ll_feats = [ l_mf ]
