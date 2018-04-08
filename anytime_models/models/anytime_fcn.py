@@ -645,7 +645,7 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         elif l_type == 'up':
             assert dyn_hw is not None
             l = ResizeImages('resize', l, dyn_hw) 
-            dilation_rate = max(1, osr//2)
+            #dilation_rate = max(1, osr//2)
         l = Conv2D('conv3x3_'+name, l, ch_out, 3, strides=stride, \
             dilation_rate=dilation_rate, activation=BNReLU)
         return l
