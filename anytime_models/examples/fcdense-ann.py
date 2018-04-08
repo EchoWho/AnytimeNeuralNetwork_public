@@ -273,6 +273,11 @@ if __name__ == '__main__':
         args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_camvid_data
+
+        batch_ratio = args.batch_size // args.nr_gpu
+        args.batch_size = args.nr_gpu
+        args.batch_norm_decay = 0.9997
+
         if args.operation == 'evaluate':
             args.batch_size = 1
             args.nr_gpu = 1
@@ -287,10 +292,9 @@ if __name__ == '__main__':
             for i in range(max_epoch):
                 lr *= 0.995
                 lr_schedule.append((i+1, lr))
+
         elif args.operation == 'finetune':
-            batch_ratio = args.batch_size // args.nr_gpu
-            args.batch_size = args.nr_gpu
-            args.batch_norm_decay = 0.9 ** (1.0 / batch_ratio) 
+            raise NotImplemented
 
             init_epoch = 750 // batch_ratio
             max_epoch = int(init_epoch * 1.25)
