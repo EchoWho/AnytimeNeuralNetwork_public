@@ -137,7 +137,7 @@ class WeightedTensorStats(Inferencer):
         self.weight_name = weight_name
         self.prefix = prefix
 
-    def _get_output_tensors(self):
+    def _get_fetches(self):
         if self.weight_name is not None:
             return self.names + [self.weight_name]
         return self.names
@@ -146,7 +146,7 @@ class WeightedTensorStats(Inferencer):
         self.stats = None
         self.total_weight = None
 
-    def _datapoint(self, output):
+    def _on_fetches(self, output):
         weight = 1.0
         if self.weight_name is not None:
             weight = output[-1]
@@ -188,13 +188,13 @@ class MeanIoUFromConfusionMatrix(Inferencer):
         self.cm_name = cm_name
         self.prefix = scope_name_prefix
     
-    def _get_output_tensors(self):
+    def _get_fetches(self):
         return [self.cm_name]
 
     def _before_inference(self):
         self.total_cm = 0 
 
-    def _datapoint(self, output):
+    def _on_fetches(self, output):
         cm = output[0]
         self.total_cm += cm
 
@@ -309,13 +309,13 @@ class StorePrediction(Inferencer):
         self.logit_var_name = logit_var_name
         self.path = path
 
-    def _get_output_tensors(self):
+    def _get_fetches(self):
         return [self.logit_var_name]
 
     def _before_inference(self):
         self.logits = []
 
-    def _datapoint(self, dp, outputs):
+    def _on_fetches(self, dp, outputs):
         self.logits.append(outputs[0])
 
     def _after_inference(self):

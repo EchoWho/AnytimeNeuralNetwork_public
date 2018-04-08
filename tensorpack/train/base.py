@@ -266,7 +266,7 @@ class Trainer(object):
                 self.loop.update_global_step()
                 def _heart_beat(epoch, max_epoch, step, max_step):
                     if (step + 1) % 1000 == 0:
-                        percent = (epoch - 1 + float(step) / max_step) / max_epoch
+                        percent = 100. * (epoch - 1 + float(step) / max_step) / max_epoch
                         print("\nPROGRESS: {0:05.2f}%".format(percent))
 
                 for self.loop._epoch_num in range(

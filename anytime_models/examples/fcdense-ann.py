@@ -13,9 +13,12 @@ from tensorpack.callbacks import JSONWriter, ScalarPrinter
 
 import anytime_models.models.anytime_network as anytime_network
 from anytime_models.models.anytime_network import \
-    AnytimeFCDenseNet, AnytimeDensenet, AnytimeLogLogDenseNet, AnytimeFCDenseNetV2,\
-    AnytimeFCNCoarseToFine
+    AnytimeLogDenseNetV1, AnytimeLogLogDenseNet
+from anytime_models.models.anytime_fcn import \
+    AnytimeFCNCoarseToFine, AnytimeFCDenseNet, AnytimeFCDenseNetV2, \
+    parser_add_fcdense_arguments
 import get_augmented_data
+import ann_app_utils
 
 
 """
@@ -48,12 +51,12 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
             xy_augmentors = [
                 #imgaug.RotationAndCropValid(7),
                 #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-                imgaug.RandomCrop((side, side)),
+#                imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
         else:
             xy_augmentors = [
-                imgaug.RandomCrop((side, side)),
+#                imgaug.RandomCrop((side, side)),
             ]
     elif args.operation == 'finetune':
         if isTrain:
@@ -174,7 +177,13 @@ def evaluate(subset, get_data, model_cls, meta_info):
 
 def get_config(ds_trian, ds_val, model_cls):
     # prepare dataset
-    steps_per_epoch = ds_train.size() // args.nr_gpu
+    steps_per_epoch = ds_train.size() // args.nr_gpu    
+    starting_epoch = ann_app_utils.grep_starting_epoch(args.load, steps_per_epoch)
+    logger.info("The starting epoch is {}".format(starting_epoch))
+    args.init_lr = ann_app_utils.grep_init_lr(starting_epoch, lr_schedule)
+    logger.info("The starting learning rate is {}".format(args.init_lr))
+
+
 
     model=model_cls(args)
     classification_cbs = model.compute_classification_callbacks()
@@ -183,7 +192,7 @@ def get_config(ds_trian, ds_val, model_cls):
     return TrainConfig(
         dataflow=ds_train,
         callbacks=[
-            ModelSaver(checkpoint_dir=args.model_dir, keep_checkpoint_every_n_hours=12),
+            ModelSaver(checkpoint_dir=args.model_dir, max_to_keep=2, keep_checkpoint_every_n_hours=12),
             InferenceRunner(ds_val,
                             [ScalarStats('cost')] + classification_cbs),
             ScheduledHyperParamSetter('learning_rate', lr_schedule),
@@ -193,6 +202,7 @@ def get_config(ds_trian, ds_val, model_cls):
         monitors=[JSONWriter(), ScalarPrinter()],
         steps_per_epoch=steps_per_epoch,
         max_epoch=max_epoch,
+        starting_epoch=starting_epoch,
     )
 
 
@@ -221,17 +231,19 @@ if __name__ == '__main__':
                         default='train', choices=['train', 'finetune', 'evaluate'])
     parser.add_argument('--display_period', help='Display at eval every # of image; 0 means no display',
                         default=0, type=int)
-    anytime_network.parser_add_fcdense_arguments(parser)
+    parser_add_fcdense_arguments(parser)
     args = parser.parse_args()
     model_cls = None
     if args.densenet_version == 'atv2':
         model_cls = AnytimeFCDenseNetV2
     elif args.densenet_version == 'atv1':
-        model_cls = AnytimeFCDenseNet(AnytimeDensenet)
+        model_cls = AnytimeFCDenseNet(AnytimeLogDenseNetV1)
     elif args.densenet_version == 'loglog':
         model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
     elif args.densenet_version == 'c2f':
         model_cls = AnytimeFCNCoarseToFine
+    elif args.densenet_version == 'dense':
+        model_cls = FCDensenet 
 
     logger.set_log_root(log_root=args.log_dir)
     logger.auto_set_dir(action='k')
@@ -261,6 +273,10 @@ if __name__ == '__main__':
         args.optimizer = 'rmsprop'
         INPUT_SIZE = None
         get_data = get_camvid_data
+
+        batch_ratio = args.batch_size // args.nr_gpu
+        #args.batch_norm_decay = 0.9997
+
         if args.operation == 'evaluate':
             args.batch_size = 1
             args.nr_gpu = 1
@@ -275,10 +291,9 @@ if __name__ == '__main__':
             for i in range(max_epoch):
                 lr *= 0.995
                 lr_schedule.append((i+1, lr))
+
         elif args.operation == 'finetune':
-            batch_ratio = args.batch_size // args.nr_gpu
-            args.batch_size = args.nr_gpu
-            args.batch_norm_decay = 0.9 ** (1.0 / batch_ratio) 
+            raise NotImplemented
 
             init_epoch = 750 // batch_ratio
             max_epoch = int(init_epoch * 1.25)
