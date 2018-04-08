@@ -1,7 +1,7 @@
 import argparse
 
 import anytime_models.models.anytime_network as anytime_network
-from anytime_models.models.anytime_network import AnytimeResnet, AnytimeResNeXt
+from anytime_models.models.anytime_network import AnytimeResNet, AnytimeResNeXt
 
 import ann_app_utils
 
@@ -13,7 +13,7 @@ if __name__ == '__main__':
     anytime_network.parser_add_resnet_arguments(parser)
     args = parser.parse_args()
     if args.resnet_version == 'resnet':
-        model_cls = AnytimeResnet
+        model_cls = AnytimeResNet
     elif args.resnet_version == 'resnext':
         model_cls = AnytimeResNeXt
         args.b_type = 'bottleneck'

@@ -48,7 +48,7 @@ do
 	CMD+="toolType=cust&"
 	CMD+="clusterId=$CLUSTER&"
 	CMD+="vcId=$VC&"
-	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork_master%2F$JOBSCRIPT&"
+	CMD+="configFile=$USERNAME%2FAnytimeNeuralNetwork_master%2Fcust_exps%2F$JOBSCRIPT&"
 	CMD+="minGPUs=$NUM_GPUS&"
 	CMD+="name=cust-p-$JOBSCRIPT$SPECIAL_NAME!~!~!1&"
 	CMD+="isdebug=false&"

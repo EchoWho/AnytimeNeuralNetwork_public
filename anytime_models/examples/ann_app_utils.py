@@ -48,6 +48,7 @@ def grep_starting_epoch(load, steps_per_epoch):
         starting_epoch = 1 + max_step / steps_per_epoch
     return starting_epoch
 
+
 def grep_init_lr(starting_epoch, lr_schedule):
     """
     starting_epoch : starting epoch index (1 based)
@@ -196,7 +197,7 @@ def ilsvrc_train_config(args, model_cls, lr_schedule, max_epoch):
         Get a TrainConfig for training on ilsvrc.
 
         args : input argument from parser i.e. options
-        model_cls : name of the class of the network, e.g., AnytimeResnet
+        model_cls : name of the class of the network, e.g., AnytimeResNet
         lr_schedule : [(epoch, lr_val),...]
         max_epoch : maximum epochs to run
 
