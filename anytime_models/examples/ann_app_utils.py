@@ -48,6 +48,7 @@ def grep_starting_epoch(load, steps_per_epoch):
         starting_epoch = 1 + max_step / steps_per_epoch
     return starting_epoch
 
+
 def grep_init_lr(starting_epoch, lr_schedule):
     """
     starting_epoch : starting epoch index (1 based)
