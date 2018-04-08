@@ -275,7 +275,6 @@ if __name__ == '__main__':
         get_data = get_camvid_data
 
         batch_ratio = args.batch_size // args.nr_gpu
-        args.batch_size = args.nr_gpu
         args.batch_norm_decay = 0.9997
 
         if args.operation == 'evaluate':
