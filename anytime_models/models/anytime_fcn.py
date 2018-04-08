@@ -216,8 +216,8 @@ class AnytimeFCN(AnytimeNetwork):
         ## Compute flattened logits
         # Assume all previous layers have gone through BNReLU, so conv directly
         ch_in = l.get_shape().as_list()[self.ch_dim]
-        #l = Conv2D('pred_conv3x3_1', l, ch_in, 3, dilation_rate=1, activation=BNReLU)
-        #l = Conv2D('pred_conv3x3_2', l, ch_in, 3, dilation_rate=2, activation=BNReLU) 
+        l = Conv2D('pred_conv3x3_1', l, ch_in, 3, dilation_rate=1, activation=BNReLU)
+        l = Conv2D('pred_conv3x3_2', l, ch_in, 3, dilation_rate=2, activation=BNReLU) 
         l = Conv2D('conv_pred', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
         if self.data_format == 'channels_first':
@@ -760,8 +760,8 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         # force merge with the last of the first block.
         n_first_block_layers = self.network_config.n_units_per_block[0]
         fine_feat = ll_feats[n_first_block_layers - 1][0]
-        #ch_fine_feat = fine_feat.get_shape().as_list()[self.ch_dim]
-        #fine_feat = Conv2D('fine_feat_conv1x1', fine_feat, ch_fine_feat, 1, activation=BNReLU)
+        ch_fine_feat = fine_feat.get_shape().as_list()[self.ch_dim]
+        fine_feat = Conv2D('fine_feat_conv1x1', fine_feat, ch_fine_feat, 1, activation=BNReLU)
         ll_feats_ret = [None] * self.total_units
         for li, l_feats in enumerate(ll_feats):
             if self.weights[li] == 0:
@@ -773,10 +773,10 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 l = fine_feat
             else:
                 l = l_feats[0]
-                #ch_out = l.get_shape().as_list()[self.ch_dim]
-                #l = Conv2D('pred_feat_conv1x1_{}'.format(li), l, ch_out, 1, activation=BNReLU)
-                #l = tf.concat([l, fine_feat],
-                #    self.ch_dim, name='merged_pred_feat'.format(li))
+                ch_out = l.get_shape().as_list()[self.ch_dim]
+                l = Conv2D('pred_feat_conv1x1_{}'.format(li), l, ch_out, 1, activation=BNReLU)
+                l = tf.concat([l, fine_feat],
+                    self.ch_dim, name='merged_pred_feat'.format(li))
 
             ll_feats_ret[li] = [l]
 
