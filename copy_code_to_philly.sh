@@ -23,7 +23,7 @@ sudo rsync -vr --progress --exclude='.git/' /home/dedey/AnytimeNeuralNetwork/ /m
 sudo umount /mnt/msrlabs_scratch_dedey
 
 
-echo "Copying code to cam"
+# echo "Copying code to cam"
 
 # Mount the msrlabs_scratch/dedey folder to /mnt/msrlabs_scratch_dedey
 sudo mount -t cifs //storage.cam.philly.selfhost.corp.microsoft.com/msrlabs_scratch/dedey /mnt/msrlabs_scratch_dedey/ -o username=dedey,domain=REDMOND,iocharset=utf8,passwd="Urdu2god?"
