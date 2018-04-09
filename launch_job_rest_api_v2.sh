@@ -32,12 +32,12 @@
 # 3928..3939
 # Num gpus : 8
 
-for i in {3892..3900}
+for i in {3892..3900} {3914..3925}
 do
     USERNAME="dedey"
-    CLUSTER="gcr"
+    CLUSTER="cam"
     JOBSCRIPT="run_exp_$i.sh"
-    SPECIAL_NAME="_ann1"
+    SPECIAL_NAME="_ann"
     VC="msrlabs"
     NUM_GPUS="4"
 
