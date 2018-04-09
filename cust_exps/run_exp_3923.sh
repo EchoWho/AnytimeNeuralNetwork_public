@@ -32,7 +32,7 @@ case $key in
     shift # pass argument
     ;;
     -p|--config-file-dir)
-    CONFIG_DIR="$2"
+    CONFIG_DIR=`dirname $2`
     shift # pass argument
     ;;
     -m|--model-dir)
