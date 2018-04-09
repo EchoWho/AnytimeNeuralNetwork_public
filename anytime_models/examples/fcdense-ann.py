@@ -285,7 +285,7 @@ if __name__ == '__main__':
             sys.exit()
         
         if args.operation == 'train':
-            max_epoch = 700
+            max_epoch = 800
             lr = args.init_lr
             lr_schedule = []
             for i in range(max_epoch):
