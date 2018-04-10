@@ -32,14 +32,14 @@
 # 3928..3939
 # Num gpus : 8
 
-for i in {3892..3900} {3914..3925}
+for i in {3903..3911} {3928..3939}
 do
     USERNAME="dedey"
     CLUSTER="cam"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="4"
+    NUM_GPUS="8"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
