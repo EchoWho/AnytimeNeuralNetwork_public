@@ -135,8 +135,7 @@ class AnytimeFCN(AnytimeNetwork):
         
 
     def _get_inputs(self):
-        #HW = [None, None]
-        HW = [360, 480]
+        HW = [None, None]
         if self.options.is_label_one_hot:
             # the label one-hot is in fact a distribution of labels. 
             # Void labeled pixels have 0-vector distribution.
