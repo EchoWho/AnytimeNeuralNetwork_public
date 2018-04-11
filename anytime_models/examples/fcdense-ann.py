@@ -20,9 +20,6 @@ from anytime_models.models.anytime_fcn import \
 import get_augmented_data
 import ann_app_utils
 
-import matplotlib.pyplot as plt
-import skimage.transform
-imresize = skimage.transform.resize
 
 """
 """
@@ -91,6 +88,14 @@ def label_image_to_rgb(label_img, cmap):
     return np.asarray([ cmap[y] for y in label_img.reshape([-1])], dtype=np.uint8).reshape([H,W,3])
 
 def evaluate(subset, get_data, model_cls, meta_info):
+    if args.display_period > 0 and i % args.display_period == 0 \
+            and logger.LOG_DIR is not None:
+        # we import here since this is only used for presentation, which never happens on servers.
+        # server may not have these packages.
+        import matplotlib.pyplot as plt
+        import skimage.transform
+        imresize = skimage.transform.resize
+
     args.batch_size = 1
     cmap = meta_info._cmap
     mean = meta_info.mean
