@@ -1,3 +1,10 @@
+This package is for reproduction of [![anytime neural networks](https://arxiv.org/abs/1708.06832)] and [![Log-DenseNet](https://arxiv.org/abs/1711.00002)].
+
+For Log-DenseNet, see example in scripts/run-fcdense.sh
+For anytime neural network, see example in tests/ann_tests/test_cifar_resnet.sh
+
+The following is the original README of the package tensorpack, which this work is based on. 
+
 ![Tensorpack](.github/tensorpack.png)
 
 Tensorpack is a training interface based on TensorFlow.
