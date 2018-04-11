@@ -20,6 +20,8 @@ from anytime_models.models.anytime_fcn import \
 import get_augmented_data
 import ann_app_utils
 
+import matplotlib.pyplot as plt
+from scipy.misc import imresize
 
 """
 """
@@ -51,26 +53,23 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
             xy_augmentors = [
                 #imgaug.RotationAndCropValid(7),
                 #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-#                imgaug.RandomCrop((side, side)),
+                imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
         else:
             xy_augmentors = [
-#                imgaug.RandomCrop((side, side)),
+                imgaug.RandomCrop((side, side)),
             ]
     elif args.operation == 'finetune':
         if isTrain:
             xy_augmentors = [ 
                 imgaug.Flip(horiz=True), 
-            #imgaug.RandomCrop((300, 300)) 
             ]
         else:
             xy_augmentors = [
-            #imgaug.RandomCrop((300, 300)) 
             ]
     elif args.operation == 'evaluate':
         xy_augmentors = [ 
-            #imgaug.RandomCrop((300, 300)) 
         ]
 
     if len(x_augmentors) > 0:
@@ -91,9 +90,6 @@ def label_image_to_rgb(label_img, cmap):
     return np.asarray([ cmap[y] for y in label_img.reshape([-1])], dtype=np.uint8).reshape([H,W,3])
 
 def evaluate(subset, get_data, model_cls, meta_info):
-    if logger.LOG_DIR is not None and args.display_period > 0:
-        import matplotlib.pyplot as plt
-        from scipy.misc import imresize
     args.batch_size = 1
     cmap = meta_info._cmap
     mean = meta_info.mean
@@ -183,8 +179,6 @@ def get_config(ds_trian, ds_val, model_cls):
     args.init_lr = ann_app_utils.grep_init_lr(starting_epoch, lr_schedule)
     logger.info("The starting learning rate is {}".format(args.init_lr))
 
-
-
     model=model_cls(args)
     classification_cbs = model.compute_classification_callbacks()
     loss_select_cbs = model.compute_loss_select_callbacks()
@@ -223,7 +217,7 @@ if __name__ == '__main__':
                         type=str, default=None)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
-    parser.add_argument('--is_test', help='Whehter use train-val or trainval-test',
+    parser.add_argument('--is_test', help='Whehter use train-val or train-test',
                         default=False, action='store_true')
     parser.add_argument('--is_philly', help='Whether the script is running in a phily script',
                         default=False, action='store_true')
@@ -274,8 +268,6 @@ if __name__ == '__main__':
         INPUT_SIZE = None
         get_data = get_camvid_data
 
-        batch_ratio = args.batch_size // args.nr_gpu
-        #args.batch_norm_decay = 0.9997
 
         if args.operation == 'evaluate':
             args.batch_size = 1
@@ -283,9 +275,10 @@ if __name__ == '__main__':
             subset = 'test' if args.is_test else 'val'
             evaluate(subset, get_data, model_cls, dataset.Camvid)
             sys.exit()
-        
+
+        max_train_epoch = 750
         if args.operation == 'train':
-            max_epoch = 800
+            max_epoch = max_train_epoch
             lr = args.init_lr
             lr_schedule = []
             for i in range(max_epoch):
@@ -293,17 +286,18 @@ if __name__ == '__main__':
                 lr_schedule.append((i+1, lr))
 
         elif args.operation == 'finetune':
-            raise NotImplemented
-
-            init_epoch = 750 // batch_ratio
-            max_epoch = int(init_epoch * 1.25)
-            lr = args.init_lr * 0.995**750 
-            lr_multiplier = 0.995 
+            batch_per_gpu = args.batch_size // args.nr_gpu
+            init_epoch = max_train_epoch // batch_per_gpu 
             lr_schedule = []
-            for i in range(max_epoch):
-                if i > init_epoch:
-                    lr *= lr_multiplier   
+            init_lr = 3e-4
+            lr = init_lr
+            for i in range(init_epoch, init_epoch + 300):
                 lr_schedule.append((i+1, lr))
+                lr *= 0.995
+
+            # Finetune has 1 sample per gpu for each batch
+            args.batch_size = args.nr_gpu 
+            args.init_lr = init_lr 
 
         if not args.is_test:
             ds_train = get_data('train') #trainval
