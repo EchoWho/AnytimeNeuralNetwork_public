@@ -82,7 +82,7 @@ def Conv2D(
         kernel_shape = shape2d(kernel_size)
         stride = shape4d(strides, data_format=data_format)
         flops = 1.0 * in_channel * out_channel * kernel_shape[0] * kernel_shape[1]
-        if in_shape[h_dim] is not None:
+        if in_shape[h_dim] is not None and in_shape[h_dim] > 0:
             flops *= in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
         ret.info = VariableHolder(flops=flops)
 
