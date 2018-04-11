@@ -48,10 +48,10 @@
 # 3959..3961
 # Num gpus : 8
 
-for i in {3942..3945} {3954..3956} # 4 gpu ;   {3948..3951} {3959..3961} # 8 gpu
+for i in {3892..3900} {3915..3925} {3942..3945} {3954..3956} # 4 gpu ;   {3948..3951} {3959..3961} # 8 gpu
 do
     USERNAME="dedey"
-    CLUSTER="cam"
+    CLUSTER="gcr"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
