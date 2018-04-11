@@ -21,7 +21,8 @@ import get_augmented_data
 import ann_app_utils
 
 import matplotlib.pyplot as plt
-from scipy.misc import imresize
+import skimage.transform
+imresize = skimage.transform.resize
 
 """
 """
