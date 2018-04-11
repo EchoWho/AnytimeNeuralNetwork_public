@@ -1,4 +1,4 @@
 import subprocess
 
-for i in range(3207, 3357):
-    subprocess.call(['git', 'rm', 'run_exp_{}.sh'.format(i), '-f'])
+for i in range(3942, 3967):
+    subprocess.call(['git', 'rm', 'cust_exps/run_exp_{}.sh'.format(i), '-f'])
