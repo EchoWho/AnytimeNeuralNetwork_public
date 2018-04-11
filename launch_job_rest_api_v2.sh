@@ -32,14 +32,30 @@
 # 3928..3939
 # Num gpus : 8
 
-for i in {3903..3911} {3928..3939}
+# Exp 98 (ResNet with adaloss with grid searched param)
+# 3942..3945
+# Num gpus : 4
+
+# Exp 99 (Copy of 98 w/ 8 gpus)
+# 3948..3951
+# Num gpus : 8
+
+# Exp 100 (MSDNet with adaloss with grid searched param)
+# 3954..3956
+# Num gpus : 4
+
+# Exp 101 (Copy of 100 w/ 8 gpus)
+# 3959..3961
+# Num gpus : 8
+
+for i in {3892..3900} {3915..3925} {3942..3945} {3954..3956} # 4 gpu ;   {3948..3951} {3959..3961} # 8 gpu
 do
     USERNAME="dedey"
-    CLUSTER="cam"
+    CLUSTER="gcr"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="8"
+    NUM_GPUS="4"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
