@@ -36,12 +36,18 @@ def grep_starting_epoch(load, steps_per_epoch):
     starting_epoch : the starting epoch number for the main_loop
     """
     starting_epoch = 1
-    if load and os.path.exists(load):
+    if load:
         dir_name, ckpt = os.path.split(load)
+        logger.info("{} exists for loading".format(load))
+        if ckpt != "checkpoint":
+            file_names = [ckpt]
+        else:
+            file_names = os.listdir(dir_name)
+        logger.info("The files we are checking are {}".format(file_names))
         max_step = 0
-        for fn in os.listdir(dir_name):
+        for fn in file_names:
             name, ext = os.path.splitext(fn)
-            if name[:5] == 'model' and ext == '.index':
+            if name[:5] == 'model':
                 step = int(name[name.rfind('-')+1:])
                 max_step = max(max_step, step)
                 logger.info("{} is at step {}".format(fn, step)) 

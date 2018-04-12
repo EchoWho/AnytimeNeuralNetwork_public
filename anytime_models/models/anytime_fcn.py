@@ -215,9 +215,7 @@ class AnytimeFCN(AnytimeNetwork):
         ## Compute flattened logits
         # Assume all previous layers have gone through BNReLU, so conv directly
         ch_in = l.get_shape().as_list()[self.ch_dim]
-        l = Conv2D('pred_conv3x3_1', l, ch_in, 3, dilation_rate=1, activation=BNReLU)
-        l = Conv2D('pred_conv3x3_2', l, ch_in, 3, dilation_rate=2, activation=BNReLU) 
-        l = Conv2D('conv_pred', l, self.num_classes, 1, use_bias=True)
+        l = Conv2D('linear', l, self.num_classes, 1, use_bias=True)
         logit_vars = l.variables
         if self.data_format == 'channels_first':
             l = tf.transpose(l, [0,2,3,1]) 
@@ -776,6 +774,10 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 l = Conv2D('pred_feat_conv1x1_{}'.format(li), l, ch_out, 1, activation=BNReLU)
                 l = tf.concat([l, fine_feat],
                     self.ch_dim, name='merged_pred_feat'.format(li))
+
+            ch_out = l.get_shape().as_list()[self.ch_dim]
+            l = Conv2D('pred_conv3x3_1', l, ch_out, 3, dilation_rate=1, activation=BNReLU)
+            l = Conv2D('pred_conv3x3_2', l, ch_out, 3, dilation_rate=2, activation=BNReLU) 
 
             ll_feats_ret[li] = [l]
 
