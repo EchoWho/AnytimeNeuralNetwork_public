@@ -2,8 +2,8 @@
 ds_name=camvid
 export CUDA_VISIBLE_DEVICES=2,3
 DATA_DIR=${GLOBAL_DATA_DIR}
-LOG_DIR=${GLOBAL_LOG_DIR}/${ds_name}_ann/
-MODEL_DIR=${GLOBAL_MODEL_DIR}/${ds_name}_ann/
+LOG_DIR=${GLOBAL_LOG_DIR}/${ds_name}_ann
+MODEL_DIR=${GLOBAL_MODEL_DIR}/${ds_name}_ann
 CONFIG_DIR=.
 
 mkdir -p $MODEL_DIR
@@ -20,7 +20,7 @@ python $CONFIG_DIR/anytime_models/examples/fcdense-ann.py \
 --n_pools=5 \
 --fcdense_depth=103 \
 -s=1 \
---batch_size=4 \
+--batch_size=6 \
 --nr_gpu=2 \
 --init_lr=1e-3 \
 --use_init_ch \
@@ -32,6 +32,6 @@ python $CONFIG_DIR/anytime_models/examples/fcdense-ann.py \
 --early_connect_type=1 \
 --log_dense_coef=2.0 \
 --weights_at_block_ends \
+--load=${MODEL_DIR}/model-42517 \
 #--is_test \
-#--load=${MODEL_DIR}/checkpoint \
 #--eval \
