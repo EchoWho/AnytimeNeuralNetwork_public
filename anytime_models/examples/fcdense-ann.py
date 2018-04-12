@@ -282,7 +282,7 @@ if __name__ == '__main__':
             evaluate(subset, get_data, model_cls, dataset.Camvid)
             sys.exit()
 
-        max_train_epoch = 750
+        max_train_epoch = 698
         if args.operation == 'train':
             max_epoch = max_train_epoch
             lr = args.init_lr
@@ -295,10 +295,12 @@ if __name__ == '__main__':
             batch_per_gpu = args.batch_size // args.nr_gpu
             init_epoch = max_train_epoch // batch_per_gpu 
             lr_schedule = []
-            init_lr = 3e-4
+            init_lr = 5e-5
             lr = init_lr
-            for i in range(init_epoch, init_epoch + 300):
-                lr_schedule.append((i+1, lr))
+            max_epoch=500 + init_epoch
+            lr_schedule.append((1, init_lr))
+            for i in range(init_epoch, max_epoch):
+                lr_schedule.append((i, lr))
                 lr *= 0.995
 
             # Finetune has 1 sample per gpu for each batch
