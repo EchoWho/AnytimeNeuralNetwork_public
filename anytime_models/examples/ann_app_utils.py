@@ -48,9 +48,12 @@ def grep_starting_epoch(load, steps_per_epoch):
         for fn in file_names:
             name, ext = os.path.splitext(fn)
             if name[:5] == 'model':
-                step = int(name[name.rfind('-')+1:])
-                max_step = max(max_step, step)
-                logger.info("{} is at step {}".format(fn, step)) 
+                try:
+                    step = int(name[name.rfind('-')+1:])
+                    max_step = max(max_step, step)
+                    logger.info("{} is at step {}".format(fn, step)) 
+                except:
+                    continue
         starting_epoch = 1 + max_step / steps_per_epoch
     return starting_epoch
 
