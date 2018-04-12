@@ -32,6 +32,7 @@ python $CONFIG_DIR/anytime_models/examples/fcdense-ann.py \
 --early_connect_type=1 \
 --log_dense_coef=2.0 \
 --weights_at_block_ends \
---load=${MODEL_DIR}/model-42517 \
-#--is_test \
+--operation=finetune \
+--load=${MODEL_DIR}/model-42517.index \
+--is_test \
 #--eval \
