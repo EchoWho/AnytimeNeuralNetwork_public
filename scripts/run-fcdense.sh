@@ -33,10 +33,12 @@ python $CONFIG_DIR/anytime_models/examples/fcdense-ann.py \
 --log_dense_coef=2.0 \
 --weights_at_block_ends \
 --operation=evaluate \
---load=${MODEL_DIR}/model-43432.index \
 --is_test \
+--load=${MODEL_DIR}/model-43432.index \
 
 # for finetune
 #--load=${MODEL_DIR}/model-42517.index \
 # for eval
 #--load=${MODEL_DIR}/model-43432.index \
+# whether evluate on test or validation
+#--is_test \
