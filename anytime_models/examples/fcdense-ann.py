@@ -51,13 +51,12 @@ def get_camvid_data(which_set, shuffle=True, slide_all=False):
             xy_augmentors = [
                 #imgaug.RotationAndCropValid(7),
                 #imgaug.RandomResize((0.8, 1.5), (0.8, 1.5), aspect_ratio_thres=0.0),
-                imgaug.ResizeShortestEdge(513),
                 imgaug.RandomCrop((side, side)),
                 imgaug.Flip(horiz=True),
             ]
         else:
             xy_augmentors = [
-                imgaug.ResizeShortestEdge(513),
+                imgaug.RandomCrop((side, side)),
             ]
     elif args.operation == 'finetune':
         if isTrain:
@@ -243,7 +242,7 @@ if __name__ == '__main__':
         model_cls = AnytimeFCDenseNet(AnytimeLogLogDenseNet)
     elif args.densenet_version == 'c2f':
         model_cls = AnytimeFCNCoarseToFine
-        side = 513
+        side = 360
     elif args.densenet_version == 'dense':
         model_cls = FCDensenet 
 
