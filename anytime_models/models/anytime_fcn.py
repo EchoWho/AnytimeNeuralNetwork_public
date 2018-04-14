@@ -49,23 +49,20 @@ def atrous_pool_features(l, ch_out, atrous_rates, data_format='channels_first', 
     w_dim = h_dim + 1
     dyn_hw = [input_shape[h_dim], input_shape[w_dim]]
 
-    ch_per_group = ch_out // (2 + len(atrous_rates))
-    
     with tf.variable_scope(scope_name) as scope:
         image_feat = GlobalAvgPooling('gap', l)
         image_feat_shape = [-1, 1, 1, 1]
         image_feat_shape[ch_dim] = l.get_shape().as_list()[ch_dim]
         image_feat = tf.reshape(image_feat, image_feat_shape) 
-        image_feat = Conv2D('gap_conv1x1', image_feat, ch_per_group, 1, activation=BNReLU)
+        image_feat = Conv2D('gap_conv1x1', image_feat, ch_out, 1, activation=BNReLU)
         image_feat = ResizeImages('image_feat_resize', image_feat, dyn_hw)
 
-        ch_out_1x1 = ch_out - ch_per_group * (1 + len(atrous_rates))
-        l_1x1 = Conv2D('conv1x1', l, ch_out_1x1, 1, activation=BNReLU)
+        l_1x1 = Conv2D('conv1x1', l, ch_out, 1, activation=BNReLU)
 
         feats = [l_1x1, image_feat]
         
         for ar_i, rate in enumerate(atrous_rates):
-            l_atrous = Conv2D('atrous_conv3x3_{}'.format(ar_i), l, ch_per_group, \
+            l_atrous = Conv2D('atrous_conv3x3_{}'.format(ar_i), l, ch_out, \
                 3, dilation_rate=rate, activation=BNReLU)
             feats.append(l_atrous)
 
@@ -623,8 +620,10 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
         self.n_pools = self.num_scales - 1 if not self.do_scale_feat_to_label else 0
         self.dropout_kp = args.dropout_kp
 
+
     def bi_to_scale_idx(self, bi):
-        return 0
+        return bi
+
 
     def _compute_edge(self, l, ch_out, bnw, osr, 
             l_type='normal', dyn_hw=None, 
@@ -653,7 +652,7 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
             layer_idx += 1
             scope_name = self.compute_scope_basename(layer_idx)
             s_start = self.bi_to_scale_idx(bi)
-            s_end = min(self.num_scales, - layer_idx + self.total_units)
+            s_end = self.num_scales 
             l_feats = [None] * self.num_scales
             for w in range(s_start, s_end):
                 with tf.variable_scope(scope_name+'.'+str(w)) as scope:
@@ -664,37 +663,20 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                     has_next_scale = w < self.num_scales - 1 and l_mf[w+1] is not None
                     dyn_hw = [tf.shape(l_mf[w])[self.h_dim], tf.shape(l_mf[w])[self.w_dim]]
 
-                    edges = []
-                    if has_prev_scale and has_next_scale:
-                        # both paths exist, 1/3 from each direction
-                        edges.append(self._compute_edge(l_mf[w], g - g//3 * 2, bnw, osr, 'normal', name='en'))
-                        edges.append(self._compute_edge(l_mf[w-1], g//3, bnw, osr, 'down', name='ed'))
-                        edges.append(self._compute_edge(l_mf[w+1], g//3, bnw, osr, 'up',
-                            dyn_hw=dyn_hw, name='eu'))
-
-                    elif has_prev_scale:
-                        edges.append(self._compute_edge(l_mf[w], g - g//2, bnw, osr, 'normal', name='en'))
-                        edges.append(self._compute_edge(l_mf[w-1], g//2, bnw, osr, 'down', name='ed'))
-
-                    elif has_next_scale:
-                        edges.append(self._compute_edge(l_mf[w], g - g//2, bnw, osr, 'normal', name='en'))
-                        edges.append(self._compute_edge(l_mf[w+1], g//2, bnw, osr, 'up',
-                            dyn_hw=dyn_hw, name='eu'))
-                    l_feats[w] = tf.concat(edges, self.ch_dim, name='concat_edges')
-                    l_feats[w] = Dropout('dropout', l_feats[w], keep_prob=self.dropout_kp)
+                    if has_prev_scale:
+                        l = self._compute_edge(l_mf[w], g//2, bnw, osr, 'normal', name='e1')
+                        bnw_prev = self.bottleneck_factor[w-1]
+                        lp = self._compute_edge(l_mf[w-1], g - g//2, bnw_prev, osr, 'down', name='e2')
+                        l = tf.concat([l, lp], self.ch_dim, name='concat_ms')
+                    else:
+                        l = self._compute_edge(l_mf[w], g, bnw, osr, 'normal', name='en')
+                    l_feats[w] = l
 
             #end for w
             new_l_mf = [None] * self.num_scales
             for w in range(s_start, s_end):
                 with tf.variable_scope(scope_name+'.'+str(w) + '.merge') as scope:
                     new_l_mf[w] = tf.concat([l_mf[w], l_feats[w]], self.ch_dim, name='merge_feats')
-                    if w == self.num_scales - 1 and self.weights[layer_idx + w] > 0:
-                        output_stride_w = min(self.output_stride, self.output_strides[w])
-                        atrous_rates = np.asarray(self.atrous_rates) * \
-                            (self.atrous_rates_base_output_stride // output_stride_w)
-                        ch_out = new_l_mf[w].get_shape().as_list()[self.ch_dim]
-                        new_l_mf[w] = atrous_pool_features(new_l_mf[w], ch_out, atrous_rates, 
-                            data_format=self.data_format)
             ll_feats.append(new_l_mf)
             l_mf = new_l_mf
         return ll_feats
@@ -711,11 +693,10 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 ch_in = l.get_shape().as_list()[self.ch_dim]
                 ch_out = int(ch_in * rr)
                 l = Conv2D('conv1x1', l, ch_out, 1, activation=BNReLU)
-                l = Dropout('dropout', l, keep_prob=self.dropout_kp)
                 l_feats[w] = l
         return l_feats
 
-
+                
     def _compute_init_l_feats(self, image):
         l_feats = []
         for w in range(self.num_scales):
@@ -754,33 +735,47 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 ll_feats.append(l_mf)
                 layer_idx += 1
 
+                #if w == self.num_scales - 1 and self.weights[layer_idx + w] > 0:
+                #        output_stride_w = min(self.output_stride, self.output_strides[w])
+                #        atrous_rates = np.asarray(self.atrous_rates) * \
+                #            (self.atrous_rates_base_output_stride // output_stride_w)
+                #        ch_out = new_l_mf[w].get_shape().as_list()[self.ch_dim]
+                #        new_l_mf[w] = atrous_pool_features(new_l_mf[w], ch_out, atrous_rates, 
+                #            data_format=self.data_format)
+
+
         # force merge with the last of the first block.
         n_first_block_layers = self.network_config.n_units_per_block[0]
         fine_feat = ll_feats[n_first_block_layers - 1][0]
-        #ch_fine_feat = fine_feat.get_shape().as_list()[self.ch_dim]
-        #fine_feat = Conv2D('fine_feat_conv1x1', fine_feat, ch_fine_feat, 1, activation=BNReLU)
+        fine_shape = tf.shape(fine_feat)
+        fine_hw = [fine_shape[self.h_dim], fine_shape[self.w_dim]]
+
         ll_feats_ret = [None] * self.total_units
         for li, l_feats in enumerate(ll_feats):
             if self.weights[li] == 0:
                 continue
 
-            #bi = bisect.bisect_right(self.cumsum_blocks, li)
-            #si = self.bi_to_scale_idx(bi)
-            if li < n_first_block_layers:
-                l = fine_feat
-            else:
-                l = l_feats[0]
-                #ch_out = l.get_shape().as_list()[self.ch_dim]
-                #l = Conv2D('pred_feat_conv1x1_{}'.format(li), l, ch_out, 1, activation=BNReLU)
-                l = tf.concat([l, fine_feat],
-                    self.ch_dim, name='merged_pred_feat'.format(li))
+            scope_name = self.compute_scope_basename(li) 
+            with tf.variable_scope(scope_name + '.pred_feat') as scope:
+                bi = bisect.bisect_right(self.cumsum_blocks, li)
+                si = self.bi_to_scale_idx(bi)
 
-            #ch_out = l.get_shape().as_list()[self.ch_dim]
-            #l = Conv2D('pred_conv3x3_1', l, ch_out, 3, dilation_rate=1, activation=BNReLU)
-            #l = Conv2D('pred_conv3x3_2', l, ch_out, 3, dilation_rate=2, activation=BNReLU) 
+                l = l_feats[-1] 
+                ch_out = 256
+                atrous_rates = np.asarray(self.atrous_rates)
+                l = atrous_pool_features(l, ch_out, atrous_rates, data_format=self.data_format) 
 
-            ll_feats_ret[li] = [l]
+                if li < n_first_block_layers:
+                    lp = l_feats[0]
+                else:
+                    lp = fine_feat
+                lp = Conv2D('fine_conv1x1', lp, 48, 1, activation=BNReLU)
 
+                l = ResizeImages('resize_to_decoder', l, fine_hw)
+                l = tf.concat([l, lp], self.ch_dim, name='merge_with_fine_feat')
+                l = Conv2D('decoder_conv3x3_1', l, ch_out, 3, activation=BNReLU) 
+                l = Conv2D('decoder_conv3x3_2', l, ch_out, 3, activation=BNReLU) 
+                ll_feats_ret[li] = [l]
         return ll_feats_ret
 
 
