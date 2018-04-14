@@ -669,7 +669,7 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                         lp = self._compute_edge(l_mf[w-1], g - g//2, bnw_prev, osr, 'down', name='e2')
                         l = tf.concat([l, lp], self.ch_dim, name='concat_ms')
                     else:
-                        l = self._compute_edge(l_mf[w], g, bnw, osr, 'normal', name='en')
+                        l = self._compute_edge(l_mf[w], g, bnw, osr, 'normal')
                     l_feats[w] = l
 
             #end for w
@@ -734,15 +734,6 @@ class AnytimeFCNCoarseToFine(AnytimeFCN):
                 l_mf = self._compute_transition(l_mf, layer_idx)
                 ll_feats.append(l_mf)
                 layer_idx += 1
-
-                #if w == self.num_scales - 1 and self.weights[layer_idx + w] > 0:
-                #        output_stride_w = min(self.output_stride, self.output_strides[w])
-                #        atrous_rates = np.asarray(self.atrous_rates) * \
-                #            (self.atrous_rates_base_output_stride // output_stride_w)
-                #        ch_out = new_l_mf[w].get_shape().as_list()[self.ch_dim]
-                #        new_l_mf[w] = atrous_pool_features(new_l_mf[w], ch_out, atrous_rates, 
-                #            data_format=self.data_format)
-
 
         # force merge with the last of the first block.
         n_first_block_layers = self.network_config.n_units_per_block[0]
