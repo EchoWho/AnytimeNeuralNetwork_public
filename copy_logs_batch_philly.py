@@ -69,8 +69,8 @@ def main():
     json_data = collect_info(cluster='cam', status='Pass')
     copy_passed_logs_from_json(json_data=json_data)
 
-    json_data = collect_info(cluster='cam', status='Failed')
-    copy_passed_logs_from_json(json_data=json_data)
+    #json_data = collect_info(cluster='cam', status='Failed')
+    #copy_passed_logs_from_json(json_data=json_data)
 
 if __name__ == '__main__':
     main()
