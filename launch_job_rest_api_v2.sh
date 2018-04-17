@@ -48,14 +48,14 @@
 # 3959..3961
 # Num gpus : 8
 
-for i in {3892..3900} {3915..3925} {3942..3945} {3954..3956} # 4 gpu ;   {3948..3951} {3959..3961} # 8 gpu
+for i in {3903..3911} {3928..3939} {3948..3951} {3959..3961} # 8 gpu
 do
     USERNAME="dedey"
-    CLUSTER="gcr"
+    CLUSTER="cam"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="4"
+    NUM_GPUS="8"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
@@ -90,6 +90,7 @@ do
             "Tag": "tf16-py27",
             "OneProcessPerContainer": true
         }'
+echo
 done
 
 
