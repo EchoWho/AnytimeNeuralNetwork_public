@@ -9,7 +9,7 @@ from tensorpack.tfutils.symbolic_functions import *
 from tensorpack.tfutils.summary import *
 
 from tensorpack import *
-from tensorpack.utils import logger, utils, fs
+from tensorpack.utils import logger, utils, fs, stats
 
 import get_augmented_data
 
@@ -36,15 +36,24 @@ def grep_starting_epoch(load, steps_per_epoch):
     starting_epoch : the starting epoch number for the main_loop
     """
     starting_epoch = 1
-    if load and os.path.exists(load):
+    if load:
         dir_name, ckpt = os.path.split(load)
+        logger.info("{} exists for loading".format(load))
+        if ckpt != "checkpoint":
+            file_names = [ckpt]
+        else:
+            file_names = os.listdir(dir_name)
+        logger.info("The files we are checking are {}".format(file_names))
         max_step = 0
-        for fn in os.listdir(dir_name):
+        for fn in file_names:
             name, ext = os.path.splitext(fn)
-            if name[:5] == 'model' and ext == '.index':
-                step = int(name[name.rfind('-')+1:])
-                max_step = max(max_step, step)
-                logger.info("{} is at step {}".format(fn, step)) 
+            if name[:5] == 'model':
+                try:
+                    step = int(name[name.rfind('-')+1:])
+                    max_step = max(max_step, step)
+                    logger.info("{} is at step {}".format(fn, step)) 
+                except:
+                    continue
         starting_epoch = 1 + max_step / steps_per_epoch
     return starting_epoch
 
@@ -78,7 +87,7 @@ def parser_add_app_arguments(parser):
                         type=int, default=128)
     parser.add_argument('--load', help='load model')
     parser.add_argument('--nr_gpu', help='Number of GPU to use', type=int, default=1)
-    parser.add_argument('--evaluate', help='a comma separated list containing [train, test]',
+    parser.add_argument('--evaluate', help='a comma separated list containing [train, test, val]',
                         default="", type=str)
     parser.add_argument('--do_validation', help='whether to use validation set',
                         default=False, action='store_true')
@@ -122,16 +131,24 @@ def evaluate_ilsvrc(args, subset, model_cls):
     INPUT_SIZE = ILSVRC_DEFAULT_INPUT_SIZE
     model = model_cls(INPUT_SIZE, args)
 
+    args.store_basename = None # This is disabled for now; it used to help storing predictions
+
     output_names = []
+    accs = []
     for i, w in enumerate(model.weights):
         if w > 0:
-            output_names.append('layer{:03d}.0.pred/linear/output:0'.format(i))
+            scope_name = model.compute_scope_basename(i)
+            scope_name = model.prediction_scope(scope_name) 
+            output_names.append('{}/wrong-top1'.format(scope_name))
+            output_names.append('{}/wrong-top5'.format(scope_name))
+            accs.extend([stats.RatioCounter(), stats.RatioCounter()])
+            #output_names.append('{}/linear/output:0'.format(scope_name))
 
     pred_config = PredictConfig(
         model=model,
         session_init=get_model_loader(args.load),
         input_names=['input', 'label'],
-        output_names=output_names[-1:]
+        output_names=output_names
     )
     pred = SimpleDatasetPredictor(pred_config, ds)
 
@@ -139,10 +156,17 @@ def evaluate_ilsvrc(args, subset, model_cls):
         store_fn = args.store_basename + "_{}.bin".format(subset)
         f_store_out = open(store_fn, 'wb')
 
+    n_batches = 0
     for o in pred.get_result():
+        n_batches += 1
         if args.store_basename is not None:
             preds = o[0]
             f_store_out.write(preds)
+        batch_size = o[0].shape[0] 
+        for i, acc in enumerate(accs):
+            acc.feed(o[i].sum(), batch_size)
+    for i, name in enumerate(output_names):
+        print("Name {}, RatioCount {}".format(name, accs[i].ratio))
 
     if args.store_basename is not None:
         f_store_out.close()
