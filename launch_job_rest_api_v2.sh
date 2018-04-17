@@ -48,14 +48,19 @@
 # 3959..3961
 # Num gpus : 8
 
-for i in {3903..3911} {3928..3939} {3948..3951} {3959..3961} # 8 gpu
+
+# Exp 102 (1 GPU and 2 GPU benchmark)
+# 3964..3965
+# Num gpus : varies {3964 : 1, 3965 : 2}
+
+for i in {3964} # 1 GPU ; {3965} # 2 GPU
 do
     USERNAME="dedey"
     CLUSTER="cam"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="8"
+    NUM_GPUS="1"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
