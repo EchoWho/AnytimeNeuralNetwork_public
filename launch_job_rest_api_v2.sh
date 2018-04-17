@@ -48,7 +48,11 @@
 # 3959..3961
 # Num gpus : 8
 
-for i in {3892..3900} {3915..3925} {3942..3945} {3954..3956} # 4 gpu ;   {3948..3951} {3959..3961} # 8 gpu
+# Exp 102 (1 GPU and 2 GPU benchmark)
+# 3964..3965
+# Num gpus : varies {3964 : 1, 3965 : 2}
+
+for i in {3964..3964} # 1 GPU ; {3965..3965} # 2 GPU
 do
     USERNAME="dedey"
     CLUSTER="gcr"
