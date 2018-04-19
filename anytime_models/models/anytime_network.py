@@ -354,7 +354,7 @@ class AnytimeNetwork(ModelDesc):
             if not hasattr(self.options, 'std'):
                 raise Exception('gpu_graph expects std, but it is not in the options')
 
-        logger.info('the final options: {}'.format(self.options)
+        logger.info('the final options: {}'.format(self.options))
     
 
     def _get_inputs(self):
