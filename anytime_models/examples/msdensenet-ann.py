@@ -12,5 +12,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     model_cls = AnytimeMultiScaleDenseNet
-    
+    args.num_classes = 100 if args.ds_name == 'cifar100' else 10
+    args.growth_rate = 6
+    args.stack = 2
+    args.prediction_feature = 'msdense'
+    args.num_scales = 3
+    args.reduction_ratio = 0.5
+
     ann_app_utils.cifar_svhn_train_or_test(args, model_cls)
