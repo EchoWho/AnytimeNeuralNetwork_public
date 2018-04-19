@@ -109,6 +109,10 @@ def compute_cfg(options):
             n_units_per_block = [6,6,5,6] #[5, 6, 6, 5]
             s_type = 'imagenet'
             # s = 4
+        elif options.msdensenet_depth == 24:
+            n_units_per_block = [8,8,8]
+            s_type = 'basic'
+            # s = 2
         else:
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
@@ -349,6 +353,8 @@ class AnytimeNetwork(ModelDesc):
                 raise Exception('gpu_graph expects mean but it is not in the options')
             if not hasattr(self.options, 'std'):
                 raise Exception('gpu_graph expects std, but it is not in the options')
+
+        logger.info('the final options: {}'.format(self.options)
     
 
     def _get_inputs(self):
