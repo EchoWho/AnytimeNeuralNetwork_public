@@ -113,6 +113,12 @@ def compute_cfg(options):
             n_units_per_block = [8,8,8]
             s_type = 'basic'
             # s = 2
+        elif options.msdensenet_depth == 15:
+            n_units_per_block = [5,5,5]
+            s_type = 'basic'
+        elif options.msdensenet_depth == 45:
+            n_units_per_block = [15,15,15]
+            s_type = 'basic'
         else:
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
