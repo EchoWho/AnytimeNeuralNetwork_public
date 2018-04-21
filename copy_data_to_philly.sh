@@ -9,7 +9,7 @@ remote_folder_rr1=hdfs://rr1/msrlabs/dedey/
 
 # Copy to rr1
 echo "Copying data to rr1"
-/mnt/philly-fs/linux/philly-fs -cp -r $local_folder $remote_folder_rr1
+/home/dedey/Dropbox/philly/linux/philly-fs -cp -r $local_folder $remote_folder_rr1
 echo "Finished copying data to rr1"
 
 # Copy to gcr
