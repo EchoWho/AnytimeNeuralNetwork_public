@@ -65,14 +65,14 @@
 # 3982..3985
 # Num gpus : 8
 
-for i in {3976..3979} # 4 gpu ;  {3982..3985} # 8 gpu
+for i in {3982..3985} # 8 gpu
 do
     USERNAME="dedey"
-    CLUSTER="cam"
+    CLUSTER="eu1"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="4"
+    NUM_GPUS="8"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
@@ -85,10 +85,10 @@ do
             "UserName": "'${USERNAME}'",
             "BuildId": 0,
             "ToolType": null,
-            "ConfigFile": "'${USERNAME}'/AnytimeNeuralNetwork_master/cust_exps/'${JOBSCRIPT}'",
+            "ConfigFile": "/blob/'${VC}'/'${USERNAME}'/AnytimeNeuralNetwork_master/cust_exps/'${JOBSCRIPT}'",
             "Inputs": [{
                 "Name": "dataDir",
-                "Path": "/hdfs/'${VC}'/dedey/ann_data_dir"
+                "Path": "/hdfs/'${VC}'/'${USERNAME}'/ann_data_dir"
             }],
             "Outputs": [],
             "IsDebug": false,
