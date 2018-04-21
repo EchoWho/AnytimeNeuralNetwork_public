@@ -53,14 +53,26 @@
 # 3964..3965
 # Num gpus : varies {3964 : 1, 3965 : 2}
 
-for i in {3964} # 1 GPU ; {3965} # 2 GPU
+# Exp 103 (2 GPU msdnet cifar (done on cmu machines)
+# 3968..3973
+# Num gpus : 2
+
+# Exp 104 (4 gpu dense with const scheme)
+# 3976..3979
+# Num gpus : 4
+
+# Exp 105 (8 gpu copy of 104)
+# 3982..3985
+# Num gpus : 8
+
+for i in {3976..3979} # 4 gpu ;  {3982..3985} # 8 gpu
 do
     USERNAME="dedey"
     CLUSTER="cam"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="1"
+    NUM_GPUS="4"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
