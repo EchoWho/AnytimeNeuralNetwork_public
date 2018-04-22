@@ -79,7 +79,7 @@ def copy_passed_logs_from_json(json_data=None, local_dir=None):
             if not os.path.exists(local_dir_this):
                 os.makedirs(local_dir_this)
 
-            cmd = 'wget -r --no-parent  -nH --cut-dirs 4 -R "index.html*" ' + https_link + ' ' + local_dir_this
+            cmd = 'wget -r --no-parent  -nH --cut-dirs 3 -R "index.html*" ' + https_link + ' ' + local_dir_this
             output = subprocess.call(cmd, shell=True)
 
 
