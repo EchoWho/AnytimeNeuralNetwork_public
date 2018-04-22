@@ -3,7 +3,19 @@ import StringIO
 import json
 import subprocess
 import os
+import errno
 import pdb
+import wget
+
+
+def mkdir_p(path):
+    try:
+        os.makedirs(path)
+    except OSError as exc:  # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
 
 
 def collect_info(cluster=None, status='Pass', num_finished_jobs='500'):
@@ -32,10 +44,52 @@ def collect_info(cluster=None, status='Pass', num_finished_jobs='500'):
 
     return json_data
 
+def copy_passed_logs_from_json(json_data=None, local_dir=None):
+    # Extract list of finished jobs
+    # Finished jobs contain all jobs which are not running
+    # including 'Failed', 'Killed' etc
+    # But since we acquired only the status of jobs which have
+    # 'Pass'ed we have only Passed jobs in the list.
+    fin_jobs_list = json_data['finishedJobs']
+
+    # Use wget to get logs back
+    # Job logs and models are in 
+    # folders which look like
+    # https://storage.eu2.philly.selfhost.corp.microsoft.com/msrlabs/sys/jobs/myApplicationJobid/
+
+    # Copy jobs over to local disk
+    # if job name has '_ann'
+    for job in fin_jobs_list:
+        job_name = job['name']
+        job_status = job['status']
+        ann_in_name = job_name.find('_ann')
+        if ann_in_name > 0:
+            # The name of the scratch directory on Philly where logs are kept
+            philly_scratch_dir = job['scratch']
+            # Convert to https path
+            https_link = 'https:' + philly_scratch_dir.replace('\\', '/')
+
+            pdb.set_trace()
+
+            print 'Downloading ' + job_name.split('.')[0]
+
+            # The name of the folder on the local machine to put logs in
+            local_dir_this = os.path.join(local_dir, job_name.split('.')[0])
+
+            if not os.path.exists(local_dir_this):
+                os.makedirs(local_dir_this)
+
+            cmd = 'wget -r --no-parent  -nH --cut-dirs 4 -R "index.html*" ' + https_link + ' ' + local_dir_this
+            output = subprocess.call(cmd, shell=True)
+
 
 def main():
-    # From cam
+    # From phillyOnAzure cluster
     json_data = collect_info(cluster='eu1', status='Pass', num_finished_jobs=100)
+    local_dir = '/home/dedey/Downloads/'
+    copy_passed_logs_from_json(json_data=json_data, local_dir=local_dir)
+
+
     pdb.set_trace()
 
     
