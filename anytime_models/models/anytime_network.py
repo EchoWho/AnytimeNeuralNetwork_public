@@ -76,6 +76,10 @@ def compute_cfg(options):
             n_units_per_block = [6, 12, 48, 32] # 98; s = 17
         elif options.densenet_depth == 265:
             n_units_per_block = [6, 12, 64, 48] # 130; s = 24
+        elif options.densenet_depth == 63:
+            n_units_per_block = [3, 6, 12, 8] # 29 ; s = 5
+        elif options.densenet_depth == 35:
+            n_units_per_block = [2, 3, 6, 4]  # 15 ; s = 3
         elif options.densenet_depth == 197:
             n_units_per_block = [16, 16, 32, 32]
         elif options.densenet_depth == 217:
