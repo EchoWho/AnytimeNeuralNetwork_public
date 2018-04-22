@@ -65,14 +65,18 @@
 # 3982..3985
 # Num gpus : 8
 
-for i in {3982..3985} # 8 gpu
+# Exp 106 (Small DenseNet)
+# 3988..3993
+# Num gpus : 4
+
+for i in {3988..3993} # 4 gpu
 do
     USERNAME="dedey"
     CLUSTER="cam"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="8"
+    NUM_GPUS="4"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
