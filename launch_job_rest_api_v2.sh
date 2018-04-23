@@ -77,7 +77,7 @@
 # 4010..4021
 # Num gpus : 8
 
-for i in {3988..3993} # 4 gpu
+for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu
 do
     USERNAME="dedey"
     CLUSTER="cam"
