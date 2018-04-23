@@ -69,6 +69,14 @@
 # 3988..3993
 # Num gpus : 4
 
+# Exp 107 (DenseNet with rescale prediction features)
+# 3996..4007
+# Num gpus : 4
+
+# Exp 108 (8 gpu copy of 107)
+# 4010..4021
+# Num gpus : 8
+
 for i in {3988..3993} # 4 gpu
 do
     USERNAME="dedey"
