@@ -90,9 +90,6 @@ def main():
     local_dir = '/home/dedey/DATADRIVE1/ann_models_logs'
     copy_passed_logs_from_json(json_data=json_data, local_dir=local_dir)
 
-
-    pdb.set_trace()
-
     
 if __name__ == '__main__':
     main()
