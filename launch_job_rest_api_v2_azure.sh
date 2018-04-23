@@ -65,7 +65,11 @@
 # 3982..3985
 # Num gpus : 8
 
-for i in {3976..3979} {3954..3956} {3942..3945} {3914..3925} {3892..3900} # 4 gpu
+# Exp 106 (Small DenseNet)
+# 3988..3993
+# Num gpus : 4
+
+for i in {3988..3993} # 4 gpu
 do
     USERNAME="dedey"
     CLUSTER="eu1"

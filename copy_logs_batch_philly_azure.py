@@ -67,11 +67,12 @@ def copy_passed_logs_from_json(json_data=None, local_dir=None):
             # The name of the scratch directory on Philly where logs are kept
             philly_scratch_dir = job['scratch']
             # Convert to https path
-            https_link = 'https:' + philly_scratch_dir.replace('\\', '/')
+            # If you don't have the trailing '/' then it will try to get sibling directories as well
+            https_link = 'https:' + philly_scratch_dir.replace('\\', '/') + '/'
 
-            pdb.set_trace()
-
+            print '------------------------------------------'
             print 'Downloading ' + job_name.split('.')[0]
+            print '------------------------------------------'
 
             # The name of the folder on the local machine to put logs in
             local_dir_this = os.path.join(local_dir, job_name.split('.')[0])
@@ -79,18 +80,15 @@ def copy_passed_logs_from_json(json_data=None, local_dir=None):
             if not os.path.exists(local_dir_this):
                 os.makedirs(local_dir_this)
 
-            cmd = 'wget -r --no-parent  -nH --cut-dirs 3 -R "index.html*" ' + https_link + ' ' + local_dir_this
+            cmd = 'wget -r --no-parent  -nH --cut-dirs 4 --directory-prefix ' + local_dir_this + '  -R "index.html*","model*" ' + https_link
             output = subprocess.call(cmd, shell=True)
 
 
 def main():
     # From phillyOnAzure cluster
     json_data = collect_info(cluster='eu1', status='Pass', num_finished_jobs=100)
-    local_dir = '/home/dedey/Downloads/'
+    local_dir = '/home/dedey/DATADRIVE1/ann_models_logs'
     copy_passed_logs_from_json(json_data=json_data, local_dir=local_dir)
-
-
-    pdb.set_trace()
 
     
 if __name__ == '__main__':
