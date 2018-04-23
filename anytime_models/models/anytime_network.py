@@ -204,7 +204,7 @@ def parser_add_common_arguments(parser):
                         type=str, default='basic', choices=['basic', 'bottleneck'])
     parser.add_argument('--prediction_feature', 
                         help='Type of feature processing for prediction',
-                        type=str, default='none', choices=['none', '1x1', 'msdense', 'bn'])
+                        type=str, default='none', choices=['none', '1x1', 'msdense', 'bn', 'rescale'])
     parser.add_argument('--prediction_feature_ch_out_rate',
                         help='ch_out= int( <rate> * ch_in)',
                         type=np.float32, default=1.0)
@@ -596,6 +596,16 @@ class AnytimeNetwork(ModelDesc):
                         l = BNReLU('bnrelu1x1_0', l)
                         l = Conv2D('conv1x1_1', l, ch_inter, 3, strides=2)
                         l = BNReLU('bnrelu1x1_1', l)
+                    elif self.options.prediction_feature == 'rescale':
+                        bi = bisect.bisect_right(self.cumsum_blocks, unit_idx)
+                        if bi+1 < len(self.cumsum_blocks):
+                            l = ResizeImages('bilin_resize', l, [7,7], align_corners=False)
+                            shape_list = [None,7,7,ch_in] if self.data_format == 'channels_last' \
+                                else [None,ch_in,7,7]
+                            l.set_shape(tf.TensorShape(shape_list))
+                            l = Conv2D('conv1x1', l, ch_in, 1, activation=BNReLU)
+                            #l = Conv2D('conv3x3_0', l, ch_in, 3, strides=2, activation=BNReLU)
+                            #l = Conv2D('conv3x3_1', l, ch_in, 3, strides=2, activation=BNReLU)
                     elif self.options.prediction_feature == 'bn':
                         l = BatchNorm('bn', l)
                     
