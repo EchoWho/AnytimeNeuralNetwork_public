@@ -77,7 +77,11 @@
 # 4010..4021
 # Num gpus : 8
 
-for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu
+# Exp 109 (1 gpu cifar/svhn rescale feature)
+# 4024..4068
+# Num gpus : 1
+
+for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu ; {4024..4068} # 1 gpu
 do
     USERNAME="dedey"
     CLUSTER="cam"
