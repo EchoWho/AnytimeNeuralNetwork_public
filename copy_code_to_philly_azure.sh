@@ -13,7 +13,7 @@ if [[ $? -eq 0 ]]; then echo "success"; else echo "failed"; fi
 # Copy code to azure blob
 azcopy --source /home/dedey/AnytimeNeuralNetwork --destination https://phillyeustorage.blob.core.windows.net/msrlabs/dedey/AnytimeNeuralNetwork_master/ --recursive --dest-sas $mySAS --parallel-level 16
 
-# Copy code from azure blob to eu1
+# Copy code from azure blob to gfs
 export PHILLY_VC=msrlabs
 # export AZURE_STORAGE_ACCESS_KEY=foobar # Only required if you use personal blob
 /home/dedey/Dropbox/philly-fs/linux/philly-fs -cp -r https://phillyeustorage.blob.core.windows.net/msrlabs/dedey/AnytimeNeuralNetwork_master gfs://eu1/msrlabs/dedey/AnytimeNeuralNetwork_master
