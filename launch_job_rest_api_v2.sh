@@ -55,7 +55,7 @@
 
 # Exp 103 (2 GPU msdnet cifar (done on cmu machines)
 # 3968..3973
-# Num gpus : 2
+# Num gpus : 1
 
 # Exp 104 (4 gpu dense with const scheme)
 # 3976..3979
@@ -81,7 +81,11 @@
 # 4024..4068
 # Num gpus : 1
 
-for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu ; {4024..4068} # 1 gpu
+# Exp 110 (4 gpu resnet with smaller number of prediction and better anytime predictors)
+# 4071..4078
+# Num gpus : 4
+
+for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu ; {4024..4068} # 1 gpu; {4071..4078} # 4 gpu
 do
     USERNAME="dedey"
     CLUSTER="cam"
