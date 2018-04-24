@@ -349,7 +349,7 @@ class AdaptiveLossWeight(Callback):
             self._weight = 1. / self.avg_losses + 1e-8
             self._weight /= np.max(self._weight)
             self._weight[-1] += self.final_extra
-            self._weight /= np.max(self._weight)
+            #self._weight /= np.max(self._weight)
             self._weight = self._weight * (1-self.gamma) \
                     + np.ones(self.K, dtype=np.float32) * self.gamma
             self.assign_op.eval(feed_dict={self.weight_holder : self._weight})
