@@ -337,7 +337,7 @@ class AnytimeNetwork(ModelDesc):
         if self.options.ls_method == ADALOSS_LS_METHOD:
             self.options.is_select_arr = True
             self.options.sum_rand_ratio = 0.0
-            self.options.func_type = FUNC_TYPE_ANN
+            assert self.options.func_type != FUNC_TYPE_OPT
 
         self.weights = anytime_loss.loss_weights(self.total_units, self.options, 
             cfg=self.network_config.n_units_per_block)
