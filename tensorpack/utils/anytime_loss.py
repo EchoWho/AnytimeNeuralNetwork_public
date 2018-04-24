@@ -54,7 +54,7 @@ def eann_sieve(N):
     weights[:N//2] = 0.0
     return weights
 
-def constant_weights(N, normalize=True):
+def constant_weights(N, normalize=False):
     weights = np.ones(N,dtype=np.float32) 
     if normalize:
         weights /= N / np.log2(N)
@@ -160,9 +160,9 @@ def loss_weights(N, args, cfg=None):
 
     FUNC_TYPE = args.func_type
     if FUNC_TYPE == 0: # exponential spacing
-        weights = at_func(N, func=lambda x:2**x)
+        weights = at_func(N, func=lambda x:2**x, method=constant_weights)
     elif FUNC_TYPE == 1: # square spacing
-        weights = at_func(N, func=lambda x:x**2)
+        weights = at_func(N, func=lambda x:x**2, method=constant_weights)
     elif FUNC_TYPE == 2: #optimal at ?
         weights = optimal_at(N, args.opt_at)
     elif FUNC_TYPE == 3: #exponential weights
