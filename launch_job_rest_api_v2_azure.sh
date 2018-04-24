@@ -81,7 +81,11 @@
 # 4024..4068
 # Num gpus : 1
 
-for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu ; {4024..4068} # 1 gpu
+# Exp 110 (4 gpu resnet with smaller number of prediction and better anytime predictors)
+# 4071..4078
+# Num gpus : 4
+
+for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu ; {4024..4068} # 1 gpu  ; {4071..4078} # 4gpu
 do
     USERNAME="dedey"
     CLUSTER="eu1"
