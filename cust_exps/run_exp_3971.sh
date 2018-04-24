@@ -67,4 +67,4 @@ python $CONFIG_DIR/anytime_models/examples/msdensenet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--f=4 --samloss=0  --msdensenet_depth=24 -s=3 --batch_size=64 --nr_gpu=1 --ds_name=cifar100 --opt_at=-1 
+-f=4 --samloss=0  --msdensenet_depth=24 -s=3 --batch_size=64 --nr_gpu=1 --ds_name=cifar100 --min_predict_unit=4 --opt_at=-1 
