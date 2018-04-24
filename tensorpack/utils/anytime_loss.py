@@ -54,7 +54,7 @@ def eann_sieve(N):
     weights[:N//2] = 0.0
     return weights
 
-def constant_weights(N, normalize=True):
+def constant_weights(N, normalize=False):
     weights = np.ones(N,dtype=np.float32) 
     if normalize:
         weights /= N / np.log2(N)
