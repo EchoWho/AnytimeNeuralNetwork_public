@@ -55,7 +55,7 @@
 
 # Exp 103 (2 GPU msdnet cifar (done on cmu machines)
 # 3968..3973
-# Num gpus : 2
+# Num gpus : 1
 
 # Exp 104 (4 gpu dense with const scheme)
 # 3976..3979
