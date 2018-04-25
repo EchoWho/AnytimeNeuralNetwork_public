@@ -60,8 +60,8 @@ def copy_passed_logs_from_json(json_data=None):
 
 def main():
     # From gcr
-    #json_data = collect_info(cluster='gcr', num_finished_jobs=20)
-    #copy_passed_logs_from_json(json_data=json_data)
+    json_data = collect_info(cluster='gcr', num_finished_jobs=20)
+    copy_passed_logs_from_json(json_data=json_data)
     # From rr1
     #json_data = collect_info(cluster='rr1')
     #copy_passed_logs_from_json(json_data=json_data)
