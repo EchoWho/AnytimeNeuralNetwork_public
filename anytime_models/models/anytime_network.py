@@ -178,6 +178,9 @@ def parser_add_common_arguments(parser):
     # special group that handles the network depths
     # For each networ type, add its special arg name here I guess. 
     depth_group = parser.add_mutually_exclusive_group(required=True)
+    depth_group.add_argument('--block_config', help='Number of units per block in a '\
+                        +'comma-separated list. This OVERWRITES other depth info.',
+                        type=str)
     depth_group.add_argument('-n', '--num_units',
                             help='number of units in each stage',
                             type=int)
@@ -204,9 +207,6 @@ def parser_add_common_arguments(parser):
                         type=str, default='basic', choices=['basic', 'imagenet'])
     parser.add_argument('--b_type', help='block type',
                         type=str, default='basic', choices=['basic', 'bottleneck'])
-    parser.add_argument('--block_config', help='Number of units per block in a '\
-                        +'comma-separated list. This OVERWRITES other depth info.',
-                        type=str)
     parser.add_argument('--prediction_feature', 
                         help='Type of feature processing for prediction',
                         type=str, default='none', choices=['none', '1x1', 'msdense', 'bn', 'rescale'])
