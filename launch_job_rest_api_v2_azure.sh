@@ -85,14 +85,17 @@
 # 4071..4078
 # Num gpus : 4
 
-for i in {3996..4007} {4071..4078}
+for i in {3996..4007} {4071..4078} {4081..4085}
+# Exp 111 (4 GPU small msdense for adaloss vs const story)
+# 4081..4085
+# Num gpus : 4
 do
     USERNAME="dedey"
     CLUSTER="eu1"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="1"
+    NUM_GPUS="4"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
