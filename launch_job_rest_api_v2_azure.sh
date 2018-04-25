@@ -85,14 +85,14 @@
 # 4071..4078
 # Num gpus : 4
 
-for i in {3996..4007} # 4 gpu ; {4010..4021} # 8 gpu ; {4024..4068} # 1 gpu  ; {4071..4078} # 4gpu
+for i in {3996..4007} {4071..4078}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="4"
+    NUM_GPUS="1"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
