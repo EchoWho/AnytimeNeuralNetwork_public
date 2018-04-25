@@ -62,9 +62,9 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/anytime_models/examples/msdensenet-ann.py \
+python $CONFIG_DIR/anytime_models/examples/imagenet-msdense-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--f=4 --samloss=0  --msdensenet_depth=24 -s=3 --batch_size=64 --nr_gpu=1 --ds_name=cifar100 --min_predict_unit=4 --opt_at=-1 
+--adaloss_gamma=0.07 --adaloss_update_per=1 --adaloss_momentum=0.9 --adaloss_final_extra=1.0 --sum_rand_ratio=0 --is_select_arr -f=5 --samloss=100  --block_config=6,8,8,8 -s=6 --batch_size=256 --nr_gpu=4 --min_predict_unit=4 --opt_at=-1 --num_classes=1000 

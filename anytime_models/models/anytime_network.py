@@ -39,7 +39,13 @@ ADALOSS_LS_METHOD=100
 NetworkConfig = namedtuple('Config', ['n_units_per_block', 'b_type', 's_type'])
 
 def compute_cfg(options):
-    if hasattr(options, 'depth') and options.depth is not None:
+    b_type = options.b_type
+    s_type = options.s_type
+    if hasattr(options, 'block_config') and options.block_config is not None:
+        assert len(options.block_config) > 0
+        n_units_per_block = map(int, options.block_config.strip().split(','))
+
+    elif hasattr(options, 'depth') and options.depth is not None:
         if options.depth == 18:
             n_units_per_block = [2,2,2,2]
             b_type = 'basic'
@@ -65,7 +71,6 @@ def compute_cfg(options):
             raise ValueError('depth {} must be in [18, 34, 50, 101, 152, 26, 14]'\
                 .format(options.depth))
         s_type = 'imagenet' 
-        return NetworkConfig(n_units_per_block, b_type, s_type)
 
     elif hasattr(options, 'densenet_depth') and options.densenet_depth is not None:
         if options.densenet_depth == 121:
@@ -97,7 +102,6 @@ def compute_cfg(options):
                 .format(options.densenet_depth))
         b_type = 'bottleneck'
         s_type = 'imagenet'
-        return NetworkConfig(n_units_per_block, b_type, s_type)#, default_growth_rate)
 
     elif hasattr(options, 'msdensenet_depth') and options.msdensenet_depth is not None:
         if options.msdensenet_depth == 38: 
@@ -122,14 +126,15 @@ def compute_cfg(options):
         elif options.msdensenet_depth == 24:
             n_units_per_block = [8,8,8]
             s_type = 'basic'
-            # s = 2
+        elif options.msdensenet_depth == 27:
+            n_units_per_block = [9,9,9]
+            s_type = 'basic'
         elif options.msdensenet_depth == 45:
             n_units_per_block = [15,15,15]
             s_type = 'basic'
         else:
             raise ValueError('Undefined msdensenet_depth')
         b_type = 'bottleneck'
-        return NetworkConfig(n_units_per_block, b_type, s_type)
  
     elif hasattr(options, 'fcdense_depth') and options.fcdense_depth is not None:
         if options.densenet_version in ['atv1', 'loglog', 'atv2', 'dense']:
@@ -140,7 +145,6 @@ def compute_cfg(options):
                     .format(options.fcdense_depth))
             b_type = 'basic'
             s_type = 'basic'
-            return NetworkConfig(n_units_per_block, b_type, s_type)
 
         elif options.densenet_version == 'c2f':
             if options.fcdense_depth == 22:
@@ -157,17 +161,15 @@ def compute_cfg(options):
                 raise ValueError('FCN coarse2fine depth {} is undefined'.format(options.c2f_depth))
             b_type = 'bottleneck'
             s_type = 'imagenet'
-            return NetworkConfig(n_units_per_block, b_type, s_type)
 
     elif options.num_units is not None: 
         #option.n is set
-        return NetworkConfig([options.num_units]*options.n_blocks, 
-                             options.b_type, options.s_type)
+        n_units_per_block = [options.num_units]*options.n_blocks, 
 
-def compute_total_units(options, config=None):
-    if config is None:
-        config = compute_cfg(options)
-    return sum(config.n_units_per_block)
+    config = NetworkConfig(n_units_per_block, b_type, s_type)
+    logger.info('The finalized network config is {}'.format(config))
+    return config
+
 
 def parser_add_common_arguments(parser):
     """
@@ -176,6 +178,9 @@ def parser_add_common_arguments(parser):
     # special group that handles the network depths
     # For each networ type, add its special arg name here I guess. 
     depth_group = parser.add_mutually_exclusive_group(required=True)
+    depth_group.add_argument('--block_config', help='Number of units per block in a '\
+                        +'comma-separated list. This OVERWRITES other depth info.',
+                        type=str)
     depth_group.add_argument('-n', '--num_units',
                             help='number of units in each stage',
                             type=int)
@@ -321,7 +326,7 @@ class AnytimeNetwork(ModelDesc):
 
         self.input_size = input_size
         self.network_config = compute_cfg(self.options)
-        self.total_units = compute_total_units(self.options, self.network_config)
+        self.total_units = sum(self.network_config.n_units_per_block)
 
         # Warn user if they are using imagenet but doesn't have the right channel
         self.init_channel = args.init_channel
