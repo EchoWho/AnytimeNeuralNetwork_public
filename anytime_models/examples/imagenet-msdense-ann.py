@@ -19,9 +19,14 @@ if __name__ == '__main__':
     args.ds_name="ilsvrc"
     args.num_classes == 1000
     args.growth_rate=16
-    args.stack = (args.msdensenet_depth - 3) // 5
+    if hasattr(args, 'msdensenet_depth') and args.msdensenet_depth is not None:
+        args.stack = (args.msdensenet_depth - 3) // 5
+    else:
+        assert hasattr(args, 'block_config') and args.block_config is not None
     args.prediction_feature='msdense'
     args.num_scales=4
     args.reduction_ratio = 0.5
+    args.b_type = 'bottleneck'
+    args.s_type = 'imagenet'
 
     ann_app_utils.train_or_test_ilsvrc(args, model_cls)
