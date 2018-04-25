@@ -122,7 +122,9 @@ def compute_cfg(options):
         elif options.msdensenet_depth == 24:
             n_units_per_block = [8,8,8]
             s_type = 'basic'
-            # s = 2
+        elif options.msdensenet_depth == 27:
+            n_units_per_block = [9,9,9]
+            s_type = 'basic'
         elif options.msdensenet_depth == 45:
             n_units_per_block = [15,15,15]
             s_type = 'basic'
