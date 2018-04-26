@@ -138,17 +138,20 @@ def evaluate_ilsvrc(args, subset, model_cls):
     output_names = []
     accs = []
     n_preds = 0
-    for i, w in enumerate(model.weights):
-        if w > 0:
-            n_preds += 1
-            scope_name = model.compute_scope_basename(i)
-            scope_name = model.prediction_scope(scope_name) 
-            output_names.append('{}/wrong-top1'.format(scope_name))
-            output_names.append('{}/wrong-top5'.format(scope_name))
-            accs.extend([stats.RatioCounter(), stats.RatioCounter()])
-            #output_names.append('{}/linear/output:0'.format(scope_name))
-        if args.num_anytime_preds >= 0 and n_preds >= args.num_anytime_preds:
-            break
+    if args.num_anytime_preds == 0:
+        output_names.append('dummy_image_mean')
+    else:
+        for i, w in enumerate(model.weights):
+            if w > 0:
+                n_preds += 1
+                scope_name = model.compute_scope_basename(i)
+                scope_name = model.prediction_scope(scope_name) 
+                output_names.append('{}/wrong-top1'.format(scope_name))
+                output_names.append('{}/wrong-top5'.format(scope_name))
+                accs.extend([stats.RatioCounter(), stats.RatioCounter()])
+                #output_names.append('{}/linear/output:0'.format(scope_name))
+            if args.num_anytime_preds > 0 and n_preds >= args.num_anytime_preds:
+                break
 
     pred_config = PredictConfig(
         model=model,
@@ -168,6 +171,8 @@ def evaluate_ilsvrc(args, subset, model_cls):
     start_time = time.time() 
     for o in pred.get_result():
         n_batches += 1
+        if args.num_anytime_preds == 0:
+            continue
         if args.store_basename is not None:
             preds = o[0]
             f_store_out.write(preds)
@@ -175,8 +180,9 @@ def evaluate_ilsvrc(args, subset, model_cls):
         for i, acc in enumerate(accs):
             acc.feed(o[i].sum(), batch_size)
     logger.info('Inference finished, time: {:.4f}sec'.format(time.time() - start_time))
-    for i, name in enumerate(output_names):
-        logger.info("Name {}, RatioCount {}".format(name, accs[i].ratio))
+    if args.num_anytime_preds != 0:
+        for i, name in enumerate(output_names):
+            logger.info("Name {}, RatioCount {}".format(name, accs[i].ratio))
 
     if args.store_basename is not None:
         f_store_out.close()
