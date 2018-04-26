@@ -555,6 +555,7 @@ class AnytimeNetwork(ModelDesc):
                 image = tf.transpose(image, [0,3,1,2])
 
             self.dynamic_batch_size = tf.identity(tf.shape(image)[0], name='dynamic_batch_size')
+            tf.reduce_mean(image, name='dummy_image_mean')
             ll_feats = self._compute_ll_feats(image)
             
             if self.options.stop_gradient:
