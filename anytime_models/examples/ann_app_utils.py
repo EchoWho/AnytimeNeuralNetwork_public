@@ -91,6 +91,8 @@ def parser_add_app_arguments(parser):
                         default="", type=str)
     parser.add_argument('--do_validation', help='whether to use validation set',
                         default=False, action='store_true')
+    parser.add_argument('--num_anytime_preds', help='Number of anytime predictions',
+                        default=-1, type=int)
 
     # For alter label and ann_policy, both of which don't really work
     #parser.add_argument('--store_final_prediction', help='wheter evaluation stores final prediction',
@@ -135,21 +137,29 @@ def evaluate_ilsvrc(args, subset, model_cls):
 
     output_names = []
     accs = []
-    for i, w in enumerate(model.weights):
-        if w > 0:
-            scope_name = model.compute_scope_basename(i)
-            scope_name = model.prediction_scope(scope_name) 
-            output_names.append('{}/wrong-top1'.format(scope_name))
-            output_names.append('{}/wrong-top5'.format(scope_name))
-            accs.extend([stats.RatioCounter(), stats.RatioCounter()])
-            #output_names.append('{}/linear/output:0'.format(scope_name))
+    n_preds = 0
+    if args.num_anytime_preds == 0:
+        output_names.append('dummy_image_mean')
+    else:
+        for i, w in enumerate(model.weights):
+            if w > 0:
+                n_preds += 1
+                scope_name = model.compute_scope_basename(i)
+                scope_name = model.prediction_scope(scope_name) 
+                output_names.append('{}/wrong-top1'.format(scope_name))
+                output_names.append('{}/wrong-top5'.format(scope_name))
+                accs.extend([stats.RatioCounter(), stats.RatioCounter()])
+                #output_names.append('{}/linear/output:0'.format(scope_name))
+            if args.num_anytime_preds > 0 and n_preds >= args.num_anytime_preds:
+                break
 
     pred_config = PredictConfig(
         model=model,
-        session_init=get_model_loader(args.load),
         input_names=['input', 'label'],
         output_names=output_names
     )
+    if args.load:
+        pred_config.session_init = get_model_loader(args.load)
     pred = SimpleDatasetPredictor(pred_config, ds)
 
     if args.store_basename is not None:
@@ -157,16 +167,22 @@ def evaluate_ilsvrc(args, subset, model_cls):
         f_store_out = open(store_fn, 'wb')
 
     n_batches = 0
+    import time
+    start_time = time.time() 
     for o in pred.get_result():
         n_batches += 1
+        if args.num_anytime_preds == 0:
+            continue
         if args.store_basename is not None:
             preds = o[0]
             f_store_out.write(preds)
         batch_size = o[0].shape[0] 
         for i, acc in enumerate(accs):
             acc.feed(o[i].sum(), batch_size)
-    for i, name in enumerate(output_names):
-        print("Name {}, RatioCount {}".format(name, accs[i].ratio))
+    logger.info('Inference finished, time: {:.4f}sec'.format(time.time() - start_time))
+    if args.num_anytime_preds != 0:
+        for i, name in enumerate(output_names):
+            logger.info("Name {}, RatioCount {}".format(name, accs[i].ratio))
 
     if args.store_basename is not None:
         f_store_out.close()
@@ -378,9 +394,10 @@ def evaluate_cifar_svhn(model_cls, ds, eval_names):
 
     pred_config = PredictConfig(
         model=model,
-        session_init=SaverRestore(args.load),
         input_names=['input', 'label'],
         output_names=['input', 'label'] + output_names[-1:] + feature_names[-1:])
+    if args.load:
+        pred_config.session_init = SaverRestore(args.load)
     
     pred = SimpleDatasetPredictor(pred_config, ds)
 

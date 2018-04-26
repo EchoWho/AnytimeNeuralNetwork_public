@@ -1,5 +1,5 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0
 # Note that $s need to be adjusted as well. (d, s):
 # (14, 1), (26, 2), (50, 2), (101, 3), (18, 2), (34, 2), (152, 5)
 d=26  
@@ -12,18 +12,9 @@ CONFIG_DIR=.
 mkdir -p $MODEL_DIR
 
 # Run the actual job
-python $CONFIG_DIR/examples/AnytimeNetwork/imagenet-ann.py \
+python $CONFIG_DIR/anytime_models/examples/imagenet-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
--f=5 \
---opt_at=-1 \
--d=$d \
---nr_gpu=2 \
---batch_size=64 \
---samloss=6 \
--c=64 \
--s=$s \
---num_classes=1000 \
---init_lr=0.0125 \
---load=${MODEL_DIR}/checkpoint
+-d=50 -s=2 --batch_size=64 --nr_gpu=1 -f=5 --samloss=100 --exp_gamma=0.07 --sum_rand_ratio=0 --is_select_arr --opt_at=-1 -c=64 --num_classes=1000 \
+--evaluate=val
