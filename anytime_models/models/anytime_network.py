@@ -609,7 +609,7 @@ class AnytimeNetwork(ModelDesc):
                             shape_list = [None,7,7,ch_in] if self.data_format == 'channels_last' \
                                 else [None,ch_in,7,7]
                             l.set_shape(tf.TensorShape(shape_list))
-                            l = Conv2D('conv1x1', l, ch_in, 1, activation=BNReLU)
+                        l = Conv2D('conv1x1', l, ch_in, 1, activation=BNReLU)
                             #l = Conv2D('conv3x3_0', l, ch_in, 3, strides=2, activation=BNReLU)
                             #l = Conv2D('conv3x3_1', l, ch_in, 3, strides=2, activation=BNReLU)
                     elif self.options.prediction_feature == 'bn':
