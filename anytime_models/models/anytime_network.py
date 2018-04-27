@@ -246,7 +246,7 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--adaloss_update_per', help='Adaloss update weights every number of iter',
                         type=int, default=100)
     parser.add_argument('--adaloss_final_extra', help='Adaloss up-weights the final loss',
-                        type=np.float32, default=0.5)
+                        type=np.float32, default=0.0)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
                         type=np.float32, default=2.0)
     parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
