@@ -55,7 +55,7 @@
 
 # Exp 103 (2 GPU msdnet cifar (done on cmu machines)
 # 3968..3973
-# Num gpus : 1
+# Num gpus : 2
 
 # Exp 104 (4 gpu dense with const scheme)
 # 3976..3979
@@ -85,10 +85,12 @@
 # 4071..4078
 # Num gpus : 4
 
-for i in {3996..4007} {4071..4078} {4081..4085}
 # Exp 111 (4 GPU small msdense for adaloss vs const story)
 # 4081..4085
 # Num gpus : 4
+
+
+for i in {3942..3945} {3976..3979} {3988..3993} {3996..4007} {4071..4078}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
