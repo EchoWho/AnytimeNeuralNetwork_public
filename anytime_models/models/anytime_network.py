@@ -244,9 +244,9 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--adaloss_momentum', help='Adaloss momentum',
                         type=np.float32, default=0.9)
     parser.add_argument('--adaloss_update_per', help='Adaloss update weights every number of iter',
-                        type=int, default=1)
+                        type=int, default=100)
     parser.add_argument('--adaloss_final_extra', help='Adaloss up-weights the final loss',
-                        type=np.float32, default=0.5)
+                        type=np.float32, default=0.0)
     parser.add_argument('--sum_rand_ratio', help='frac{Sum weight}{randomly selected weight}',
                         type=np.float32, default=2.0)
     parser.add_argument('--last_reward_rate', help='rate of last reward in comparison to the max',
@@ -609,7 +609,7 @@ class AnytimeNetwork(ModelDesc):
                             shape_list = [None,7,7,ch_in] if self.data_format == 'channels_last' \
                                 else [None,ch_in,7,7]
                             l.set_shape(tf.TensorShape(shape_list))
-                            l = Conv2D('conv1x1', l, ch_in, 1, activation=BNReLU)
+                        l = Conv2D('conv1x1', l, ch_in, 1, activation=BNReLU)
                             #l = Conv2D('conv3x3_0', l, ch_in, 3, strides=2, activation=BNReLU)
                             #l = Conv2D('conv3x3_1', l, ch_in, 3, strides=2, activation=BNReLU)
                     elif self.options.prediction_feature == 'bn':
