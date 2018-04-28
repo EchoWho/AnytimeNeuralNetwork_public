@@ -62,10 +62,9 @@ echo "MODEL_DIR=$MODEL_DIR"
 export PYTHONPATH=$PYTHONPATH:$CONFIG_DIR
 
 # Run the actual job
-python $CONFIG_DIR/anytime_models/examples/resnet-ann.py \
+python $CONFIG_DIR/anytime_models/examples/imagenet-msdense-ann.py \
 --data_dir=$DATA_DIR \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--f=5 --samloss=100  -n=9 -c=16 -s=4 --ds_name=svhn --batch_size=64 --nr_gpu=1 --prediction_feature=rescale 
-
+-f=5 --samloss=100  --block_config=3,6,9,12 -s=6 --batch_size=256 --nr_gpu=4 --min_predict_unit=4 --adaloss_gamma=0.1 --adaloss_final_extra=1 --opt_at=-1 --num_classes=1000 
