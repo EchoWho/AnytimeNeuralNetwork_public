@@ -93,6 +93,7 @@
 # 4088..4107
 # Num gpus : 4
 
+
 for i in {4081..4085} {4088..4107} # 4gpu {4024..4068} # 1gpu
 do
     USERNAME="dedey"
