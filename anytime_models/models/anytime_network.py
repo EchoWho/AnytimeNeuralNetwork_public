@@ -164,7 +164,7 @@ def compute_cfg(options):
 
     elif options.num_units is not None: 
         #option.n is set
-        n_units_per_block = [options.num_units]*options.n_blocks, 
+        n_units_per_block = [options.num_units]*options.n_blocks 
 
     config = NetworkConfig(n_units_per_block, b_type, s_type)
     logger.info('The finalized network config is {}'.format(config))
