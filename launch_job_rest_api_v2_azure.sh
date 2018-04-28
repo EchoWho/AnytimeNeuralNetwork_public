@@ -89,8 +89,12 @@
 # 4081..4085
 # Num gpus : 4
 
+# Exp 112 (4 GPU small msdnet with param sweep)
+# 4088..4107
+# Num gpus : 4
 
-for i in {3892..3900} {3914..3925} {3942..3945} {3954..3956} {3976..3979} {3988..3993} {3996..4007} {4071..4078}
+
+for i in {4081..4085} {4088..4107} # 4gpu {4024..4068} # 1gpu
 do
     USERNAME="dedey"
     CLUSTER="eu1"

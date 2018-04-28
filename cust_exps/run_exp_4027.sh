@@ -67,4 +67,5 @@ python $CONFIG_DIR/anytime_models/examples/resnet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--f=5 --samloss=100  -n=7 -c=16 -s=1 --ds_name=cifar100 --batch_size=64 --nr_gpu=1 --prediction_feature=rescale --exp_gamma=0.07 --sum_rand_ratio=0 --is_select_arr -f=5 
+-f=5 --samloss=100  -n=7 -c=16 -s=3 --ds_name=cifar100 --batch_size=64 --nr_gpu=1 --prediction_feature=rescale 
+
