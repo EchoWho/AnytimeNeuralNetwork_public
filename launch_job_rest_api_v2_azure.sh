@@ -97,8 +97,12 @@
 # 4110..4115
 # Num gpus : 4
 
+# Exp 114 (4 GPU DenseNet)
+# 4118..4126
+# Num gpus : 4
 
-for i in {4110..4115} 
+
+for i in {4110..4115} {4118..4126}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
