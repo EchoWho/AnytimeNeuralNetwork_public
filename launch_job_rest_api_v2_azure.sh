@@ -93,8 +93,12 @@
 # 4088..4107
 # Num gpus : 4
 
+# Exp 113 (4 GPU MSDNet 30 and MSDNet38)
+# 4110..4115
+# Num gpus : 4
 
-for i in {4081..4085} {4088..4107} # 4gpu {4024..4068} # 1gpu
+
+for i in {4110..4115} 
 do
     USERNAME="dedey"
     CLUSTER="eu1"
