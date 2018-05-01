@@ -101,8 +101,12 @@
 # 4118..4126
 # Num gpus : 4
 
+# Exp 115 (4 GPU MSDNet const baselin)
+# 4129..4130
+# Num gpus : 4
 
-for i in {4110..4115} {4118..4126}
+
+for i in {4110..4115} {4118..4126} {4129..4130}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
