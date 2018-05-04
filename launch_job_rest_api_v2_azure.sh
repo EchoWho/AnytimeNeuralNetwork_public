@@ -108,7 +108,7 @@
 # 4133..4156
 # Num gpus : 4
 
-for i in {4133..4156}
+for i in {4133..4150} {4151..4156}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
