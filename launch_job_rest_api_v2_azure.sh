@@ -105,11 +105,11 @@
 # Num gpus : 4
 
 # Exp 116 (4 GPU MSDNet param sweep on small msdnet)
-# 4133..4150
+# 4133..4156
 # Num gpus : 4
 
 
-for i in {4133..4150}
+for i in {4133..4156}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
