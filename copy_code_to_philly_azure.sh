@@ -1,7 +1,7 @@
 # Must make sure that you have azcopy, az-cli and philly-fs installed
 
 # This needs to be run once every 14 days according to docs.
-az login
+# az login
 
 # retrieve the SAS token 
 mySAS=?$(az keyvault secret show --vault-name phillymsrlabs --name eu1 | jq .value | tr -d \" | cut -d "?" -f 2)
