@@ -48,7 +48,6 @@
 # 3959..3961
 # Num gpus : 8
 
-
 # Exp 102 (1 GPU and 2 GPU benchmark)
 # 3964..3965
 # Num gpus : varies {3964 : 1, 3965 : 2}
@@ -105,7 +104,11 @@
 # 4129..4130
 # Num gpus : 4
 
-for i in {4110..4115} {4118..4126} {4129..4130}
+# Exp 116 (4 GPU MSDNet param sweep on small msdnet)
+# 4133..4150
+# Num gpus : 4
+
+for i in {4133..4150}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
