@@ -12,7 +12,7 @@ from tensorpack.utils import anytime_loss, logger, utils, fs
 from collections import namedtuple
 import bisect
 
-from online_learn import Exp3CPU, RWMCPU, \
+from anytime_models.models.online_learn import Exp3CPU, RWMCPU, \
         FixedDistributionCPU, ThompsonSamplingCPU, AdaptiveLossWeight
 
 # Best choice for samloss for AANN if running anytime networks.
@@ -43,7 +43,7 @@ def compute_cfg(options):
     s_type = options.s_type
     if hasattr(options, 'block_config') and options.block_config is not None:
         assert len(options.block_config) > 0
-        n_units_per_block = map(int, options.block_config.strip().split(','))
+        n_units_per_block = list(map(int, options.block_config.strip().split(',')))
 
     elif hasattr(options, 'depth') and options.depth is not None:
         if options.depth == 18:

@@ -11,7 +11,7 @@ from tensorpack.tfutils.summary import *
 from tensorpack import *
 from tensorpack.utils import logger, utils, fs, stats
 
-import get_augmented_data
+from anytime_models.examples import get_augmented_data
 
 ILSVRC_DEFAULT_BATCH_SIZE = 256
 ILSVRC_DEFAULT_INPUT_SIZE = 224
@@ -112,7 +112,7 @@ def train_or_test_ilsvrc(args, model_cls):
     log_init(args, model_cls)
 
     # If test 
-    args.evaluate = filter(bool, args.evaluate.split(','))
+    args.evaluate = list(filter(bool, args.evaluate.split(',')))
     do_eval = len(args.evaluate) > 0
     if do_eval:
         for subset in args.evaluate:
@@ -293,7 +293,7 @@ def cifar_svhn_train_or_test(args, model_cls):
     log_init(args, model_cls)
 
     # generate a list of none-empty strings for specifying the splits
-    args.evaluate = filter(bool, args.evaluate.split(','))
+    args.evaluate = list(filter(bool, args.evaluate.split(',')))
     do_eval = len(args.evaluate) > 0
     evalute = evaluate_cifar_svhn
 

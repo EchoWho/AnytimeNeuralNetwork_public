@@ -47,7 +47,7 @@ class Camvid(RNGDataFlow):
     # frequency and weight of each class (including void)
     class_freq = np.array([ 0.16845114,  0.23258652,  0.00982927,  0.31658215,  0.0448627,
         0.09724055, 0.01172954, 0.01126809, 0.05865686, 0.00639231, 0.00291665, 0.03948423])
-    class_weight = sorted(class_freq)[len(class_freq)/2] / class_freq
+    class_weight = sorted(class_freq)[len(class_freq)//2] / class_freq
     #class_weight = np.array([  0.49470329,   0.35828961,   8.47807568,   0.26322815,
     #    1.8575192 ,   0.85698135,   7.10457224,   7.39551774,
     #    1.42069214,  13.03649617,  28.57158304,   2.11054735])

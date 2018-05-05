@@ -16,7 +16,7 @@ class PascalVOC(RNGDataFlow):
         0.16320343,  1.71444452,  1.56673861,  0.86603409,  0.77613521,
         1.45208943,  0.96439946], dtype=np.float32)
 
-    GTclasses = range(21) + [255]
+    GTclasses = list(range(21)) + [255]
     _cmap = {
         0: (0, 0, 0),           # background
         1: (255, 0, 0),         # aeroplane
