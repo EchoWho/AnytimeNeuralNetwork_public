@@ -108,7 +108,19 @@
 # 4133..4156
 # Num gpus : 4
 
-for i in {4133..4150} {4151..4156}
+# Exp 117 (1/2 GPU test using msdnet)
+# 4159..4160 
+# Num gpus : 1
+# 4161..4162
+# Num gpus : 2
+
+# Exp 118 (1/2 GPU test using densenet)
+# 4165..4167
+# Num gpus : 1
+# 4168..4170
+# Num gpus : 2
+
+for i in {4159..4160} {4165..4167} # 1gpu ;  {4161..4162} {4168..4170} # 2gpu
 do
     USERNAME="dedey"
     CLUSTER="eu1"
