@@ -120,14 +120,18 @@
 # 4168..4170
 # Num gpus : 2
 
-for i in {4159..4160} {4165..4167} # 1gpu ;  {4161..4162} {4168..4170} # 2gpu
+# Exp 119 (cifar/svhn prediction_feature=none)
+# 4173..4217
+# Num gpus : 1
+
+for i in {4173..4217}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="4"
+    NUM_GPUS="1"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
