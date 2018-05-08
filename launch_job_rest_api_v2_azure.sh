@@ -124,14 +124,18 @@
 # 4173..4217
 # Num gpus : 1
 
-for i in {4173..4217}
+# Exp 120 (116 continued; more msdnet sweep)
+# 4220..4271
+# Num gpus : 4
+
+for i in {4220..4271}
 do
     USERNAME="dedey"
     CLUSTER="eu1"
     JOBSCRIPT="run_exp_$i.sh"
     SPECIAL_NAME="_ann"
     VC="msrlabs"
-    NUM_GPUS="1"
+    NUM_GPUS="4"
 
     curl -H "Content-Type: application/json" \
          -H "WWW-Authenticate: Negotiate" \
