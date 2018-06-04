@@ -1,5 +1,5 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=0
 TIME=`date +"%y_%m_%d_%H_%M"`
 DATA_DIR=${GLOBAL_DATA_DIR}
 LOG_DIR=${GLOBAL_LOG_DIR}/test_cifar_densenet/$TIME

@@ -80,9 +80,12 @@ def parser_add_app_arguments(parser):
     parser.add_argument('--ds_name', help='name of dataset',
                         type=str, default='ilsvrc', 
                         choices=['cifar10', 'cifar100', 'svhn', 'ilsvrc'])
-    parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly')
-    parser.add_argument('--log_dir', help='log_dir for stdout')
-    parser.add_argument('--model_dir', help='dir for saving models')
+    parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly',
+                        default=os.getenv('PT_DATA_DIR', '/home/hanzhang/data'))
+    parser.add_argument('--log_dir', help='log_dir for stdout',
+                        default=os.getenv('PT_OUTPUT_DIR', '/home/hanzhang/train_logs'))
+    parser.add_argument('--model_dir', help='dir for saving models',
+                        default=os.getenv('PT_OUTPUT_DIR', '/home/hanzhang/train_logs'))
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=128)
     parser.add_argument('--load', help='load model')

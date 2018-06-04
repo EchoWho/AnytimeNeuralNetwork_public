@@ -213,6 +213,9 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--prediction_feature_ch_out_rate',
                         help='ch_out= int( <rate> * ch_in)',
                         type=np.float32, default=1.0)
+    parser.add_argument('--num_predictor_copies', 
+                        help='Number of copies of predictors at each exit',
+                        type=int, default=1)
 
     ## alternative_training_target, distillation/compression
     parser.add_argument('--alter_label', help="Type of alternative target to use",
@@ -499,24 +502,37 @@ class AnytimeNetwork(ModelDesc):
             unit_idx : the feature computation unit index.
         """
         l = GlobalAvgPooling('gap', l)
-        logits = FullyConnected('linear', l, self.num_classes, activation=tf.identity)
-        if self.options.high_temperature > 1.0:
-            logits /= self.options.high_temperature
-            
-        ## local cost/error_rate
-        label = label_obj[0]
-        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
-            logits=logits, labels=label)
-        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
-        add_moving_summary(cost)
+        avg_cost = 0
+        avg_logits = 0
+        variables = []
+        for repeat_idx in list(range(self.options.num_predictor_copies)):
+            postfix = '_' + str(repeat_idx) if repeat_idx > 0 else ""
+            logits = FullyConnected('linear'+postfix, l, self.num_classes, activation=tf.identity)
+            variables.append(logits.variables.W)
+            variables.append(logits.variables.b)
+            if self.options.high_temperature > 1.0:
+                logits /= self.options.high_temperature
+                
+            ## local cost/error_rate
+            label = label_obj[0]
+            cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
+                logits=logits, labels=label)
+            cost = tf.reduce_mean(cost, name='cross_entropy_loss'+postfix)
+            add_moving_summary(cost)
 
-        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
-        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
+            wrong = prediction_incorrect(logits, label, 1, name='wrong-top1'+postfix)
+            add_moving_summary(tf.reduce_mean(wrong, name='train_error'+postfix))
+            
+            wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5'+postfix)
+            add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'+postfix))
+
+            avg_cost += cost
+            avg_logits += logits
         
-        wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
-        add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
-        
-        return logits, cost
+        #return logits, cost
+        avg_cost /= self.options.num_predictor_copies
+        avg_logits /= self.options.num_predictor_copies
+        return avg_cost, variables 
 
 
     def _parse_inputs(self, inputs):
@@ -569,8 +585,8 @@ class AnytimeNetwork(ModelDesc):
                 wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                                   480000, 0.2, True)
             
-            wd_cost = 0
-            total_cost = 0
+            wd_cost = 0.0
+            total_cost = 0.0
             unit_idx = -1
             anytime_idx = -1
             last_cost = None
@@ -615,7 +631,7 @@ class AnytimeNetwork(ModelDesc):
                     elif self.options.prediction_feature == 'bn':
                         l = BatchNorm('bn', l)
                     
-                    logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
+                    cost, variables = self._compute_prediction_and_loss(l, label, unit_idx)
                 #end with scope
                 anytime_cost_i = tf.identity(cost, 
                         name='anytime_cost_{:02d}'.format(anytime_idx))
@@ -641,8 +657,8 @@ class AnytimeNetwork(ModelDesc):
                     total_cost += add_weight * cost
 
                 ## Regularize weights from FC layers.
-                wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W)
-                wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.b)
+                for var in variables:
+                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var)
 
                 ## Compute reward for loss selecters. 
 
