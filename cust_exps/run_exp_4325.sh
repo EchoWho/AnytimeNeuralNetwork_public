@@ -67,4 +67,5 @@ python $CONFIG_DIR/anytime_models/examples/imagenet-ann.py \
 --log_dir=$LOG_DIR \
 --model_dir=$MODEL_DIR \
 --load=${MODEL_DIR}/checkpoint \
--d=101 --num_predictor_copies=4 --batch_size=128 --nr_gpu=4 --resnet_version=resnet 
+-d=101 --num_predictor_copies=4 --batch_size=128 --nr_gpu=4 --resnet_version=resnet \
+--opt_at=-1 -f=2 --samloss=0 -c=64 -s=1 --num_classes=1000 
