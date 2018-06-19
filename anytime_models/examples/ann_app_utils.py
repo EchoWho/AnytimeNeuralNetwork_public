@@ -298,7 +298,7 @@ def cifar_svhn_train_or_test(args, model_cls):
     # generate a list of none-empty strings for specifying the splits
     args.evaluate = list(filter(bool, args.evaluate.split(',')))
     do_eval = len(args.evaluate) > 0
-    evalute = evaluate_cifar_svhn
+    evaluate = evaluate_cifar_svhn
 
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':

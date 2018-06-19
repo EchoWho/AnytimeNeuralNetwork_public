@@ -358,6 +358,5 @@ class AdaptiveLossWeight(Callback):
     def _trigger_epoch(self):
         logger.info("AdaLoss: weights: {}".format(self._weight))
 
-
     def _before_run(self, _):
         return self.losses 

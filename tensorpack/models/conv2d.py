@@ -9,7 +9,7 @@ from ..tfutils.common import get_tf_version_number
 from ..utils.argtools import shape2d, shape4d, get_data_format
 from .tflayer import rename_get_variable, convert_to_tflayer_args
 
-__all__ = ['Conv2D', 'Deconv2D', 'Conv2DTranspose', 'GroupedConv2D', 'ResizeImages']
+__all__ = ['Conv2D', 'Deconv2D', 'Conv2DTranspose', 'GroupedConv2D', 'ResizeImages', 'SeparableConv2D']
 
 
 @layer_register(log_shape=True)
@@ -297,4 +297,81 @@ def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
     ret.variables = VariableHolder(W=W)
     if use_bias:
         ret.variables.b = b
+    return ret
+
+
+
+@layer_register(log_shape=True)
+@convert_to_tflayer_args(
+    args_names=['filters', 'kernel_size'],
+    name_mapping={
+        'out_channel': 'filters',
+        'kernel_shape': 'kernel_size',
+        'stride': 'strides',
+    })
+def SeparableConv2D(
+        inputs, 
+        filters, 
+        kernel_size, 
+        strides=(1,1),
+        padding='same',
+        data_format='channels_last',
+        dilation_rate=(1,1),
+        depth_multiplier=1,
+        activation=None,
+        use_bias=True,
+        depthwise_initializer=tf.contrib.layers.variance_scaling_initializer(2.0),
+        pointwise_initializer=tf.contrib.layers.variance_scaling_initializer(2.0),
+        bias_initializer=tf.zeros_initializer(),
+        depthwise_regularizer=None,
+        pointwise_regularizer=None,
+        bias_regularizer=None,
+        activity_regularizer=None,
+        depthwise_constraint=None,
+        pointwise_constraint=None,
+        bias_constraint=None,
+        trainable=True,
+        name=None,
+        reuse=None):
+    with rename_get_variable({'depthwise_kernel': 'Wd', 'pointwise_kernel': 'Wp', 'bias': 'b'}):
+        layer = tf.layers.SeparableConv2D(
+            filters,
+            kernel_size,
+            strides=strides,
+            padding=padding,
+            data_format=data_format,
+            dilation_rate=dilation_rate,
+            activation=activation,
+            use_bias=use_bias,
+            depth_multiplier=depth_multiplier,
+            depthwise_initializer=depthwise_initializer,
+            pointwise_initializer=pointwise_initializer,
+            bias_initializer=bias_initializer,
+            activity_regularizer=activity_regularizer,
+            depthwise_regularizer=depthwise_regularizer,
+            pointwise_regularizer=pointwise_regularizer,
+            bias_regularizer=bias_regularizer)
+        ret = layer.apply(inputs, scope=tf.get_variable_scope())
+        ret = tf.identity(ret, name='output')
+
+    ret.variables = VariableHolder(Wd=layer.depthwise_kernel, Wp=layer.pointwise_kernel)
+    if use_bias:
+        ret.variables.b = layer.bias
+        
+    # compute the flops of the conv
+    in_shape = inputs.get_shape().as_list()
+    channel_axis = 3 if data_format == 'channels_last' else 1
+    h_dim = 1 if data_format == 'channels_last' else 2
+    w_dim = h_dim + 1
+    in_channel = in_shape[channel_axis]
+    out_channel = filters
+    kernel_shape = shape2d(kernel_size)
+    stride = shape4d(strides, data_format=data_format)
+    flops = 1.0 * in_channel * depth_multiplier * kernel_shape[0] * kernel_shape[1]
+    pt_flops = 1.0 * (in_channel * depth_multiplier) * out_channel
+    if in_shape[h_dim] is not None and in_shape[h_dim] > 0:
+        H_times_W = in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
+        flops *= H_times_W
+        pt_flops *= H_times_W
+    ret.info = VariableHolder(flops=flops+pt_flops)
     return ret
