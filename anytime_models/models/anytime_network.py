@@ -256,6 +256,8 @@ def parser_add_common_arguments(parser):
                         type=np.float32, default=0.85)
     parser.add_argument('--is_select_arr', help='Whether select_idx is an int or an array of float',
                         default=False, action='store_true')
+    parser.add_argument('--adaloss_order', help='Zero-th or first order adaloss',
+                        type=int, default=0, choices=[0,1])
 
     ## loss_weight computation
     parser.add_argument('-f', '--func_type', 
@@ -633,7 +635,15 @@ class AnytimeNetwork(ModelDesc):
                     
                     cost, variables = self._compute_prediction_and_loss(l, label, unit_idx)
                 #end with scope
-                anytime_cost_i = tf.identity(cost, 
+
+                ## cost at each anytime prediction for learning the weights
+                if self.options.adaloss_order == 0:
+                    anytime_cost_i = tf.identity(cost, 
+                        name='anytime_cost_{:02d}'.format(anytime_idx))
+                elif self.options.adaloss_order == 1:
+                    grad = tf.gradients(cost, tf.trainable_variables()) 
+                    grad_norm = tf.add_n([tf.nn.l2_loss(g) for g in grad if g is not None])
+                    anytime_cost_i = tf.identity(grad_norm,
                         name='anytime_cost_{:02d}'.format(anytime_idx))
 
                 ## Compute the contribution of the cost to total cost
@@ -660,11 +670,8 @@ class AnytimeNetwork(ModelDesc):
                 for var in variables:
                     wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var)
 
+                ################# (For 2017 submissions; Depricated) ###############
                 ## Compute reward for loss selecters. 
-
-                # Compute gradients of the loss as the rewards
-                #gs = tf.gradients(c, tf.trainable_variables()) 
-                #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
 
                 # Compute relative loss improvement as rewards
                 # note the rewards are outside varscopes.
@@ -680,6 +687,8 @@ class AnytimeNetwork(ModelDesc):
                             name='reward_{:02d}'.format(anytime_idx)))
                         #cost = tf.Print(cost, online_learn_rewards)
                     last_cost = cost
+                ################# (End Depricated) ###############
+
                 #end if compute_rewards
                 #end (implied) if cost_weight > 0
             #endfor each layer
