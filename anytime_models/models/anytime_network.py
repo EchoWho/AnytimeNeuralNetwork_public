@@ -641,6 +641,7 @@ class AnytimeNetwork(ModelDesc):
                     anytime_cost_i = tf.identity(cost, 
                         name='anytime_cost_{:02d}'.format(anytime_idx))
                 elif self.options.adaloss_order == 1:
+                    logger.info("The gradient at predictor {:02d} is from layer {:03d}".format(anytime_idx, layer_idx))
                     grad = tf.gradients(cost, tf.trainable_variables()) 
                     grad_norm = tf.add_n([tf.nn.l2_loss(g) for g in grad if g is not None])
                     anytime_cost_i = tf.identity(grad_norm,
