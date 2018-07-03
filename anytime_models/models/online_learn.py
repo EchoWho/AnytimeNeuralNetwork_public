@@ -329,7 +329,7 @@ class AdaptiveLossWeight(Callback):
     
     def _before_train(self):
         self.avg_losses = None
-
+        self._weight = 0
 
     def _after_run(self, ctx, run_vals):
         losses = np.asarray(run_vals.results)

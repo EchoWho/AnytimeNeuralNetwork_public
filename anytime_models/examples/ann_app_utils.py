@@ -78,8 +78,7 @@ def grep_init_lr(starting_epoch, lr_schedule):
 
 def parser_add_app_arguments(parser):
     parser.add_argument('--ds_name', help='name of dataset',
-                        type=str, default='ilsvrc', 
-                        choices=['cifar10', 'cifar100', 'svhn', 'ilsvrc'])
+                        type=str, default='ilsvrc')
     parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly',
                         default=os.getenv('PT_DATA_DIR', '/home/hanzhang/data'))
     parser.add_argument('--log_dir', help='log_dir for stdout',
@@ -107,6 +106,26 @@ def parser_add_app_arguments(parser):
     #parser.add_argument('--store_images_labels', help='whether store input image and labels in npz during eval', 
     #                    default=False, action='store_true')
     return parser
+
+
+def cosine_learning_rate(lr_max=0.05, lr_min=0.001, initial_period=10, period_multiplier=2, max_epoch=300):
+    lr_schedule = []
+    curr_step = 0
+    curr_period = initial_period
+    for i in range(max_epoch):
+        if i == max_epoch - 1:
+            lr = lr_min
+        else:
+            lr = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + np.cos(np.pi * curr_step / (curr_period - 1)))
+        curr_step += 1
+        if curr_step == curr_period:
+            curr_step = 0
+            curr_period *= period_multiplier
+            if curr_period + i + 1 > max_epoch:
+                curr_step = curr_period - (max_epoch - i - 1)
+        lr_schedule.append((i, lr))
+    return lr_schedule
+
 
 
 def train_or_test_ilsvrc(args, model_cls):
