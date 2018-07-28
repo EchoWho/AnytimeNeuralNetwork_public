@@ -35,10 +35,10 @@ def join_distill_and_shuffle(ds, subset, options, buffer_size=None):
     ds = LocallyShuffleData(ds, buffer_size)
     return ds
 
-def get_cifar_augmented_data(subset, options, do_multiprocess=True, do_validation=False):
+def get_cifar_augmented_data(subset, options, do_multiprocess=True, do_validation=False, shuffle=None):
     isTrain = subset == 'train' and do_multiprocess
     use_distill = isTrain and options.alter_label
-    shuffle = isTrain and not options.alter_label
+    shuffle = shuffle if shuffle is not None else (isTrain and not options.alter_label)
     if options.num_classes == 10:
         ds = dataset.Cifar10(subset, shuffle=shuffle, do_validation=do_validation)
     elif options.num_classes == 100:
@@ -67,10 +67,10 @@ def get_cifar_augmented_data(subset, options, do_multiprocess=True, do_validatio
     return ds
 
 
-def get_svhn_augmented_data(subset, options, do_multiprocess=True):
+def get_svhn_augmented_data(subset, options, do_multiprocess=True, shuffle=None):
     isTrain = subset == 'train' and do_multiprocess
     use_distill = isTrain and options.alter_label
-    shuffle = isTrain and not options.alter_label
+    shuffle = shuffle if shuffle is not None else (isTrain and not options.alter_label)
     pp_mean = dataset.SVHNDigit.get_per_pixel_mean()
     if isTrain:
         d1 = dataset.SVHNDigit('train', shuffle=shuffle)
@@ -104,17 +104,18 @@ def get_svhn_augmented_data(subset, options, do_multiprocess=True):
     return ds
 
 
-def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True):
-    isTrain = subset == 'train' and do_multiprocess
+def get_ilsvrc_augmented_data(subset, options, do_multiprocess=True, is_train=None, shuffle=None):
+    isTrain = is_train if is_train is not None else (subset == 'train' and do_multiprocess)
+    shuffle = shuffle if shuffle is not None else isTrain
     use_distill = isTrain and options.alter_label
     lmdb_path = os.path.join(options.data_dir, 'lmdb2', 'ilsvrc2012_{}.lmdb'.format(subset))
     ds = LMDBData(lmdb_path, shuffle=False)
-    if isTrain:
-        if use_distill:
-            fn = os.path.join(options.data_dir, 'distill_targets', 
-                '{}_distill_target_{}.bin'.format(options.ds_name, subset))
-            dstl = BinaryData(fn, options.num_classes)
-            ds = JoinData([ds, dstl])
+    if isTrain and use_distill:
+        fn = os.path.join(options.data_dir, 'distill_targets', 
+            '{}_distill_target_{}.bin'.format(options.ds_name, subset))
+        dstl = BinaryData(fn, options.num_classes)
+        ds = JoinData([ds, dstl])
+    if shuffle:
         ds = LocallyShuffleData(ds, 1024*64)  # This is 64G~80G in memory images
     ds = PrefetchData(ds, 1024*8, 1) # prefetch around 8 G
     ds = LMDBDataPoint(ds)

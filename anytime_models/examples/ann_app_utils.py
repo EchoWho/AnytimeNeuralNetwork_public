@@ -11,7 +11,7 @@ from tensorpack.tfutils.summary import *
 from tensorpack import *
 from tensorpack.utils import logger, utils, fs, stats
 
-import get_augmented_data
+from anytime_models.examples import get_augmented_data
 
 ILSVRC_DEFAULT_BATCH_SIZE = 256
 ILSVRC_DEFAULT_INPUT_SIZE = 224
@@ -78,11 +78,13 @@ def grep_init_lr(starting_epoch, lr_schedule):
 
 def parser_add_app_arguments(parser):
     parser.add_argument('--ds_name', help='name of dataset',
-                        type=str, default='ilsvrc', 
-                        choices=['cifar10', 'cifar100', 'svhn', 'ilsvrc'])
-    parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly')
-    parser.add_argument('--log_dir', help='log_dir for stdout')
-    parser.add_argument('--model_dir', help='dir for saving models')
+                        type=str, default='ilsvrc')
+    parser.add_argument('--data_dir', help='ILSVRC dataset dir that contains the tf records directly',
+                        default=os.getenv('PT_DATA_DIR', '/home/hanzhang/data'))
+    parser.add_argument('--log_dir', help='log_dir for stdout',
+                        default=os.getenv('PT_OUTPUT_DIR', '/home/hanzhang/train_logs'))
+    parser.add_argument('--model_dir', help='dir for saving models',
+                        default=os.getenv('PT_OUTPUT_DIR', '/home/hanzhang/train_logs'))
     parser.add_argument('--batch_size', help='Batch size for train/testing', 
                         type=int, default=128)
     parser.add_argument('--load', help='load model')
@@ -106,13 +108,33 @@ def parser_add_app_arguments(parser):
     return parser
 
 
+def cosine_learning_rate(lr_max=0.05, lr_min=0.001, initial_period=10, period_multiplier=2, max_epoch=300):
+    lr_schedule = []
+    curr_step = 0
+    curr_period = initial_period
+    for i in range(max_epoch):
+        if i == max_epoch - 1:
+            lr = lr_min
+        else:
+            lr = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + np.cos(np.pi * curr_step / (curr_period - 1)))
+        curr_step += 1
+        if curr_step == curr_period:
+            curr_step = 0
+            curr_period *= period_multiplier
+            if curr_period + i + 1 > max_epoch:
+                curr_step = curr_period - (max_epoch - i - 1)
+        lr_schedule.append((i, lr))
+    return lr_schedule
+
+
+
 def train_or_test_ilsvrc(args, model_cls):
     # Fix some common args like num_classes 
     args = ilsvrc_fix_args(args)
     log_init(args, model_cls)
 
     # If test 
-    args.evaluate = filter(bool, args.evaluate.split(','))
+    args.evaluate = list(filter(bool, args.evaluate.split(',')))
     do_eval = len(args.evaluate) > 0
     if do_eval:
         for subset in args.evaluate:
@@ -293,9 +315,9 @@ def cifar_svhn_train_or_test(args, model_cls):
     log_init(args, model_cls)
 
     # generate a list of none-empty strings for specifying the splits
-    args.evaluate = filter(bool, args.evaluate.split(','))
+    args.evaluate = list(filter(bool, args.evaluate.split(',')))
     do_eval = len(args.evaluate) > 0
-    evalute = evaluate_cifar_svhn
+    evaluate = evaluate_cifar_svhn
 
     ## Set dataset-network specific assert/info
     if args.ds_name == 'cifar10' or args.ds_name == 'cifar100':

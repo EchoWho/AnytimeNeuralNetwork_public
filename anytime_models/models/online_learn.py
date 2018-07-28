@@ -329,7 +329,7 @@ class AdaptiveLossWeight(Callback):
     
     def _before_train(self):
         self.avg_losses = None
-
+        self._weight = 0
 
     def _after_run(self, ctx, run_vals):
         losses = np.asarray(run_vals.results)
@@ -357,7 +357,6 @@ class AdaptiveLossWeight(Callback):
 
     def _trigger_epoch(self):
         logger.info("AdaLoss: weights: {}".format(self._weight))
-
 
     def _before_run(self, _):
         return self.losses 

@@ -3,7 +3,6 @@ six
 opencv-python
 lmdb
 scipy
-tensorflow-gpu==1.6.0
 termcolor==1.1.0
 tabulate==0.7.7
 tqdm>4.11.1

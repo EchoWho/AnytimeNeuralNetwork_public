@@ -12,7 +12,7 @@ from tensorpack.utils import anytime_loss, logger, utils, fs
 from collections import namedtuple
 import bisect
 
-from online_learn import Exp3CPU, RWMCPU, \
+from anytime_models.models.online_learn import Exp3CPU, RWMCPU, \
         FixedDistributionCPU, ThompsonSamplingCPU, AdaptiveLossWeight
 
 # Best choice for samloss for AANN if running anytime networks.
@@ -43,7 +43,7 @@ def compute_cfg(options):
     s_type = options.s_type
     if hasattr(options, 'block_config') and options.block_config is not None:
         assert len(options.block_config) > 0
-        n_units_per_block = map(int, options.block_config.strip().split(','))
+        n_units_per_block = list(map(int, options.block_config.strip().split(',')))
 
     elif hasattr(options, 'depth') and options.depth is not None:
         if options.depth == 18:
@@ -213,6 +213,9 @@ def parser_add_common_arguments(parser):
     parser.add_argument('--prediction_feature_ch_out_rate',
                         help='ch_out= int( <rate> * ch_in)',
                         type=np.float32, default=1.0)
+    parser.add_argument('--num_predictor_copies', 
+                        help='Number of copies of predictors at each exit',
+                        type=int, default=1)
 
     ## alternative_training_target, distillation/compression
     parser.add_argument('--alter_label', help="Type of alternative target to use",
@@ -253,6 +256,8 @@ def parser_add_common_arguments(parser):
                         type=np.float32, default=0.85)
     parser.add_argument('--is_select_arr', help='Whether select_idx is an int or an array of float',
                         default=False, action='store_true')
+    parser.add_argument('--adaloss_order', help='Zero-th or first order adaloss',
+                        type=int, default=0, choices=[0,1])
 
     ## loss_weight computation
     parser.add_argument('-f', '--func_type', 
@@ -499,24 +504,37 @@ class AnytimeNetwork(ModelDesc):
             unit_idx : the feature computation unit index.
         """
         l = GlobalAvgPooling('gap', l)
-        logits = FullyConnected('linear', l, self.num_classes, activation=tf.identity)
-        if self.options.high_temperature > 1.0:
-            logits /= self.options.high_temperature
-            
-        ## local cost/error_rate
-        label = label_obj[0]
-        cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
-            logits=logits, labels=label)
-        cost = tf.reduce_mean(cost, name='cross_entropy_loss')
-        add_moving_summary(cost)
+        avg_cost = 0
+        avg_logits = 0
+        variables = []
+        for repeat_idx in list(range(self.options.num_predictor_copies)):
+            postfix = '_' + str(repeat_idx) if repeat_idx > 0 else ""
+            logits = FullyConnected('linear'+postfix, l, self.num_classes, activation=tf.identity)
+            variables.append(logits.variables.W)
+            variables.append(logits.variables.b)
+            if self.options.high_temperature > 1.0:
+                logits /= self.options.high_temperature
+                
+            ## local cost/error_rate
+            label = label_obj[0]
+            cost = tf.nn.sparse_softmax_cross_entropy_with_logits(\
+                logits=logits, labels=label)
+            cost = tf.reduce_mean(cost, name='cross_entropy_loss'+postfix)
+            add_moving_summary(cost)
 
-        wrong = prediction_incorrect(logits, label, 1, name='wrong-top1')
-        add_moving_summary(tf.reduce_mean(wrong, name='train_error'))
+            wrong = prediction_incorrect(logits, label, 1, name='wrong-top1'+postfix)
+            add_moving_summary(tf.reduce_mean(wrong, name='train_error'+postfix))
+            
+            wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5'+postfix)
+            add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'+postfix))
+
+            avg_cost += cost
+            avg_logits += logits
         
-        wrong5 = prediction_incorrect(logits, label, 5, name='wrong-top5')
-        add_moving_summary(tf.reduce_mean(wrong5, name='train-error-top5'))
-        
-        return logits, cost
+        #return logits, cost
+        avg_cost /= self.options.num_predictor_copies
+        avg_logits /= self.options.num_predictor_copies
+        return avg_cost, variables 
 
 
     def _parse_inputs(self, inputs):
@@ -569,8 +587,8 @@ class AnytimeNetwork(ModelDesc):
                 wd_w = tf.train.exponential_decay(0.0002, get_global_step_var(),
                                                   480000, 0.2, True)
             
-            wd_cost = 0
-            total_cost = 0
+            wd_cost = 0.0
+            total_cost = 0.0
             unit_idx = -1
             anytime_idx = -1
             last_cost = None
@@ -615,9 +633,19 @@ class AnytimeNetwork(ModelDesc):
                     elif self.options.prediction_feature == 'bn':
                         l = BatchNorm('bn', l)
                     
-                    logits, cost = self._compute_prediction_and_loss(l, label, unit_idx)
+                    cost, variables = self._compute_prediction_and_loss(l, label, unit_idx)
                 #end with scope
-                anytime_cost_i = tf.identity(cost, 
+
+                ## cost at each anytime prediction for learning the weights
+                if self.options.adaloss_order == 0:
+                    anytime_cost_i = tf.identity(cost, 
+                        name='anytime_cost_{:02d}'.format(anytime_idx))
+                elif self.options.adaloss_order == 1:
+                    logger.info("The gradient at predictor {:02d} is from layer {:03d}".format(anytime_idx, layer_idx))
+                    grad = tf.gradients(cost, tf.trainable_variables()) 
+                    grad_norm = tf.add_n([tf.nn.l2_loss(g) for g in grad if g is not None])
+                    grad_dims = tf.add_n([tf.reshape(g, [-1]).get_shape().as_list()[0] for g in grad if g is not None])
+                    anytime_cost_i = tf.identity(grad_norm / tf.cast(grad_dims, tf.float32),
                         name='anytime_cost_{:02d}'.format(anytime_idx))
 
                 ## Compute the contribution of the cost to total cost
@@ -641,14 +669,11 @@ class AnytimeNetwork(ModelDesc):
                     total_cost += add_weight * cost
 
                 ## Regularize weights from FC layers.
-                wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.W)
-                wd_cost += cost_weight * wd_w * tf.nn.l2_loss(logits.variables.b)
+                for var in variables:
+                    wd_cost += cost_weight * wd_w * tf.nn.l2_loss(var)
 
+                ################# (For 2017 submissions; Depricated) ###############
                 ## Compute reward for loss selecters. 
-
-                # Compute gradients of the loss as the rewards
-                #gs = tf.gradients(c, tf.trainable_variables()) 
-                #reward = tf.add_n([tf.nn.l2_loss(g) for g in gs if g is not None])
 
                 # Compute relative loss improvement as rewards
                 # note the rewards are outside varscopes.
@@ -664,6 +689,8 @@ class AnytimeNetwork(ModelDesc):
                             name='reward_{:02d}'.format(anytime_idx)))
                         #cost = tf.Print(cost, online_learn_rewards)
                     last_cost = cost
+                ################# (End Depricated) ###############
+
                 #end if compute_rewards
                 #end (implied) if cost_weight > 0
             #endfor each layer

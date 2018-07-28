@@ -1,2 +1,0 @@
-python copy_logs_batch_philly.py
-bash sync_logs_with_hivemind.sh

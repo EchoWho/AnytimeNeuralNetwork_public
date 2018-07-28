@@ -265,7 +265,7 @@ class Trainer(object):
                 # what if gs is changed later?
                 self.loop.update_global_step()
                 def _heart_beat(epoch, max_epoch, step, max_step):
-                    if (step + 1) % 1000 == 0:
+                    if (step + 1) % 1000 == 0 or step == max_step:
                         percent = 100. * (epoch - 1 + float(step) / max_step) / max_epoch
                         print("\nPROGRESS: {0:05.2f}%".format(percent))
 
@@ -284,6 +284,8 @@ class Trainer(object):
                     self._callbacks.after_epoch()
                     logger.info("Epoch {} (global_step {}) finished, time:{}.".format(
                         self.loop.epoch_num, self.loop.global_step, humanize_time_delta(time.time() - start_time)))
+                    _heart_beat(self.loop._epoch_num, self.loop.max_epoch, \
+                        self.loop.steps_per_epoch, self.loop.steps_per_epoch)
 
                     # trigger epoch outside the timing region.
                     self._callbacks.trigger_epoch()
