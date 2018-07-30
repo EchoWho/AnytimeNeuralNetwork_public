@@ -94,7 +94,7 @@ def parser_add_app_arguments(parser):
     parser.add_argument('--do_validation', help='whether to use validation set',
                         default=False, action='store_true')
     parser.add_argument('--num_anytime_preds', help='Number of anytime predictions',
-                        default=-1, type=int)
+                        default=None, type=int)
 
     # For alter label and ann_policy, both of which don't really work
     #parser.add_argument('--store_final_prediction', help='wheter evaluation stores final prediction',
