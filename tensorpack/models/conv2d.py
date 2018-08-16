@@ -72,7 +72,7 @@ def Conv2D(
         if use_bias:
             ret.variables.b = layer.bias
 
-        # compute the flops of the conv 
+        # compute the flops of the conv
         in_shape = inputs.get_shape().as_list()
         channel_axis = 3 if data_format == 'channels_last' else 1
         h_dim = 1 if data_format == 'channels_last' else 2
@@ -81,9 +81,10 @@ def Conv2D(
         out_channel = filters
         kernel_shape = shape2d(kernel_size)
         stride = shape4d(strides, data_format=data_format)
-        flops = 1.0 * in_channel * out_channel * kernel_shape[0] * kernel_shape[1]
+        flops = 1.0 * in_channel * out_channel * \
+            kernel_shape[0] * kernel_shape[1] / stride[h_dim] / stride[w_dim]
         if in_shape[h_dim] is not None and in_shape[h_dim] > 0:
-            flops *= in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
+            flops *= in_shape[h_dim] * in_shape[w_dim]
         ret.info = VariableHolder(flops=flops)
 
     else:
@@ -128,6 +129,14 @@ def Conv2D(
         ret.variables = VariableHolder(W=W)
         if use_bias:
             ret.variables.b = b
+
+        h_dim = 1 if data_format == 'NHWC' else 2
+        w_dim = h_dim + 1
+        flops = 1.0 * in_channel * out_channel * \
+            kernel_shape[0] * kernel_shape[1] / stride[h_dim] / stride[w_dim] / split
+        if in_shape[h_dim] is not None and in_shape[h_dim] > 0:
+            flops *= in_shape[h_dim] * in_shape[w_dim]
+        ret.info = VariableHolder(flops=flops)
     return ret
 
 
@@ -181,12 +190,12 @@ def Conv2DTranspose(
             bias_regularizer=bias_regularizer,
             activity_regularizer=activity_regularizer)
         ret = layer.apply(inputs, scope=tf.get_variable_scope())
-    
+
     ret = tf.identity(ret, name='output')
     ret.variables = VariableHolder(W=layer.kernel)
     if use_bias:
         ret.variables.b = layer.bias
-    return ret 
+    return ret
 
 
 Deconv2D = Conv2DTranspose
@@ -194,20 +203,20 @@ Deconv2D = Conv2DTranspose
 
 @layer_register(log_shape=True)
 def ResizeImages(
-    images, 
-    size, 
-    method=tf.image.ResizeMethod.BILINEAR, 
+    images,
+    size,
+    method=tf.image.ResizeMethod.BILINEAR,
     align_corners=True,
     data_format='channels_last'):
     """
-        Use tf.image.resize_images to resize feature map. 
-        We have to do some transposing first before using image resize if the 
-        data_format is 'channels_first', because resize_images only accept 
-        'channels_last'. 
+        Use tf.image.resize_images to resize feature map.
+        We have to do some transposing first before using image resize if the
+        data_format is 'channels_first', because resize_images only accept
+        'channels_last'.
 
         images : tensor representing the feature map to resize
         size : 2D int32 tensor of the new shape (h, w)
-        method : Resize method see tf.image.ResizeMethod 
+        method : Resize method see tf.image.ResizeMethod
         align_corners : Preserving the corner pixels ?
         data_format : current data_format of the inputs 'channels_first' or 'channels_last'
     """
@@ -219,22 +228,22 @@ def ResizeImages(
         l = tf.transpose(l, [0,3,1,2])
     ret = tf.identity(l, name='output')
     return ret
- 
+
 
 @layer_register(log_shape=True)
 def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
-        sum_paths=False, padding='SAME', stride=1, 
+        sum_paths=False, padding='SAME', stride=1,
         W_init=None, b_init=None, nl=tf.identity,
         use_bias=False, data_format='NHWC'):
     """
     Grouped conv 2d for ResNeXt. Uses depthwise conv 2d and reshape and sum.
-   
+
     Args:
         x : 4D tensor of data_format
         num_paths : number of groups
         path_ch_out : number of ch_out per group
         kernel_shape : (h,w) tuple or an int
-        sum_paths : whether the groups are summed together (if True) 
+        sum_paths : whether the groups are summed together (if True)
             or concatenated (if False (default))
         padding, W_init, b_init, nl, use_bias, data_format : see Conv2D
 
@@ -251,7 +260,7 @@ def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
     in_shape = x.get_shape().as_list()
     ch_dim = 3 if data_format == 'NHWC' else 1
     ch_in = in_shape[ch_dim]
-    assert ch_in % num_paths == 0, "Grouped conv requires n_groups to divide ch_in" 
+    assert ch_in % num_paths == 0, "Grouped conv requires n_groups to divide ch_in"
     ch_in_per_path = ch_in // num_paths
     ch_out = path_ch_out if sum_paths else num_paths * path_ch_out
 
@@ -272,7 +281,7 @@ def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
     x = tf.nn.depthwise_conv2d(x, W, stride, padding, rate=None, data_format=data_format)
     out_shape = x.get_shape().as_list()
 
-    # First reshape to expose the dimension by input channels 
+    # First reshape to expose the dimension by input channels
     shape_depthwise = [num_paths, ch_in_per_path, path_ch_out]
     if data_format == 'NHWC':
         x = tf.reshape(x, [-1, out_shape[1], out_shape[2]] + shape_depthwise)
@@ -284,7 +293,7 @@ def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
         sum_axis = [ch_dim, ch_dim + 1]
     else:
         sum_axis = ch_dim + 1
-    x = tf.reduce_sum(x, sum_axis) 
+    x = tf.reduce_sum(x, sum_axis)
 
     # reshape to output shape if path dim did not collapse
     if not sum_paths:
@@ -310,9 +319,9 @@ def GroupedConv2D(x, num_paths, path_ch_out, kernel_shape,
         'stride': 'strides',
     })
 def SeparableConv2D(
-        inputs, 
-        filters, 
-        kernel_size, 
+        inputs,
+        filters,
+        kernel_size,
         strides=(1,1),
         padding='same',
         data_format='channels_last',
@@ -357,7 +366,7 @@ def SeparableConv2D(
     ret.variables = VariableHolder(Wd=layer.depthwise_kernel, Wp=layer.pointwise_kernel)
     if use_bias:
         ret.variables.b = layer.bias
-        
+
     # compute the flops of the conv
     in_shape = inputs.get_shape().as_list()
     channel_axis = 3 if data_format == 'channels_last' else 1
@@ -367,10 +376,13 @@ def SeparableConv2D(
     out_channel = filters
     kernel_shape = shape2d(kernel_size)
     stride = shape4d(strides, data_format=data_format)
-    flops = 1.0 * in_channel * depth_multiplier * kernel_shape[0] * kernel_shape[1]
-    pt_flops = 1.0 * (in_channel * depth_multiplier) * out_channel
+    flops = 1.0 * in_channel * depth_multiplier * \
+        kernel_shape[0] * kernel_shape[1] / stride[h_dim] / stride[w_dim]
+    # since pointwise is on the result of depthwise, the stride is carried over.
+    pt_flops = 1.0 * (in_channel * depth_multiplier) * out_channel \
+        / stride[h_dim] / stride[w_dim]
     if in_shape[h_dim] is not None and in_shape[h_dim] > 0:
-        H_times_W = in_shape[h_dim] * in_shape[w_dim] / stride[h_dim] / stride[w_dim]
+        H_times_W = in_shape[h_dim] * in_shape[w_dim]
         flops *= H_times_W
         pt_flops *= H_times_W
     ret.info = VariableHolder(flops=flops+pt_flops)
