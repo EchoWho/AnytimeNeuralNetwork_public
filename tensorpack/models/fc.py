@@ -54,4 +54,10 @@ def FullyConnected(
     ret.variables = VariableHolder(W=layer.kernel)
     if use_bias:
         ret.variables.b = layer.bias
-    return ret 
+
+    in_dim = inputs.get_shape().as_list()[1]
+    flops = float(units)
+    if in_dim is not None and in_dim > 0:
+        flops *= in_dim
+    ret.info = VariableHolder(flops=flops)
+    return ret
